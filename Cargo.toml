@@ -2,7 +2,7 @@
 name = "tetramem-v12"
 version = "12.0.0"
 edition = "2021"
-description = "TetraMem-XL v12.0 — 7D Dark Universe Memory System"
+description = "TetraMem-XL v12.0 - 7D Dark Universe Memory System"
 license = "AGPL-3.0-or-later"
 authors = ["sunormesky-max <sunormesky@gmail.com>"]
 repository = "https://github.com/sunormesky-max/TetraMem-XL-v12"
