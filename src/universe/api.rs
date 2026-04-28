@@ -1,18 +1,30 @@
 use axum::{
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
+use tower::ServiceBuilder;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::timeout::TimeoutLayer;
+use tower_http::trace::TraceLayer;
 
+use crate::universe::auth::{JwtConfig, LoginRequest, LoginResponse};
 use crate::universe::autoscale::AutoScaler;
+use crate::universe::config::AppConfig;
 use crate::universe::coord::Coord7D;
 use crate::universe::dream::DreamEngine;
+use crate::universe::error::AppError;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::{MemoryAtom, MemoryCodec};
+use crate::universe::metrics;
 use crate::universe::node::DarkUniverse;
 use crate::universe::observer::{SelfRegulator, UniverseObserver};
 use crate::universe::pulse::{PulseEngine, PulseType};
@@ -21,6 +33,8 @@ pub struct AppState {
     pub universe: Mutex<DarkUniverse>,
     pub hebbian: Mutex<HebbianMemory>,
     pub memories: Mutex<Vec<MemoryAtom>>,
+    pub config: AppConfig,
+    pub jwt: JwtConfig,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -156,10 +170,68 @@ pub struct NeighborInfo {
     pub weight: f64,
 }
 
+#[derive(Serialize)]
+pub struct OpenApiDoc {
+    pub openapi: String,
+    pub info: OpenApiInfo,
+    pub paths: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct OpenApiInfo {
+    pub title: String,
+    pub version: String,
+    pub description: String,
+}
+
+async fn metrics_middleware(req: Request, next: Next) -> Response {
+    metrics::API_REQUESTS_TOTAL.inc();
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    metrics::REQUEST_DURATION.observe(start.elapsed().as_secs_f64());
+    response
+}
+
+async fn auth_middleware(
+    State(state): State<SharedState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    if !state.config.auth.enabled {
+        return Ok(next.run(req).await);
+    }
+
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    match auth_header {
+        Some(token) => {
+            state.jwt.validate_token(token)?;
+            Ok(next.run(req).await)
+        }
+        None => Err(AppError::Unauthorized("missing authorization header".to_string())),
+    }
+}
+
 pub fn create_router(state: SharedState) -> Router {
-    Router::new()
-        .route("/stats", get(get_stats))
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    let x_request_id = axum::http::HeaderName::from_static("x-request-id");
+
+    let public_routes = Router::new()
         .route("/health", get(get_health))
+        .route("/stats", get(get_stats))
+        .route("/metrics", get(get_metrics))
+        .route("/openapi.json", get(get_openapi))
+        .route("/login", post(login));
+
+    let protected_routes = Router::new()
         .route("/memory/encode", post(encode_memory))
         .route("/memory/decode", post(decode_memory))
         .route("/memory/list", get(list_memories))
@@ -169,7 +241,90 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/scale/frontier/:max_new", post(frontier_expand))
         .route("/hebbian/neighbors/:x/:y/:z", get(get_hebbian_neighbors))
         .route("/regulate", post(regulate))
+        .layer(middleware::from_fn(metrics_middleware));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .layer(DefaultBodyLimit::max(state.config.server.body_limit_bytes))
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::new(
+                    x_request_id.clone(),
+                    MakeRequestUuid,
+                ))
+                .layer(TraceLayer::new_for_http())
+                .layer(PropagateRequestIdLayer::new(x_request_id))
+                .layer(cors)
+                .layer(TimeoutLayer::new(Duration::from_secs(state.config.server.timeout_secs))),
+        )
         .with_state(state)
+}
+
+async fn login(
+    State(state): State<SharedState>,
+    Json(req): Json<LoginRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<LoginResponse>>), AppError> {
+    if req.username.is_empty() || req.password.is_empty() {
+        return Err(AppError::BadRequest("username and password required".to_string()));
+    }
+
+    tracing::info!(username = %req.username, "user login attempt");
+
+    let token = state.jwt.create_token(&req.username, "user")?;
+    let expires_in = state.config.auth.jwt_expiry_secs;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::ok(LoginResponse { token, expires_in })),
+    ))
+}
+
+async fn get_metrics(State(_state): State<SharedState>) -> String {
+    let u = _state.universe.lock().await;
+    let h = _state.hebbian.lock().await;
+    let mems = _state.memories.lock().await;
+    let stats = u.stats();
+    metrics::update_universe_metrics(
+        stats.active_nodes,
+        stats.manifested_nodes,
+        stats.dark_nodes,
+        stats.total_energy,
+        stats.allocated_energy,
+        stats.available_energy,
+        mems.len(),
+        h.edge_count(),
+    );
+    drop(u);
+    drop(h);
+    drop(mems);
+    metrics::render_metrics()
+}
+
+async fn get_openapi() -> Json<OpenApiDoc> {
+    let paths: serde_json::Value = serde_json::from_str(r#"{
+        "/health": {"get":{"summary":"Health check","responses":{"200":{"description":"OK"}}}},
+        "/stats": {"get":{"summary":"Universe statistics","responses":{"200":{"description":"OK"}}}},
+        "/metrics": {"get":{"summary":"Prometheus metrics","responses":{"200":{"description":"OK"}}}},
+        "/login": {"post":{"summary":"Authenticate","responses":{"200":{"description":"JWT token"}}}},
+        "/memory/encode": {"post":{"summary":"Encode memory","responses":{"200":{"description":"OK"}}}},
+        "/memory/decode": {"post":{"summary":"Decode memory","responses":{"200":{"description":"OK"}}}},
+        "/memory/list": {"get":{"summary":"List memories","responses":{"200":{"description":"OK"}}}},
+        "/pulse": {"post":{"summary":"Fire pulse","responses":{"200":{"description":"OK"}}}},
+        "/dream": {"post":{"summary":"Run dream cycle","responses":{"200":{"description":"OK"}}}},
+        "/scale": {"post":{"summary":"Auto-scale universe","responses":{"200":{"description":"OK"}}}},
+        "/regulate": {"post":{"summary":"Run regulation cycle","responses":{"200":{"description":"OK"}}}}
+    }"#).unwrap_or_default();
+
+    Json(OpenApiDoc {
+        openapi: "3.0.3".to_string(),
+        info: OpenApiInfo {
+            title: "TetraMem-XL v12.0 API".to_string(),
+            version: "12.0.0".to_string(),
+            description: "7D Dark Universe Memory System REST API".to_string(),
+        },
+        paths,
+    })
 }
 
 async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsResponse>> {
@@ -177,6 +332,8 @@ async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsRe
     let h = state.hebbian.lock().await;
     let mems = state.memories.lock().await;
     let stats = u.stats();
+
+    tracing::debug!(nodes = stats.active_nodes, utilization = %format!("{:.1}%", stats.utilization * 100.0), "stats requested");
 
     Json(ApiResponse::ok(StatsResponse {
         nodes: stats.active_nodes,
@@ -204,8 +361,13 @@ async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<Health
 
     let report = UniverseObserver::inspect(&u, &h, &mems);
 
+    let level = report.health_level().as_str().to_string();
+    if level != "Healthy" {
+        tracing::warn!(health = %level, nodes = report.node_count, "universe health degraded");
+    }
+
     Json(ApiResponse::ok(HealthResponse {
-        level: report.health_level().as_str().to_string(),
+        level,
         conservation_ok: report.conservation_ok,
         energy_utilization: report.energy_utilization,
         node_count: report.node_count,
@@ -220,16 +382,20 @@ async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<Health
 async fn encode_memory(
     State(state): State<SharedState>,
     Json(req): Json<EncodeRequest>,
-) -> Result<(StatusCode, Json<ApiResponse<EncodeResponse>>), StatusCode> {
+) -> Result<(StatusCode, Json<ApiResponse<EncodeResponse>>), AppError> {
     let mut u = state.universe.lock().await;
     let mut mems = state.memories.lock().await;
 
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
+    tracing::info!(anchor = %anchor, dims = req.data.len(), "encoding memory");
+    metrics::API_ENCODE_TOTAL.inc();
+
     match MemoryCodec::encode(&mut u, &anchor, &req.data) {
         Ok(atom) => {
             let manifested = atom.is_manifested(&u);
             let anchor_str = format!("{}", atom.anchor());
+            tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
             mems.push(atom);
             Ok((
                 StatusCode::OK,
@@ -240,32 +406,38 @@ async fn encode_memory(
                 })),
             ))
         }
-        Err(e) => Ok((
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::err(format!("encode failed: {}", e))),
-        )),
+        Err(e) => {
+            tracing::warn!(error = %e, "memory encode failed");
+            Ok((
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::err(format!("encode failed: {}", e))),
+            ))
+        }
     }
 }
 
 async fn decode_memory(
     State(state): State<SharedState>,
     Json(req): Json<DecodeRequest>,
-) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), StatusCode> {
+) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), AppError> {
     let u = state.universe.lock().await;
     let mems = state.memories.lock().await;
 
+    metrics::API_DECODE_TOTAL.inc();
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
     for mem in mems.iter() {
         if mem.anchor() == &anchor && mem.data_dim() == req.data_dim {
             match MemoryCodec::decode(&u, mem) {
                 Ok(data) => {
+                    tracing::debug!(anchor = %anchor, dims = data.len(), "memory decoded");
                     return Ok((
                         StatusCode::OK,
                         Json(ApiResponse::ok(DecodeResponse { data })),
                     ));
                 }
                 Err(e) => {
+                    tracing::warn!(error = %e, "memory decode failed");
                     return Ok((
                         StatusCode::BAD_REQUEST,
                         Json(ApiResponse::err(format!("decode failed: {}", e))),
@@ -294,6 +466,7 @@ async fn fire_pulse(
     let u = state.universe.lock().await;
     let mut h = state.hebbian.lock().await;
 
+    metrics::API_PULSE_TOTAL.inc();
     let source = Coord7D::new_even([req.source[0], req.source[1], req.source[2], 0, 0, 0, 0]);
     let pt = match req.pulse_type.to_lowercase().as_str() {
         "reinforcing" => PulseType::Reinforcing,
@@ -301,6 +474,7 @@ async fn fire_pulse(
         _ => PulseType::Exploratory,
     };
 
+    tracing::info!(source = %source, pulse_type = ?pt, "firing pulse");
     let engine = PulseEngine::new();
     let result = engine.propagate(&source, pt, &u, &mut h);
 
@@ -317,8 +491,18 @@ async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<DreamRe
     let mut h = state.hebbian.lock().await;
     let mems = state.memories.lock().await;
 
+    metrics::API_DREAM_TOTAL.inc();
+    tracing::info!("running dream cycle");
+
     let dream = DreamEngine::new();
     let report = dream.dream(&u, &mut h, &mems);
+
+    tracing::info!(
+        replayed = report.paths_replayed,
+        weakened = report.paths_weakened,
+        consolidated = report.memories_consolidated,
+        "dream cycle complete"
+    );
 
     Json(ApiResponse::ok(DreamResponse {
         paths_replayed: report.paths_replayed,
@@ -338,6 +522,13 @@ async fn auto_scale(State(state): State<SharedState>) -> Json<ApiResponse<ScaleR
 
     let scaler = AutoScaler::new();
     let report = scaler.auto_scale(&mut u, &h, &mems);
+
+    tracing::info!(
+        nodes_added = report.nodes_added,
+        energy_expanded = report.energy_expanded_by,
+        reason = ?report.reason,
+        "auto-scale complete"
+    );
 
     Json(ApiResponse::ok(ScaleResponse {
         energy_expanded_by: report.energy_expanded_by,
@@ -393,13 +584,46 @@ async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<Stri
     let regulator = SelfRegulator::new();
     let actions = regulator.regulate(&report, &mut h);
 
+    tracing::info!(actions = actions.len(), "regulation cycle complete");
     let descriptions: Vec<String> = actions.iter().map(|a| a.description.clone()).collect();
     Json(ApiResponse::ok(descriptions))
 }
 
-pub async fn start_server(state: SharedState, addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_server(state: SharedState, addr: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = create_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    tracing::info!("API server listening on http://{}", addr);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    tracing::info!("server shutdown complete");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            tracing::info!("received Ctrl+C, shutting down gracefully...");
+        },
+        _ = terminate => {
+            tracing::info!("received SIGTERM, shutting down gracefully...");
+        },
+    }
 }

@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  tetramem:
+    build: .
+    container_name: tetramem-v12
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./tetramem.toml:/app/tetramem.toml:ro
+      - tetramem-data:/app/data
+      - tetramem-backups:/app/backups
+    environment:
+      - RUST_LOG=tetramem_v12=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3456/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tetramem-data:
+  tetramem-backups:

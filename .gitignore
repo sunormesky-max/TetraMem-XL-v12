@@ -2,3 +2,6 @@
 **/*.rs.bk
 *.pdb
 Cargo.lock
+/backups
+/data
+*.toml.bak

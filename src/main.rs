@@ -1,37 +1,107 @@
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use std::time::Instant;
+use tetramem_v12::universe::auth::JwtConfig;
 use tetramem_v12::universe::autoscale::AutoScaler;
+use tetramem_v12::universe::config::AppConfig;
 use tetramem_v12::universe::coord::Coord7D;
 use tetramem_v12::universe::crystal::CrystalEngine;
 use tetramem_v12::universe::dream::DreamEngine;
 use tetramem_v12::universe::hebbian::HebbianMemory;
 use tetramem_v12::universe::memory::MemoryCodec;
+use tetramem_v12::universe::metrics;
 use tetramem_v12::universe::node::DarkUniverse;
 use tetramem_v12::universe::persist::PersistEngine;
 use tetramem_v12::universe::pulse::{PulseEngine, PulseType};
 use tetramem_v12::universe::reasoning::ReasoningEngine;
 use tetramem_v12::universe::regulation::RegulationEngine;
 use tetramem_v12::universe::topology::TopologyEngine;
+use tracing_subscriber::EnvFilter;
+
+#[derive(Parser)]
+#[command(name = "tetramem-v12", version = "12.0.0")]
+#[command(about = "TetraMem-XL v12.0 - 7D Dark Universe Memory System")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[arg(short, long, default_value = "tetramem.toml")]
+    config: PathBuf,
+
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Serve {
+        #[arg(short, long)]
+        addr: Option<String>,
+    },
+    Bench,
+    Config {
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+}
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && args[1] == "serve" {
-        let addr = if args.len() > 2 { args[2].as_str() } else { "127.0.0.1:3456" };
-        let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
-            universe: tokio::sync::Mutex::new(DarkUniverse::new(10_000_000.0)),
-            hebbian: tokio::sync::Mutex::new(HebbianMemory::new()),
-            memories: tokio::sync::Mutex::new(Vec::new()),
-        });
-        println!("API Server on http://{}", addr);
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            if let Err(e) = tetramem_v12::universe::api::start_server(state, addr).await {
-                eprintln!("{}", e);
-            }
-        });
-        return;
-    }
+    let cli = Cli::parse();
 
-    bench_vs_v8();
+    init_tracing(&cli.log_level);
+
+    match cli.command {
+        Some(Commands::Serve { addr }) => {
+            let config = AppConfig::load(&cli.config).unwrap_or_else(|e| {
+                tracing::warn!("config load error: {}, using defaults", e);
+                AppConfig::default()
+            });
+            metrics::init_metrics();
+
+            let effective_addr = addr.unwrap_or_else(|| config.server.addr.clone());
+
+            let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
+                universe: tokio::sync::Mutex::new(DarkUniverse::new(config.universe.total_energy)),
+                hebbian: tokio::sync::Mutex::new(HebbianMemory::new()),
+                memories: tokio::sync::Mutex::new(Vec::new()),
+                config: config.clone(),
+                jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
+            });
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
+                    tracing::error!("server error: {}", e);
+                }
+            });
+        }
+        Some(Commands::Bench) => {
+            bench_vs_v8();
+        }
+        Some(Commands::Config { output }) => {
+            let path = output.unwrap_or_else(|| PathBuf::from("tetramem.toml"));
+            match AppConfig::save_default(&path) {
+                Ok(()) => println!("Default config written to {}", path.display()),
+                Err(e) => eprintln!("Error: {}", e),
+            }
+        }
+        None => {
+            bench_vs_v8();
+        }
+    }
+}
+
+fn init_tracing(level: &str) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(level));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
 }
 
 fn bench_vs_v8() {
@@ -41,7 +111,6 @@ fn bench_vs_v8() {
 
     let mut total_score = 0usize;
 
-    // ═══ 1. 记忆精确度 ═══
     println!("━━━ 1. 记忆精确度 (v8.0: 模糊查询 20信号权重, 误差~5-15%) ━━━");
     let mut u = DarkUniverse::new(10_000_000.0);
     let dims = [1, 7, 14, 28];
@@ -61,7 +130,6 @@ fn bench_vs_v8() {
     println!("  v12.0最大误差: {:.2e}  v8.0典型误差: ~0.05-0.15", max_total_error);
     if max_total_error < 1e-10 { println!("  ✓ 精确度提升 >10万倍"); total_score += 5; }
 
-    // ═══ 2. 能量守恒 ═══
     println!("\n━━━ 2. 能量守恒 (v8.0: 近似守恒, 级联5%损耗) ━━━");
     let mut u2 = DarkUniverse::new(1_000_000.0);
     for i in 0..1000i32 {
@@ -99,7 +167,6 @@ fn bench_vs_v8() {
     println!("  v8.0级联损耗: 5%/次  v12.0: 0 (数学证明)");
     if conserved { total_score += 5; }
 
-    // ═══ 3. 规模与速度 ═══
     println!("\n━━━ 3. 规模与速度 (v8.0: Python ~500节点/秒) ━━━");
     let t = Instant::now();
     let mut u3 = DarkUniverse::new(100_000_000.0);
@@ -121,7 +188,6 @@ fn bench_vs_v8() {
     println!("  v8.0: ~500节点/秒  v12.0: {:.0}节点/秒", nodes_per_sec);
     total_score += if nodes_per_sec > 10_000.0 { 5 } else { 3 };
 
-    // ═══ 4. PCNN脉冲吞吐 ═══
     println!("\n━━━ 4. PCNN脉冲吞吐 ━━━");
     let mut h4 = HebbianMemory::new();
     let engine4 = PulseEngine::new();
@@ -142,7 +208,6 @@ fn bench_vs_v8() {
     println!("  赫布边: {}", h4.edge_count());
     total_score += 3;
 
-    // ═══ 5. 拓扑分析 ═══
     println!("\n━━━ 5. 7D拓扑分析 (v8.0: H0-H6由ODE/Union-Find计算) ━━━");
     let t = Instant::now();
     let topo = TopologyEngine::analyze(&u3);
@@ -154,7 +219,6 @@ fn bench_vs_v8() {
     println!("  平均配位数:{:.1} Euler特征量:{}", topo.average_coordination, topo.betti.euler_characteristic());
     total_score += 3;
 
-    // ═══ 6. 结晶相变 ═══
     println!("\n━━━ 6. 结晶相变 (v8.0: crystallized_pathway.py) ━━━");
     let mut crystal = CrystalEngine::new();
     let report = crystal.crystallize(&h4, &u3);
@@ -165,7 +229,6 @@ fn bench_vs_v8() {
     println!("  结晶路由 {}→{}: {}跳", path_a, path_b, if cpath.is_empty() { "未连通".to_string() } else { format!("{}", cpath.len() - 1) });
     total_score += 3;
 
-    // ═══ 7. 几何推理 ═══
     println!("\n━━━ 7. 几何推理 (v8.0: semantic_reasoning.py 文本推理) ━━━");
     let mut u7 = DarkUniverse::new(5_000_000.0);
     let mut mems7 = Vec::new();
@@ -217,7 +280,6 @@ fn bench_vs_v8() {
     println!("  脉冲发现: {}条新线索", discoveries.len());
     total_score += 4;
 
-    // ═══ 8. 梦境引擎 ═══
     println!("\n━━━ 8. 梦境引擎 ━━━");
     let dream = DreamEngine::new();
     let t = Instant::now();
@@ -229,9 +291,8 @@ fn bench_vs_v8() {
         dream_report.weight_before, dream_report.weight_after);
     total_score += 3;
 
-    // ═══ 9. 维度调控 ═══
     println!("\n━━━ 9. 维度调控 (v8.0: 6层生理模型) ━━━");
-    let mut reg_engine = RegulationEngine::new();
+    let reg_engine = RegulationEngine::new();
     let mut crystal9 = CrystalEngine::new();
     let mut h9 = HebbianMemory::new();
     h9.record_path(&[*mems7[0].anchor(), *mems7[1].anchor()], 1.0);
@@ -246,7 +307,6 @@ fn bench_vs_v8() {
         reg_report.dimension_pressure.imbalance, reg_report.stress_level, reg_report.entropy);
     total_score += 3;
 
-    // ═══ 10. 自动扩展 ═══
     println!("\n━━━ 10. 自动扩展 ━━━");
     let mut u10 = DarkUniverse::new(50_000.0);
     for i in 0..20i32 {
@@ -264,23 +324,21 @@ fn bench_vs_v8() {
     println!("  扩展后守恒: ✓");
     total_score += 3;
 
-    // ═══ 11. 持久化 ═══
     println!("\n━━━ 11. 持久化 (v8.0: WAL+gzip) ━━━");
     let t = Instant::now();
     let json = PersistEngine::to_json(&u7, &h7, &mems7, &crystal7).unwrap();
     let serialize_time = t.elapsed();
     let t = Instant::now();
-    let (u7r, _h7r, mems7r, _c7r) = PersistEngine::from_json(&json).unwrap();
+    let (u7r, _h7r, _mems7r, _c7r) = PersistEngine::from_json(&json).unwrap();
     let deserialize_time = t.elapsed();
     println!("  序列化: {}字节 {:.1}ms", json.len(), serialize_time.as_secs_f64() * 1000.0);
     println!("  反序列化: {:.1}ms", deserialize_time.as_secs_f64() * 1000.0);
-    println!("  守恒保持: {} 节点保持: {}→{}", 
+    println!("  守恒保持: {} 节点保持: {}→{}",
         if u7r.verify_conservation() { "✓" } else { "✗" },
         u7.active_node_count(), u7r.active_node_count());
     total_score += 3;
 
-    // ═══ 12. 综合 ═══
-    println!("\n━━━ 12. 综合吞吐量 ━━━");
+    println!("\n━━━ 12. 综合 ━━━");
     let mut u12 = DarkUniverse::new(100_000_000.0);
     let t = Instant::now();
     for x in 0..30i32 {
@@ -295,7 +353,7 @@ fn bench_vs_v8() {
     }
     let stats12 = u12.stats();
     let build12 = t.elapsed();
-    println!("  {}节点 ({}具现+{}暗) 构建: {:.0}ms", 
+    println!("  {}节点 ({}具现+{}暗) 构建: {:.0}ms",
         stats12.active_nodes, stats12.manifested_nodes, stats12.dark_nodes,
         build12.as_secs_f64() * 1000.0);
     assert!(u12.verify_conservation());
@@ -307,7 +365,6 @@ fn bench_vs_v8() {
     println!("  拓扑分析({}节点): {:.0}ms → {}", stats12.active_nodes, topo12_time.as_secs_f64() * 1000.0, topo12.betti);
     total_score += 4;
 
-    // ═══ 总结 ═══
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║   总分: {}/50                                              ║", total_score);
     println!("╠══════════════════════════════════════════════════════════╣");
