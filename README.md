@@ -4,7 +4,7 @@
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.95.0-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-227-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-248-brightgreen.svg)]()
 
 ## What is TetraMem-XL?
 
@@ -17,6 +17,7 @@ TetraMem-XL v12.0 is a next-generation memory system built on a **7-dimensional 
 - **Tetrahedron as Minimal Unit** — Each memory is stored in a tetrahedron of 4 nodes in 7D space
 - **Offset Encoding** — Arbitrary real numbers (including negatives) stored with precision < 1e-14
 - **Manifestation** — Nodes with physical energy ratio > 0.5 crystallize into the physical lattice
+- **H6 Phase Transition** — Two-phase energy quorum consensus for distributed crystallization
 
 ## Architecture
 
@@ -29,38 +30,47 @@ TetraMem-XL v12.0 is a next-generation memory system built on a **7-dimensional 
    ┌──┼──┬──┐    ┌────┼────┐     ┌──────┼──────┐
    coord  energy  memory  hebbian  crystal  reasoning
    node   lattice  pulse  dream   topology
+   config                        perception
                          |
                ┌─────────┼─────────┐
                |         |         |
           Adaptive    Safety     Interface
           ┌──┼──┐   ┌──┼──┐      |
         autoscale  observer backup watchdog   API (axum REST)
-        regulation persist              11 endpoints
+        regulation persist  raft_node         26 endpoints
+                   cluster
 ```
 
-## Modules (19 total)
+## Modules (22 total)
 
-| Module | Lines | Description |
-|--------|------:|-------------|
-| `coord` | 145 | 7D coordinate system with Even/Odd parity |
-| `energy` | 525 | 7D energy fields, pool management, flow/split |
-| `lattice` | 915 | BCC lattice, tetrahedra, 3-layer neighbor shells |
-| `memory` | 524 | MemoryCodec — encode/decode 1-28 dimensions |
-| `node` | 514 | DarkUniverse core — materialize, protect, conservation |
-| `hebbian` | 224 | Hebbian learning — path recording, bias, decay, prune |
-| `pulse` | 399 | PCNN pulse engine — BFS with 3 pulse types |
-| `observer` | 422 | Universe health monitor (12 metrics) + self-regulator |
-| `dream` | 304 | 3-phase dream engine — replay, weaken, consolidate |
-| `autoscale` | 487 | 5 auto-scaling strategies + scale-to-fit-memory |
-| `crystal` | 329 | Phase transition crystallization + crystal path routing |
-| `topology` | 366 | Betti numbers H0-H6, Euler characteristic, BFS paths |
-| `reasoning` | 308 | Analogy, association, inference chains, discovery |
-| `persist` | 320 | JSON serialization with conservation verification |
-| `regulation` | 281 | Dimension pressure thermodynamics + stress response |
-| `backup` | 389 | Scheduled backups with generational rotation |
-| `watchdog` | 482 | 4-level watermarks + auto-recovery + backup integration |
-| `api` | 353 | axum REST API with 11 endpoints |
-| `main` | 329 | CLI benchmark vs v8.0 + serve mode |
+| Module | Description |
+|--------|-------------|
+| `coord` | 7D coordinate system with Even/Odd parity |
+| `energy` | 7D energy fields, pool management, flow/split, drift measurement |
+| `lattice` | BCC lattice, tetrahedra, 3-layer neighbor shells |
+| `memory` | MemoryCodec — encode/decode 1-28 dimensions with timestamps |
+| `node` | DarkUniverse core — materialize, protect, conservation |
+| `hebbian` | Hebbian learning — path recording, bias, decay, prune |
+| `pulse` | PCNN pulse engine — BFS with 3 pulse types |
+| `observer` | Universe health monitor (12 metrics) + self-regulator |
+| `dream` | 3-phase dream engine — replay, weaken, consolidate |
+| `autoscale` | 5 auto-scaling strategies + scale-to-fit-memory |
+| `crystal` | Phase transition crystallization + crystal path routing |
+| `topology` | Betti numbers H0-H6, Euler characteristic, BFS paths |
+| `reasoning` | Analogy, association, inference chains, discovery |
+| `perception` | Perception budget with topology weighting |
+| `persist` | JSON serialization with enhanced checksum verification |
+| `persist_file` | Atomic file persistence with temp-file write |
+| `persist_sqlite` | SQLite storage with indexed schema |
+| `regulation` | Dimension pressure thermodynamics + stress response |
+| `backup` | Scheduled backups with generational rotation |
+| `watchdog` | 4-level watermarks + auto-recovery + backup integration |
+| `config` | TOML configuration with full validation |
+| `api` | axum REST API with 26 endpoints, JWT auth, rate limiting |
+| `cluster` | Raft-based cluster management + H6EnergyQuorum consensus |
+| `raft_node` | openraft integration (log store, state machine, network) |
+| `auth` | JWT token creation and validation |
+| `metrics` | Prometheus-compatible metrics |
 
 ## Quick Start
 
@@ -70,20 +80,13 @@ TetraMem-XL v12.0 is a next-generation memory system built on a **7-dimensional 
 # Build
 cargo build --release
 
-# Run all 227 tests
+# Run all 210 unit tests + 38 integration tests
 cargo test
 
 # Run specific test suites
 cargo test --test full_suite    # 38 integration tests
 cargo test --test scale_bench   # 8 scalability tests
 cargo test --test stress_test   # 12 extreme stress tests
-```
-
-### CLI Benchmark
-
-```bash
-# Run v12.0 vs v8.0 comparative benchmark
-cargo run --release
 ```
 
 ### REST API Server
@@ -94,23 +97,69 @@ cargo run --release serve
 
 # Custom address
 cargo run --release serve 0.0.0.0:8080
+
+# With config file
+cargo run --release -- --config config.toml serve
 ```
 
-#### API Endpoints
+#### API Endpoints (26 total)
 
+**Core CRUD**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Universe health check |
-| GET | `/stats` | Universe statistics |
+| GET | `/stats` | Universe statistics (incl. energy_drift) |
 | POST | `/nodes` | Materialize a node |
 | DELETE | `/nodes/{id}` | Dematerialize a node |
 | POST | `/memory` | Encode memory |
 | GET | `/memory/{id}` | Decode memory |
+| DELETE | `/memory/{id}` | Erase memory |
+| GET | `/memories` | List all memories |
+
+**Cognitive**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | POST | `/pulse` | Fire a pulse |
 | POST | `/dream` | Run dream cycle |
-| POST | `/scale` | Auto-scale universe |
+| POST | `/topology` | Compute topology (Betti numbers) |
 | POST | `/regulate` | Run regulation cycle |
-| POST | `/backup` | Create backup |
+
+**Backup**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/backup/create` | Create manual backup |
+| GET | `/backup/list` | List backups |
+
+**Cluster**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/cluster/init` | Initialize cluster |
+| GET | `/cluster/status` | Cluster status |
+| POST | `/cluster/propose` | Propose command |
+| POST | `/cluster/add-node` | Add cluster node |
+| POST | `/cluster/remove-node` | Remove cluster node |
+
+**Timeline & Trace**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/memory/timeline` | Memory timeline by date |
+| POST | `/memory/trace` | Trace memory associations |
+
+**Phase Transition**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/phase/detect` | Detect phase transitions |
+| POST | `/phase/consensus` | Phase consensus proposal |
+| POST | `/phase/quorum/start` | Start energy quorum |
+| POST | `/phase/quorum/confirm` | Confirm quorum entry |
+| GET | `/phase/quorum/status` | Quorum status |
+| POST | `/phase/quorum/execute` | Execute quorum decision |
+
+**Auth & Metrics**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/login` | Obtain JWT token |
+| GET | `/metrics` | Prometheus metrics |
 
 ### Usage Example
 
@@ -140,12 +189,12 @@ assert!(universe.verify_conservation());
 | Build Speed | ~500 nodes/s | ~4.5M nodes/s | 8,916x |
 | Energy Conservation | ~5% loss per cascade | 0 (mathematically proven) | ∞ |
 | Dimensions | 3D + time | 7D dark universe | 2.3x |
-| Code Size | 22,123 lines | ~7,000 lines | 3.2x less |
-| Tests | ~90 | 227 | 2.5x |
+| Code Size | 22,123 lines | ~9,000 lines | 2.5x less |
+| Tests | ~90 | 248 | 2.8x |
 
 ## Test Coverage
 
-- **169 unit tests** — per-module correctness
+- **210 unit tests** — per-module correctness
 - **38 integration tests** — full pipeline verification
 - **8 scalability tests** — 10K+ nodes, 100K+ operations
 - **12 stress tests** — extreme conditions (million ops, 20K rounds)
@@ -166,6 +215,11 @@ assert!(universe.verify_conservation());
 - [tokio](https://crates.io/crates/tokio) 1 — Async runtime
 - [serde](https://crates.io/crates/serde) 1 — Serialization
 - [serde_json](https://crates.io/crates/serde_json) 1 — JSON support
+- [rusqlite](https://crates.io/crates/rusqlite) 0.31 — SQLite (bundled)
+- [openraft](https://crates.io/crates/openraft) 0.10 — Raft consensus
+- [tower-http](https://crates.io/crates/tower-http) 0.6 — Middleware
+- [jsonwebtoken](https://crates.io/crates/jsonwebtoken) 9 — JWT auth
+- [prometheus](https://crates.io/crates/prometheus) 0.13 — Metrics
 
 ## License
 

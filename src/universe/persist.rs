@@ -148,16 +148,42 @@ impl PersistEngine {
             }
         }).collect();
 
-        let mut node_energy_sum = 0.0f64;
+        let mut node_dim_hash: u64 = 0;
         for ns in &nodes {
             for &d in &ns.dims {
-                node_energy_sum += d;
+                let s = format!("{:.12}", d);
+                node_dim_hash = node_dim_hash.wrapping_mul(31)
+                    .wrapping_add(s.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)));
             }
+            node_dim_hash = node_dim_hash.wrapping_mul(7).wrapping_add(if ns.is_even { 1 } else { 0 });
         }
-        let conservation_checksum = (stats.total_energy * 1e10) as u64
-            ^ (node_energy_sum * 1e10) as u64
-            ^ (nodes.len() as u64).wrapping_mul(31)
-            ^ (mem_snapshots.len() as u64).wrapping_mul(37);
+        let mut edge_hash: u64 = 0;
+        for es in &edges {
+            edge_hash = edge_hash
+                .wrapping_mul(31)
+                .wrapping_add(es.traversal_count as u64)
+                .wrapping_add(es.a.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)))
+                .wrapping_add(es.b.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)));
+        }
+        let mut chan_hash: u64 = 0;
+        for cs in &channels {
+            chan_hash = chan_hash
+                .wrapping_mul(37)
+                .wrapping_add(if cs.is_super { 1u64 } else { 0u64 })
+                .wrapping_add(cs.a.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)))
+                .wrapping_add(cs.b.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)));
+        }
+        let conservation_checksum = (nodes.len() as u64)
+            .wrapping_mul(0x517cc1b727220a95)
+            ^ (mem_snapshots.len() as u64)
+            .wrapping_mul(0x6c62272e07bb0142)
+            ^ (edges.len() as u64)
+            .wrapping_mul(0x9e3779b97f4a7c15)
+            ^ (channels.len() as u64)
+            .wrapping_mul(0x123456789abcdef0)
+            ^ node_dim_hash
+            ^ edge_hash
+            ^ chan_hash;
 
         let snapshot = UniverseSnapshot {
             total_energy: stats.total_energy,
@@ -180,22 +206,47 @@ impl PersistEngine {
     }
 
     pub fn deserialize(snapshot: &UniverseSnapshot) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), PersistError> {
-        let mut node_energy_sum = 0.0f64;
+        let mut node_dim_hash: u64 = 0;
         for ns in &snapshot.nodes {
             for &d in &ns.dims {
-                node_energy_sum += d;
+                let s = format!("{:.12}", d);
+                node_dim_hash = node_dim_hash.wrapping_mul(31)
+                    .wrapping_add(s.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)));
             }
+            node_dim_hash = node_dim_hash.wrapping_mul(7).wrapping_add(if ns.is_even { 1 } else { 0 });
         }
-        let checksum = (snapshot.total_energy * 1e10) as u64
-            ^ (node_energy_sum * 1e10) as u64
-            ^ (snapshot.nodes.len() as u64).wrapping_mul(31)
-            ^ (snapshot.memories.len() as u64).wrapping_mul(37);
+        let mut edge_hash: u64 = 0;
+        for es in &snapshot.hebbian_edges {
+            edge_hash = edge_hash
+                .wrapping_mul(31)
+                .wrapping_add(es.traversal_count as u64)
+                .wrapping_add(es.a.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)))
+                .wrapping_add(es.b.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)));
+        }
+        let mut chan_hash: u64 = 0;
+        for cs in &snapshot.crystal_channels {
+            chan_hash = chan_hash
+                .wrapping_mul(37)
+                .wrapping_add(if cs.is_super { 1u64 } else { 0u64 })
+                .wrapping_add(cs.a.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)))
+                .wrapping_add(cs.b.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)));
+        }
+        let checksum = (snapshot.nodes.len() as u64)
+            .wrapping_mul(0x517cc1b727220a95)
+            ^ (snapshot.memories.len() as u64)
+            .wrapping_mul(0x6c62272e07bb0142)
+            ^ (snapshot.hebbian_edges.len() as u64)
+            .wrapping_mul(0x9e3779b97f4a7c15)
+            ^ (snapshot.crystal_channels.len() as u64)
+            .wrapping_mul(0x123456789abcdef0)
+            ^ node_dim_hash
+            ^ edge_hash
+            ^ chan_hash;
 
         if snapshot.conservation_checksum != 0 && checksum != snapshot.conservation_checksum {
-            tracing::warn!(
-                "snapshot checksum mismatch: stored={} computed={}",
-                snapshot.conservation_checksum, checksum
-            );
+            return Err(PersistError::ConservationViolation(
+                format!("snapshot checksum mismatch: stored={} computed={}", snapshot.conservation_checksum, checksum)
+            ));
         }
 
         let mut universe = DarkUniverse::new(snapshot.total_energy);

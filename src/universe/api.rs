@@ -322,6 +322,9 @@ async fn login(
     if req.username.is_empty() || req.password.is_empty() {
         return Err(AppError::BadRequest("username and password required".to_string()));
     }
+    if req.password.len() < 8 {
+        return Err(AppError::BadRequest("password must be at least 8 characters".to_string()));
+    }
 
     tracing::info!(username = %req.username, "user login attempt");
 
@@ -401,7 +404,7 @@ async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsRe
         physical_energy: stats.physical_energy,
         dark_energy: stats.dark_energy,
         utilization: stats.utilization,
-        conservation_ok: u.verify_conservation(),
+        conservation_ok: u.verify_conservation_with_tolerance(state.config.universe.energy_drift_tolerance),
         energy_drift: u.energy_drift(),
         memory_count: mems.len(),
         hebbian_edges: h.edge_count(),
@@ -505,7 +508,7 @@ async fn decode_memory(
     }
 
     Ok((
-        StatusCode::OK,
+        StatusCode::NOT_FOUND,
         Json(ApiResponse::err("memory not found")),
     ))
 }
@@ -659,7 +662,7 @@ pub async fn start_server(state: SharedState, addr: &str) -> Result<(), Box<dyn 
         let u = state.universe.lock().await;
         let h = state.hebbian.lock().await;
         let m = state.memories.lock().await;
-        let crystal = crate::universe::crystal::CrystalEngine::new();
+        let crystal = state.crystal.lock().await;
         match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &m, &crystal) {
             Ok(info) => tracing::info!("final persist on shutdown: {}", info),
             Err(e) => tracing::warn!("final persist failed: {}", e),
@@ -708,8 +711,8 @@ async fn create_backup(
     let h = state.hebbian.lock().await;
     let m = state.memories.lock().await;
     let mut bs = state.backup.lock().await;
+    let crystal = state.crystal.lock().await;
 
-    let crystal = crate::universe::crystal::CrystalEngine::new();
     let report = bs.create_backup(BackupTrigger::Manual, &u, &h, &m, &crystal)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -881,10 +884,14 @@ async fn memory_trace(
 
     let mut hops: Vec<TraceHop> = Vec::new();
 
-    let source_mem = mems.iter().find(|m| m.anchor() == &source);
-    if let Some(m) = source_mem {
+    let mem_index: std::collections::HashMap<String, &MemoryAtom> = mems.iter()
+        .map(|m| (format!("{}", m.anchor()), m))
+        .collect();
+
+    let source_str = format!("{}", source);
+    if let Some(m) = mem_index.get(&source_str) {
         hops.push(TraceHop {
-            anchor: format!("{}", m.anchor()),
+            anchor: source_str,
             created_at: m.created_at(),
             data_dim: m.data_dim(),
             confidence: 1.0,
@@ -894,7 +901,7 @@ async fn memory_trace(
 
     for r in &associations {
         for target_str in &r.targets {
-            if let Some(m) = mems.iter().find(|m| format!("{}", m.anchor()) == *target_str) {
+            if let Some(m) = mem_index.get(target_str) {
                 hops.push(TraceHop {
                     anchor: target_str.clone(),
                     created_at: m.created_at(),

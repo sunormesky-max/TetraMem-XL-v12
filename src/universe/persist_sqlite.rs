@@ -73,7 +73,8 @@ impl PersistSqlite {
                 v33 INTEGER NOT NULL, v34 INTEGER NOT NULL, v35 INTEGER NOT NULL, v36 INTEGER NOT NULL,
                 v3_even INTEGER NOT NULL,
                 data_dim INTEGER NOT NULL,
-                physical_base REAL NOT NULL
+                physical_base REAL NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS crystal_channels (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +89,9 @@ impl PersistSqlite {
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_coord ON nodes(c0, c1, c2, c3, c4, c5, c6);
             CREATE INDEX IF NOT EXISTS idx_memories_dim ON memories(data_dim);
+            CREATE INDEX IF NOT EXISTS idx_hebbian_a ON hebbian_edges(a0,a1,a2,a3,a4,a5,a6,a_even);
+            CREATE INDEX IF NOT EXISTS idx_memories_anchor ON memories(v00,v01,v02,v03,v04,v05,v06,v0_even);
+            CREATE INDEX IF NOT EXISTS idx_crystal_a ON crystal_channels(a0,a1,a2,a3,a4,a5,a6,a_even);
             "
         ).map_err(|e| SqliteError::Schema(e.to_string()))
     }
@@ -160,13 +164,13 @@ impl PersistSqlite {
                 rows.push((b, v.is_even()));
             }
             tx.execute(
-                "INSERT INTO memories (v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)",
+                "INSERT INTO memories (v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)",
                 params![
                     rows[0].0[0], rows[0].0[1], rows[0].0[2], rows[0].0[3], rows[0].0[4], rows[0].0[5], rows[0].0[6], rows[0].1 as i32,
                     rows[1].0[0], rows[1].0[1], rows[1].0[2], rows[1].0[3], rows[1].0[4], rows[1].0[5], rows[1].0[6], rows[1].1 as i32,
                     rows[2].0[0], rows[2].0[1], rows[2].0[2], rows[2].0[3], rows[2].0[4], rows[2].0[5], rows[2].0[6], rows[2].1 as i32,
                     rows[3].0[0], rows[3].0[1], rows[3].0[2], rows[3].0[3], rows[3].0[4], rows[3].0[5], rows[3].0[6], rows[3].1 as i32,
-                    m.data_dim(), m.physical_base_f64(),
+                    m.data_dim(), m.physical_base_f64(), m.created_at() as i64,
                 ],
             ).map_err(|e| SqliteError::Insert(e.to_string()))?;
         }
@@ -264,7 +268,7 @@ impl PersistSqlite {
         let mut mems = Vec::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base FROM memories"
+                "SELECT v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at FROM memories"
             ).map_err(|e| SqliteError::Query(e.to_string()))?;
 
             let rows = stmt.query_map([], |row| {
@@ -278,16 +282,17 @@ impl PersistSqlite {
                 let v3e = row.get::<_,i32>(31)?;
                 let dim: i32 = row.get(32)?;
                 let pb: f64 = row.get(33)?;
-                Ok((v0, v0e, v1, v1e, v2, v2e, v3, v3e, dim as usize, pb))
+                let created_at: i64 = row.get(34)?;
+                Ok((v0, v0e, v1, v1e, v2, v2e, v3, v3e, dim as usize, pb, created_at as u64))
             }).map_err(|e| SqliteError::Query(e.to_string()))?;
 
             for row in rows {
-                let (v0,v0e,v1,v1e,v2,v2e,v3,v3e,dim,pb) = row.map_err(|e| SqliteError::Query(e.to_string()))?;
+                let (v0,v0e,v1,v1e,v2,v2e,v3,v3e,dim,pb,created_at) = row.map_err(|e| SqliteError::Query(e.to_string()))?;
                 let make = |b: [i32;7], e: i32| -> Coord7D {
                     if e != 0 { Coord7D::new_even(b) } else { Coord7D::new_odd(b) }
                 };
                 let verts = [make(v0,v0e), make(v1,v1e), make(v2,v2e), make(v3,v3e)];
-                mems.push(MemoryAtom::from_parts_with_time(verts, dim, pb, 0));
+                mems.push(MemoryAtom::from_parts_with_time(verts, dim, pb, created_at));
             }
         }
 

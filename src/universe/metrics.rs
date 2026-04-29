@@ -134,10 +134,10 @@ mod tests {
     #[test]
     fn metrics_init_and_render() {
         init_metrics();
-        NODES_TOTAL.set(42);
+        NODES_TOTAL.set(99999);
         let output = render_metrics();
         assert!(output.contains("tetramem_nodes_total"));
-        assert!(output.contains("42"));
+        assert!(output.contains("99999"));
     }
 
     #[test]

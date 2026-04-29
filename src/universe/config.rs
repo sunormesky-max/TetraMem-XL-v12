@@ -196,14 +196,39 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.universe.total_energy <= 0.0 {
-            return Err(ConfigError::Parse("universe.total_energy must be > 0".to_string()));
+        if self.universe.total_energy <= 0.0 || self.universe.total_energy.is_nan() {
+            return Err(ConfigError::Parse("universe.total_energy must be > 0 and not NaN".to_string()));
+        }
+        if self.universe.manifestation_threshold < 0.0 || self.universe.manifestation_threshold > 1.0
+            || self.universe.manifestation_threshold.is_nan() {
+            return Err(ConfigError::Parse("universe.manifestation_threshold must be in [0, 1]".to_string()));
+        }
+        if self.universe.energy_drift_tolerance <= 0.0 || self.universe.energy_drift_tolerance.is_nan() {
+            return Err(ConfigError::Parse("universe.energy_drift_tolerance must be > 0".to_string()));
         }
         if self.server.body_limit_bytes == 0 {
             return Err(ConfigError::Parse("server.body_limit_bytes must be > 0".to_string()));
         }
+        if self.server.timeout_secs == 0 {
+            return Err(ConfigError::Parse("server.timeout_secs must be > 0".to_string()));
+        }
         if self.auth.enabled && self.auth.jwt_secret == "change-me-in-production" {
             tracing::warn!("auth enabled with default JWT secret — tokens are insecure");
+        }
+        if self.auth.enabled && self.auth.jwt_expiry_secs == 0 {
+            return Err(ConfigError::Parse("auth.jwt_expiry_secs must be > 0".to_string()));
+        }
+        if self.backup.interval_secs == 0 {
+            return Err(ConfigError::Parse("backup.interval_secs must be > 0".to_string()));
+        }
+        if self.backup.max_generations == 0 {
+            return Err(ConfigError::Parse("backup.max_generations must be > 0".to_string()));
+        }
+        if self.rate_limit.requests_per_minute == 0 {
+            return Err(ConfigError::Parse("rate_limit.requests_per_minute must be > 0".to_string()));
+        }
+        if self.rate_limit.burst == 0 {
+            return Err(ConfigError::Parse("rate_limit.burst must be > 0".to_string()));
         }
         Ok(())
     }

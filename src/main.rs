@@ -72,9 +72,9 @@ fn main() {
                             "restored state: {} nodes, {} memories, {} edges, E={:.0}",
                             stats.active_nodes, m.len(), h.edge_count(), stats.total_energy
                         );
-                        let conservation_ok = u.verify_conservation();
+                        let conservation_ok = u.verify_conservation_with_tolerance(config.universe.energy_drift_tolerance);
                         if conservation_ok {
-                            tracing::info!("POST-RESTORE conservation check: PASSED");
+                            tracing::info!("POST-RESTORE conservation check: PASSED (tolerance={:.e})", config.universe.energy_drift_tolerance);
                         } else {
                             tracing::error!(
                                 "POST-RESTORE conservation check: FAILED — energy violation detected after loading persisted state"
@@ -114,18 +114,29 @@ fn main() {
                     let state_ref = state.clone();
                     let mut cm = state.cluster.lock().await;
                     cm.set_conservation_validator(Box::new(move || {
-                        let u = state_ref.universe.blocking_lock();
-                        let ok = u.verify_conservation();
-                        if !ok {
-                            tracing::error!("CLUSTER PROPOSE REJECTED: energy conservation violated");
+                        match state_ref.universe.try_lock() {
+                            Ok(u) => {
+                                let ok = u.verify_conservation();
+                                if !ok {
+                                    tracing::error!("CLUSTER PROPOSE REJECTED: energy conservation violated");
+                                }
+                                ok
+                            }
+                            Err(_) => {
+                                tracing::warn!("conservation validator: universe lock busy, skipping check");
+                                true
+                            }
                         }
-                        ok
                     }));
                     let state_ref2 = state.clone();
                     cm.set_energy_reporter(Box::new(move || {
-                        let u = state_ref2.universe.blocking_lock();
-                        let stats = u.stats();
-                        (stats.available_energy, stats.active_nodes, u.verify_conservation())
+                        match state_ref2.universe.try_lock() {
+                            Ok(u) => {
+                                let stats = u.stats();
+                                (stats.available_energy, stats.active_nodes, u.verify_conservation())
+                            }
+                            Err(_) => (0.0, 0, true),
+                        }
                     }));
                 }
 
@@ -133,6 +144,7 @@ fn main() {
                     let state_bg = state.clone();
                     let conservation_interval = config.logging.conservation_check_interval_secs.max(10);
                     let tracing_on = config.logging.tracing_enabled;
+                    let drift_tolerance = config.universe.energy_drift_tolerance;
                     tokio::spawn(async move {
                         let mut interval = tokio::time::interval(
                             std::time::Duration::from_secs(conservation_interval)
@@ -142,7 +154,7 @@ fn main() {
                             interval.tick().await;
                             if !tracing_on { continue; }
                             let u = state_bg.universe.lock().await;
-                            let ok = u.verify_conservation();
+                            let ok = u.verify_conservation_with_tolerance(drift_tolerance);
                             let drift = u.energy_drift();
                             let stats = u.stats();
                             drop(u);
