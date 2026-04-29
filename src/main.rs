@@ -72,6 +72,14 @@ fn main() {
                             "restored state: {} nodes, {} memories, {} edges, E={:.0}",
                             stats.active_nodes, m.len(), h.edge_count(), stats.total_energy
                         );
+                        let conservation_ok = u.verify_conservation();
+                        if conservation_ok {
+                            tracing::info!("POST-RESTORE conservation check: PASSED");
+                        } else {
+                            tracing::error!(
+                                "POST-RESTORE conservation check: FAILED — energy violation detected after loading persisted state"
+                            );
+                        }
                         (u, h, m, c)
                     }
                     Err(e) => {
@@ -102,6 +110,19 @@ fn main() {
 
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             rt.block_on(async {
+                {
+                    let state_ref = state.clone();
+                    let mut cm = state.cluster.lock().await;
+                    cm.set_conservation_validator(Box::new(move || {
+                        let u = state_ref.universe.blocking_lock();
+                        let ok = u.verify_conservation();
+                        if !ok {
+                            tracing::error!("CLUSTER PROPOSE REJECTED: energy conservation violated");
+                        }
+                        ok
+                    }));
+                }
+
                 if auto_persist && persist_interval > 0 {
                     let handle = tokio::spawn(async move {
                         let mut interval = tokio::time::interval(

@@ -86,6 +86,7 @@ pub struct StatsResponse {
     pub dark_energy: f64,
     pub utilization: f64,
     pub conservation_ok: bool,
+    pub energy_drift: f64,
     pub memory_count: usize,
     pub hebbian_edges: usize,
     pub hebbian_total_weight: f64,
@@ -282,6 +283,8 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/cluster/remove-node", post(cluster_remove_node))
         .route("/memory/timeline", get(memory_timeline))
         .route("/memory/trace", post(memory_trace))
+        .route("/phase/detect", get(detect_phase_transition))
+        .route("/phase/consensus", post(phase_consensus))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -393,6 +396,7 @@ async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsRe
         dark_energy: stats.dark_energy,
         utilization: stats.utilization,
         conservation_ok: u.verify_conservation(),
+        energy_drift: u.energy_drift(),
         memory_count: mems.len(),
         hebbian_edges: h.edge_count(),
         hebbian_total_weight: h.total_weight(),
@@ -825,11 +829,16 @@ async fn memory_timeline(
         };
         day_map.entry(date).or_default().push(format!("{}", m.anchor()));
     }
-    let timeline: Vec<TimelineDay> = day_map.into_iter().map(|(date, anchors)| TimelineDay {
-        count: anchors.len(),
-        date,
-        anchors,
-    }).collect();
+    let max_days = state.config.universe.max_timeline_days;
+    let timeline: Vec<TimelineDay> = day_map.into_iter()
+        .rev()
+        .take(max_days)
+        .map(|(date, anchors)| TimelineDay {
+            count: anchors.len(),
+            date,
+            anchors,
+        })
+        .collect();
     Json(ApiResponse::ok(timeline))
 }
 
@@ -892,4 +901,97 @@ async fn memory_trace(
     }
 
     Ok(Json(ApiResponse::ok(hops)))
+}
+
+async fn detect_phase_transition(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<crate::universe::crystal::PhaseTransitionReport>>, AppError> {
+    let u = state.universe.lock().await;
+    let h = state.hebbian.lock().await;
+    let c = state.crystal.lock().await;
+
+    let report = c.detect_phase_transition(&h, &u);
+
+    if report.requires_consensus {
+        tracing::warn!(
+            candidates = report.super_channel_candidates,
+            existing = report.existing_super_channels,
+            "H6 phase transition detected — consensus required"
+        );
+    }
+
+    Ok(Json(ApiResponse::ok(report)))
+}
+
+#[derive(Deserialize)]
+struct PhaseConsensusRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+async fn phase_consensus(
+    State(state): State<SharedState>,
+    Json(req): Json<PhaseConsensusRequest>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    let u = state.universe.lock().await;
+    let h = state.hebbian.lock().await;
+    let mut c = state.crystal.lock().await;
+    let cm = state.cluster.lock().await;
+
+    let report = c.detect_phase_transition(&h, &u);
+
+    if !report.requires_consensus && !req.force {
+        return Ok(Json(ApiResponse::ok(serde_json::json!({
+            "status": "no_transition",
+            "phase_coherent": report.phase_coherent,
+        }))));
+    }
+
+    if !cm.is_initialized() {
+        tracing::warn!("phase consensus requested but cluster not initialized, proceeding locally");
+        let crystal_report = c.crystallize(&h, &u);
+        drop(u);
+        drop(h);
+        drop(cm);
+        return Ok(Json(ApiResponse::ok(serde_json::json!({
+            "status": "local_consensus",
+            "new_crystals": crystal_report.new_crystals,
+            "new_super_crystals": crystal_report.new_super_crystals,
+            "cluster": "not_initialized",
+        }))));
+    }
+
+    let propose_result = cm.propose(ProposeRequest {
+        action: "phase_transition".to_string(),
+        data: serde_json::json!({
+            "super_candidates": report.super_channel_candidates,
+            "avg_weight": report.avg_edge_weight,
+        }),
+    }).await;
+
+    drop(cm);
+
+    match propose_result {
+        Ok(resp) => {
+            let crystal_report = c.crystallize(&h, &u);
+            drop(u);
+            drop(h);
+            Ok(Json(ApiResponse::ok(serde_json::json!({
+                "status": "consensus_committed",
+                "log_index": resp.log_index,
+                "conservation_verified": resp.conservation_verified,
+                "new_crystals": crystal_report.new_crystals,
+                "new_super_crystals": crystal_report.new_super_crystals,
+            }))))
+        }
+        Err(e) => {
+            drop(u);
+            drop(h);
+            tracing::error!("phase consensus rejected: {}", e);
+            Ok(Json(ApiResponse::ok(serde_json::json!({
+                "status": "rejected",
+                "reason": e,
+            }))))
+        }
+    }
 }

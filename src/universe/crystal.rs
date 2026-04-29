@@ -1,6 +1,7 @@
 use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::node::DarkUniverse;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 const CRYSTAL_THRESHOLD: f64 = 1.8;
@@ -166,6 +167,38 @@ impl CrystalEngine {
         &self.channels
     }
 
+    pub fn detect_phase_transition(
+        &self,
+        hebbian: &HebbianMemory,
+        universe: &DarkUniverse,
+    ) -> PhaseTransitionReport {
+        let strong = hebbian.strongest_edges(1000);
+        let mut super_count = 0usize;
+        let mut total_weight = 0.0f64;
+
+        for ((a, b), weight) in &strong {
+            if universe.get_node(a).is_none() || universe.get_node(b).is_none() {
+                continue;
+            }
+            if *weight >= self.super_threshold {
+                super_count += 1;
+            }
+            total_weight += weight;
+        }
+
+        let avg_weight = if strong.is_empty() { 0.0 } else { total_weight / strong.len() as f64 };
+        let phase_coherent = super_count >= 3 && avg_weight >= self.threshold;
+        let existing_super = self.super_count();
+
+        PhaseTransitionReport {
+            super_channel_candidates: super_count,
+            existing_super_channels: existing_super,
+            avg_edge_weight: avg_weight,
+            phase_coherent,
+            requires_consensus: phase_coherent && super_count > existing_super,
+        }
+    }
+
     pub fn decay_unused(&mut self, active_nodes: &HashSet<Coord7D>) -> usize {
         let before = self.channels.len();
         self.channels.retain(|(a, b), _| {
@@ -206,6 +239,15 @@ impl CrystalEngine {
         }
         vec![]
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseTransitionReport {
+    pub super_channel_candidates: usize,
+    pub existing_super_channels: usize,
+    pub avg_edge_weight: f64,
+    pub phase_coherent: bool,
+    pub requires_consensus: bool,
 }
 
 #[cfg(test)]

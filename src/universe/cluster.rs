@@ -71,9 +71,12 @@ pub struct ProposeResponse {
     pub success: bool,
     pub log_index: u64,
     pub data: serde_json::Value,
+    pub conservation_verified: bool,
 }
 
 type RaftNode = Raft<TypeName, StateMachineStore>;
+
+pub type ConservationValidator = Box<dyn Fn() -> bool + Send + Sync>;
 
 pub struct ClusterManager {
     node_id: u64,
@@ -82,6 +85,7 @@ pub struct ClusterManager {
     state_machine: StateMachineStore,
     addr: String,
     peers: BTreeMap<u64, String>,
+    conservation_validator: Option<ConservationValidator>,
 }
 
 impl ClusterManager {
@@ -93,7 +97,12 @@ impl ClusterManager {
             state_machine: new_state_machine(),
             addr,
             peers: BTreeMap::new(),
+            conservation_validator: None,
         }
+    }
+
+    pub fn set_conservation_validator(&mut self, v: ConservationValidator) {
+        self.conservation_validator = Some(v);
     }
 
     pub async fn init_single_node(&mut self) -> Result<(), String> {
@@ -194,6 +203,13 @@ impl ClusterManager {
             .as_ref()
             .ok_or("raft not initialized".to_string())?;
 
+        if let Some(ref validator) = self.conservation_validator {
+            if !validator() {
+                tracing::warn!("conservation check failed before propose, rejecting");
+                return Err("conservation violation detected, propose rejected".to_string());
+            }
+        }
+
         let raft_req = Request {
             action: req.action,
             data: req.data,
@@ -204,10 +220,13 @@ impl ClusterManager {
             .await
             .map_err(|e| format!("client_write error: {}", e))?;
 
+        let conservation_ok = self.conservation_validator.as_ref().map(|v| v()).unwrap_or(true);
+
         Ok(ProposeResponse {
             success: true,
             log_index: result.log_id.index,
             data: serde_json::json!({"committed": true}),
+            conservation_verified: conservation_ok,
         })
     }
 
@@ -389,6 +408,7 @@ mod tests {
             .unwrap();
         assert!(resp.success);
         assert!(resp.log_index > 0);
+        assert!(resp.conservation_verified);
 
         let status = cm.status().await;
         assert!(status.log_index > 0);

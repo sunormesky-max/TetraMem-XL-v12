@@ -42,6 +42,10 @@ pub struct UniverseConfig {
     pub total_energy: f64,
     #[serde(default = "default_manifestation_threshold")]
     pub manifestation_threshold: f64,
+    #[serde(default = "default_energy_drift_tolerance")]
+    pub energy_drift_tolerance: f64,
+    #[serde(default = "default_max_timeline_days")]
+    pub max_timeline_days: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +103,8 @@ fn default_universe() -> UniverseConfig {
     UniverseConfig {
         total_energy: default_total_energy(),
         manifestation_threshold: default_manifestation_threshold(),
+        energy_drift_tolerance: default_energy_drift_tolerance(),
+        max_timeline_days: default_max_timeline_days(),
     }
 }
 
@@ -140,6 +146,8 @@ fn default_timeout_secs() -> u64 { 30 }
 fn default_body_limit() -> usize { 10 * 1024 * 1024 }
 fn default_total_energy() -> f64 { 10_000_000.0 }
 fn default_manifestation_threshold() -> f64 { 0.5 }
+fn default_energy_drift_tolerance() -> f64 { 1e-8 }
+fn default_max_timeline_days() -> usize { 365 }
 fn default_jwt_secret() -> String { "change-me-in-production".to_string() }
 fn default_jwt_expiry_secs() -> u64 { 86400 }
 fn default_log_level() -> String { "info".to_string() }

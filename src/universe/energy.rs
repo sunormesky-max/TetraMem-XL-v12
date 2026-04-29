@@ -377,6 +377,15 @@ impl EnergyPool {
         (self.allocated + self.available() - self.total).abs() < 1e-10
     }
 
+    pub fn verify_conservation_with_tolerance(&self, tolerance: f64) -> bool {
+        let diff = (self.allocated + self.available() - self.total).abs();
+        diff < tolerance
+    }
+
+    pub fn energy_drift(&self) -> f64 {
+        (self.allocated + self.available() - self.total).abs()
+    }
+
     pub fn expand(&mut self, additional: f64) -> Result<f64, EnergyError> {
         if additional <= 0.0 {
             return Err(EnergyError::NegativeAmount);

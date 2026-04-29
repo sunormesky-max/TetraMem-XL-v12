@@ -289,6 +289,25 @@ impl DarkUniverse {
         diff / scale < 1e-12 || diff < 1e-10
     }
 
+    pub fn verify_conservation_with_tolerance(&self, tolerance: f64) -> bool {
+        if !self.pool.verify_conservation_with_tolerance(tolerance) {
+            return false;
+        }
+        let mut node_total = 0.0;
+        for node in self.nodes.values() {
+            if !node.energy.verify_integrity() {
+                return false;
+            }
+            node_total += node.energy.total();
+        }
+        let diff = (node_total - self.pool.allocated()).abs();
+        diff < tolerance
+    }
+
+    pub fn energy_drift(&self) -> f64 {
+        self.pool.energy_drift()
+    }
+
     pub fn stats(&self) -> UniverseStats {
         let mut active = 0usize;
         let mut manifested = 0usize;
