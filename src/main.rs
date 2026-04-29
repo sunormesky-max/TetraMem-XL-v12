@@ -121,6 +121,12 @@ fn main() {
                         }
                         ok
                     }));
+                    let state_ref2 = state.clone();
+                    cm.set_energy_reporter(Box::new(move || {
+                        let u = state_ref2.universe.blocking_lock();
+                        let stats = u.stats();
+                        (stats.available_energy, stats.active_nodes, u.verify_conservation())
+                    }));
                 }
 
                 {

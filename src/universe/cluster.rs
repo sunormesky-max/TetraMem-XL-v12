@@ -85,6 +85,100 @@ impl H6PhaseTransitionProposal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnergyQuorumEntry {
+    pub node_id: u64,
+    pub available_energy: f64,
+    pub conservation_ok: bool,
+    pub node_count: usize,
+    pub energy_sufficient: bool,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct H6EnergyQuorum {
+    pub quorum_id: u64,
+    pub proposer: u64,
+    pub required_energy_budget: f64,
+    pub entries: Vec<EnergyQuorumEntry>,
+    pub total_nodes: usize,
+    pub quorum_threshold: usize,
+    pub phase: QuorumPhase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum QuorumPhase {
+    Collecting,
+    QuorumReached,
+    QuorumFailed,
+    Executed,
+}
+
+impl H6EnergyQuorum {
+    pub fn new(quorum_id: u64, proposer: u64, total_nodes: usize, required_budget: f64) -> Self {
+        let threshold = (total_nodes / 2) + 1;
+        Self {
+            quorum_id,
+            proposer,
+            required_energy_budget: required_budget,
+            entries: Vec::new(),
+            total_nodes,
+            quorum_threshold: threshold,
+            phase: QuorumPhase::Collecting,
+        }
+    }
+
+    pub fn add_confirmation(&mut self, entry: EnergyQuorumEntry) {
+        if self.phase != QuorumPhase::Collecting {
+            return;
+        }
+        if self.entries.iter().any(|e| e.node_id == entry.node_id) {
+            return;
+        }
+        self.entries.push(entry);
+        if self.entries.len() >= self.quorum_threshold {
+            if self.quorum_satisfied() {
+                self.phase = QuorumPhase::QuorumReached;
+            } else if self.entries.len() == self.total_nodes {
+                self.phase = QuorumPhase::QuorumFailed;
+            }
+        }
+    }
+
+    pub fn quorum_satisfied(&self) -> bool {
+        let sufficient_count = self.entries.iter().filter(|e| e.energy_sufficient).count();
+        let all_conserved = self.entries.iter().all(|e| e.conservation_ok);
+        sufficient_count >= self.quorum_threshold && all_conserved
+    }
+
+    pub fn total_available_energy(&self) -> f64 {
+        self.entries.iter().map(|e| e.available_energy).sum()
+    }
+
+    pub fn confirming_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_reached(&self) -> bool {
+        self.phase == QuorumPhase::QuorumReached
+    }
+
+    pub fn mark_executed(&mut self) {
+        self.phase = QuorumPhase::Executed;
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QuorumStatus {
+    pub quorum_id: u64,
+    pub phase: QuorumPhase,
+    pub confirming_count: usize,
+    pub total_nodes: usize,
+    pub quorum_threshold: usize,
+    pub total_available_energy: f64,
+    pub all_conserved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeResponse {
     pub success: bool,
     pub log_index: u64,
@@ -95,6 +189,7 @@ pub struct ProposeResponse {
 type RaftNode = Raft<TypeName, StateMachineStore>;
 
 pub type ConservationValidator = Box<dyn Fn() -> bool + Send + Sync>;
+pub type EnergyReporter = Box<dyn Fn() -> (f64, usize, bool) + Send + Sync>;
 
 pub struct ClusterManager {
     node_id: u64,
@@ -104,6 +199,9 @@ pub struct ClusterManager {
     addr: String,
     peers: BTreeMap<u64, String>,
     conservation_validator: Option<ConservationValidator>,
+    energy_reporter: Option<EnergyReporter>,
+    active_quorum: Option<H6EnergyQuorum>,
+    quorum_counter: u64,
 }
 
 impl ClusterManager {
@@ -116,11 +214,18 @@ impl ClusterManager {
             addr,
             peers: BTreeMap::new(),
             conservation_validator: None,
+            energy_reporter: None,
+            active_quorum: None,
+            quorum_counter: 0,
         }
     }
 
     pub fn set_conservation_validator(&mut self, v: ConservationValidator) {
         self.conservation_validator = Some(v);
+    }
+
+    pub fn set_energy_reporter(&mut self, r: EnergyReporter) {
+        self.energy_reporter = Some(r);
     }
 
     pub async fn init_single_node(&mut self) -> Result<(), String> {
@@ -302,6 +407,118 @@ impl ClusterManager {
     pub fn is_initialized(&self) -> bool {
         self.raft.is_some()
     }
+
+    pub fn start_energy_quorum(&mut self, required_budget: f64) -> QuorumStatus {
+        self.quorum_counter += 1;
+        let total_nodes = self.peers.len().max(1);
+        let mut quorum = H6EnergyQuorum::new(
+            self.quorum_counter,
+            self.node_id,
+            total_nodes,
+            required_budget,
+        );
+
+        if let Some(ref reporter) = self.energy_reporter {
+            let (available, node_count, conserved) = reporter();
+            let entry = EnergyQuorumEntry {
+                node_id: self.node_id,
+                available_energy: available,
+                conservation_ok: conserved,
+                node_count,
+                energy_sufficient: available >= required_budget,
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            quorum.add_confirmation(entry);
+        }
+
+        let status = quorum_status(&quorum);
+        self.active_quorum = Some(quorum);
+        status
+    }
+
+    pub fn confirm_energy_quorum(&mut self, entry: EnergyQuorumEntry) -> QuorumStatus {
+        if let Some(ref mut quorum) = self.active_quorum {
+            quorum.add_confirmation(entry);
+            quorum_status(quorum)
+        } else {
+            QuorumStatus {
+                quorum_id: 0,
+                phase: QuorumPhase::QuorumFailed,
+                confirming_count: 0,
+                total_nodes: 0,
+                quorum_threshold: 0,
+                total_available_energy: 0.0,
+                all_conserved: false,
+            }
+        }
+    }
+
+    pub fn get_quorum_status(&self) -> Option<QuorumStatus> {
+        self.active_quorum.as_ref().map(quorum_status)
+    }
+
+    pub fn execute_quorum_transition(
+        &mut self,
+        _proposal: H6PhaseTransitionProposal,
+    ) -> Result<ProposeResponse, String> {
+        let mut quorum = self.active_quorum.take().ok_or("no active quorum")?;
+
+        if !quorum.is_reached() {
+            self.active_quorum = Some(quorum);
+            return Err("quorum not reached, cannot execute phase transition".to_string());
+        }
+
+        quorum.mark_executed();
+        self.active_quorum = None;
+        Err("use quorum_propose() with the proposal directly after quorum check".to_string())
+    }
+
+    pub async fn quorum_propose(
+        &mut self,
+        proposal: H6PhaseTransitionProposal,
+    ) -> Result<ProposeResponse, String> {
+        match self.active_quorum {
+            Some(ref q) if q.is_reached() => {
+                tracing::info!(
+                    quorum_id = q.quorum_id,
+                    confirmations = q.confirming_count(),
+                    total_energy = q.total_available_energy(),
+                    "H6 energy quorum reached, executing phase transition"
+                );
+                let resp = self.propose(proposal.to_propose_request()).await?;
+                if let Some(ref mut q) = self.active_quorum {
+                    q.mark_executed();
+                }
+                self.active_quorum = None;
+                Ok(resp)
+            }
+            Some(ref q) => {
+                Err(format!(
+                    "quorum not reached: {}/{} confirmations",
+                    q.confirming_count(),
+                    q.quorum_threshold
+                ))
+            }
+            None => {
+                Err("no active quorum, call start_energy_quorum first".to_string())
+            }
+        }
+    }
+}
+
+fn quorum_status(q: &H6EnergyQuorum) -> QuorumStatus {
+    QuorumStatus {
+        quorum_id: q.quorum_id,
+        phase: q.phase.clone(),
+        confirming_count: q.confirming_count(),
+        total_nodes: q.total_nodes,
+        quorum_threshold: q.quorum_threshold,
+        total_available_energy: q.total_available_energy(),
+        all_conserved: q.entries.iter().all(|e| e.conservation_ok),
+    }
 }
 
 struct DummyNetwork;
@@ -452,5 +669,170 @@ mod tests {
         let parsed: ClusterStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.node_id, 1);
         assert_eq!(parsed.nodes.len(), 1);
+    }
+
+    #[test]
+    fn energy_quorum_single_node_auto_reaches() {
+        let mut q = H6EnergyQuorum::new(1, 0, 1, 100.0);
+        assert_eq!(q.quorum_threshold, 1);
+        assert_eq!(q.phase, QuorumPhase::Collecting);
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 500.0,
+            conservation_ok: true,
+            node_count: 10,
+            energy_sufficient: true,
+            timestamp_ms: 1000,
+        });
+
+        assert_eq!(q.phase, QuorumPhase::QuorumReached);
+        assert!(q.quorum_satisfied());
+        assert!(q.is_reached());
+    }
+
+    #[test]
+    fn energy_quorum_three_nodes_need_two() {
+        let mut q = H6EnergyQuorum::new(1, 0, 3, 100.0);
+        assert_eq!(q.quorum_threshold, 2);
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 500.0,
+            conservation_ok: true,
+            node_count: 10,
+            energy_sufficient: true,
+            timestamp_ms: 1000,
+        });
+        assert_eq!(q.phase, QuorumPhase::Collecting);
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 1,
+            available_energy: 300.0,
+            conservation_ok: true,
+            node_count: 8,
+            energy_sufficient: true,
+            timestamp_ms: 1001,
+        });
+        assert_eq!(q.phase, QuorumPhase::QuorumReached);
+        assert!(q.quorum_satisfied());
+        assert!((q.total_available_energy() - 800.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn energy_quorum_fails_if_not_conserved() {
+        let mut q = H6EnergyQuorum::new(1, 0, 3, 100.0);
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 500.0,
+            conservation_ok: true,
+            node_count: 10,
+            energy_sufficient: true,
+            timestamp_ms: 1000,
+        });
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 1,
+            available_energy: 300.0,
+            conservation_ok: false,
+            node_count: 8,
+            energy_sufficient: true,
+            timestamp_ms: 1001,
+        });
+
+        assert!(!q.quorum_satisfied());
+    }
+
+    #[test]
+    fn energy_quorum_duplicate_ignored() {
+        let mut q = H6EnergyQuorum::new(1, 0, 3, 100.0);
+
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 500.0,
+            conservation_ok: true,
+            node_count: 10,
+            energy_sufficient: true,
+            timestamp_ms: 1000,
+        });
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 999.0,
+            conservation_ok: true,
+            node_count: 20,
+            energy_sufficient: true,
+            timestamp_ms: 1001,
+        });
+
+        assert_eq!(q.confirming_count(), 1);
+        assert!((q.total_available_energy() - 500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn energy_quorum_mark_executed() {
+        let mut q = H6EnergyQuorum::new(1, 0, 1, 100.0);
+        q.add_confirmation(EnergyQuorumEntry {
+            node_id: 0,
+            available_energy: 500.0,
+            conservation_ok: true,
+            node_count: 10,
+            energy_sufficient: true,
+            timestamp_ms: 1000,
+        });
+        assert_eq!(q.phase, QuorumPhase::QuorumReached);
+        q.mark_executed();
+        assert_eq!(q.phase, QuorumPhase::Executed);
+    }
+
+    #[tokio::test]
+    async fn cluster_quorum_start_with_reporter() {
+        let mut cm = ClusterManager::new(1, "127.0.0.1:3460".to_string());
+        cm.init_single_node().await.unwrap();
+        cm.set_energy_reporter(Box::new(|| (1000.0, 50, true)));
+
+        let status = cm.start_energy_quorum(100.0);
+        assert_eq!(status.quorum_id, 1);
+        assert_eq!(status.confirming_count, 1);
+        assert!(status.all_conserved);
+        assert_eq!(status.phase, QuorumPhase::QuorumReached);
+    }
+
+    #[tokio::test]
+    async fn cluster_quorum_propose_after_reach() {
+        let mut cm = ClusterManager::new(1, "127.0.0.1:3461".to_string());
+        cm.init_single_node().await.unwrap();
+        cm.set_energy_reporter(Box::new(|| (1000.0, 50, true)));
+
+        cm.start_energy_quorum(100.0);
+
+        let proposal = H6PhaseTransitionProposal {
+            proposer_node: 1,
+            super_candidates: 5,
+            avg_edge_weight: 3.0,
+            energy_budget: 1000.0,
+            energy_sufficient: true,
+        };
+
+        let resp = cm.quorum_propose(proposal).await.unwrap();
+        assert!(resp.success);
+        assert!(resp.log_index > 0);
+    }
+
+    #[tokio::test]
+    async fn cluster_quorum_reject_without_start() {
+        let mut cm = ClusterManager::new(1, "127.0.0.1:3462".to_string());
+        cm.init_single_node().await.unwrap();
+
+        let proposal = H6PhaseTransitionProposal {
+            proposer_node: 1,
+            super_candidates: 5,
+            avg_edge_weight: 3.0,
+            energy_budget: 1000.0,
+            energy_sufficient: true,
+        };
+
+        let result = cm.quorum_propose(proposal).await;
+        assert!(result.is_err());
     }
 }
