@@ -67,6 +67,24 @@ pub struct ProposeRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct H6PhaseTransitionProposal {
+    pub proposer_node: u64,
+    pub super_candidates: usize,
+    pub avg_edge_weight: f64,
+    pub energy_budget: f64,
+    pub energy_sufficient: bool,
+}
+
+impl H6PhaseTransitionProposal {
+    pub fn to_propose_request(&self) -> ProposeRequest {
+        ProposeRequest {
+            action: "phase_transition".to_string(),
+            data: serde_json::to_value(self).unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeResponse {
     pub success: bool,
     pub log_index: u64,

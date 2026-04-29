@@ -20,8 +20,8 @@ use crate::universe::auth::{JwtConfig, LoginRequest, LoginResponse};
 use crate::universe::autoscale::AutoScaler;
 use crate::universe::backup::{BackupScheduler, BackupTrigger};
 use crate::universe::cluster::{
-    AddNodeRequest as ClusterAddNodeRequest, ClusterManager, ClusterStatus, ProposeRequest,
-    ProposeResponse as ClusterProposeResponse, RemoveNodeRequest as ClusterRemoveNodeRequest,
+    AddNodeRequest as ClusterAddNodeRequest, ClusterManager, ClusterStatus, H6PhaseTransitionProposal,
+    ProposeRequest, ProposeResponse as ClusterProposeResponse, RemoveNodeRequest as ClusterRemoveNodeRequest,
 };
 use crate::universe::config::AppConfig;
 use crate::universe::coord::Coord7D;
@@ -961,13 +961,15 @@ async fn phase_consensus(
         }))));
     }
 
-    let propose_result = cm.propose(ProposeRequest {
-        action: "phase_transition".to_string(),
-        data: serde_json::json!({
-            "super_candidates": report.super_channel_candidates,
-            "avg_weight": report.avg_edge_weight,
-        }),
-    }).await;
+    let proposal = H6PhaseTransitionProposal {
+        proposer_node: cm.node_id(),
+        super_candidates: report.super_channel_candidates,
+        avg_edge_weight: report.avg_edge_weight,
+        energy_budget: u.stats().available_energy,
+        energy_sufficient: u.stats().available_energy > 100.0,
+    };
+
+    let propose_result = cm.propose(proposal.to_propose_request()).await;
 
     drop(cm);
 

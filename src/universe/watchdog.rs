@@ -546,7 +546,7 @@ mod tests {
         }
 
         for _ in 0..10 {
-            let report = wd.checkup(&mut u, &mut h, &mut c, &mems);
+            let _report = wd.checkup(&mut u, &mut h, &mut c, &mems);
             assert!(u.verify_conservation());
         }
         assert_eq!(wd.total_checkups(), 10);

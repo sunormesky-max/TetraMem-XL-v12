@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UniverseSnapshot {
     pub total_energy: f64,
+    pub conservation_checksum: u64,
     pub nodes: Vec<NodeSnapshot>,
     pub hebbian_edges: Vec<EdgeSnapshot>,
     pub memories: Vec<MemorySnapshot>,
@@ -147,8 +148,20 @@ impl PersistEngine {
             }
         }).collect();
 
+        let mut node_energy_sum = 0.0f64;
+        for ns in &nodes {
+            for &d in &ns.dims {
+                node_energy_sum += d;
+            }
+        }
+        let conservation_checksum = (stats.total_energy * 1e10) as u64
+            ^ (node_energy_sum * 1e10) as u64
+            ^ (nodes.len() as u64).wrapping_mul(31)
+            ^ (mem_snapshots.len() as u64).wrapping_mul(37);
+
         let snapshot = UniverseSnapshot {
             total_energy: stats.total_energy,
+            conservation_checksum,
             nodes,
             hebbian_edges: edges,
             memories: mem_snapshots,
@@ -167,6 +180,24 @@ impl PersistEngine {
     }
 
     pub fn deserialize(snapshot: &UniverseSnapshot) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), PersistError> {
+        let mut node_energy_sum = 0.0f64;
+        for ns in &snapshot.nodes {
+            for &d in &ns.dims {
+                node_energy_sum += d;
+            }
+        }
+        let checksum = (snapshot.total_energy * 1e10) as u64
+            ^ (node_energy_sum * 1e10) as u64
+            ^ (snapshot.nodes.len() as u64).wrapping_mul(31)
+            ^ (snapshot.memories.len() as u64).wrapping_mul(37);
+
+        if snapshot.conservation_checksum != 0 && checksum != snapshot.conservation_checksum {
+            tracing::warn!(
+                "snapshot checksum mismatch: stored={} computed={}",
+                snapshot.conservation_checksum, checksum
+            );
+        }
+
         let mut universe = DarkUniverse::new(snapshot.total_energy);
 
         for ns in &snapshot.nodes {

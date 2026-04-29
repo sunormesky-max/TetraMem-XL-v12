@@ -15,6 +15,7 @@ pub mod memory;
 pub mod metrics;
 pub mod node;
 pub mod observer;
+pub mod perception;
 pub mod persist;
 pub mod persist_file;
 pub mod persist_sqlite;
@@ -46,6 +47,7 @@ pub use observer::{
     HealthLevel, HealthReport, RegulatorAction, RegulatorActionType, RegulatorParams,
     SelfRegulator, UniverseObserver,
 };
+pub use perception::{PerceptionBudget, PerceptionReport};
 pub use persist::PersistEngine;
 pub use pulse::{PulseEngine, PulseResult, PulseType};
 pub use raft_node::{

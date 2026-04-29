@@ -66,6 +66,10 @@ pub struct LoggingConfig {
     pub json_format: bool,
     #[serde(default)]
     pub file_path: Option<String>,
+    #[serde(default = "default_tracing_enabled")]
+    pub tracing_enabled: bool,
+    #[serde(default = "default_conservation_check_interval_secs")]
+    pub conservation_check_interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +125,8 @@ fn default_logging() -> LoggingConfig {
         level: default_log_level(),
         json_format: false,
         file_path: None,
+        tracing_enabled: default_tracing_enabled(),
+        conservation_check_interval_secs: default_conservation_check_interval_secs(),
     }
 }
 
@@ -151,6 +157,8 @@ fn default_max_timeline_days() -> usize { 365 }
 fn default_jwt_secret() -> String { "change-me-in-production".to_string() }
 fn default_jwt_expiry_secs() -> u64 { 86400 }
 fn default_log_level() -> String { "info".to_string() }
+fn default_tracing_enabled() -> bool { true }
+fn default_conservation_check_interval_secs() -> u64 { 60 }
 fn default_backup_dir() -> String { "./backups".to_string() }
 fn default_backup_interval_secs() -> u64 { 300 }
 fn default_max_generations() -> usize { 10 }

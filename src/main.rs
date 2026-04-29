@@ -123,6 +123,40 @@ fn main() {
                     }));
                 }
 
+                {
+                    let state_bg = state.clone();
+                    let conservation_interval = config.logging.conservation_check_interval_secs.max(10);
+                    let tracing_on = config.logging.tracing_enabled;
+                    tokio::spawn(async move {
+                        let mut interval = tokio::time::interval(
+                            std::time::Duration::from_secs(conservation_interval)
+                        );
+                        interval.tick().await;
+                        loop {
+                            interval.tick().await;
+                            if !tracing_on { continue; }
+                            let u = state_bg.universe.lock().await;
+                            let ok = u.verify_conservation();
+                            let drift = u.energy_drift();
+                            let stats = u.stats();
+                            drop(u);
+                            if ok {
+                                tracing::info!(
+                                    nodes = stats.active_nodes,
+                                    drift = drift,
+                                    "periodic conservation check: OK"
+                                );
+                            } else {
+                                tracing::error!(
+                                    nodes = stats.active_nodes,
+                                    drift = drift,
+                                    "PERIODIC CONSERVATION CHECK: VIOLATION DETECTED"
+                                );
+                            }
+                        }
+                    });
+                }
+
                 if auto_persist && persist_interval > 0 {
                     let handle = tokio::spawn(async move {
                         let mut interval = tokio::time::interval(
