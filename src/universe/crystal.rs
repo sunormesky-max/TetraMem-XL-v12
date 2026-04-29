@@ -158,7 +158,7 @@ impl CrystalEngine {
                 result.push((*a, channel.strength, channel.is_super));
             }
         }
-        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
 

@@ -120,9 +120,9 @@ pub fn update_universe_metrics(
     NODES_TOTAL.set(nodes as i64);
     NODES_MANIFESTED.set(manifested as i64);
     NODES_DARK.set(dark as i64);
-    ENERGY_TOTAL.set(total_energy as i64);
-    ENERGY_ALLOCATED.set(allocated as i64);
-    ENERGY_AVAILABLE.set(available as i64);
+    ENERGY_TOTAL.set((total_energy + 0.5) as i64);
+    ENERGY_ALLOCATED.set((allocated + 0.5) as i64);
+    ENERGY_AVAILABLE.set((available + 0.5) as i64);
     MEMORIES_TOTAL.set(memories as i64);
     HEBBIAN_EDGES.set(hebbian_edges as i64);
 }

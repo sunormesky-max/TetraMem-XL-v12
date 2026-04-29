@@ -37,6 +37,8 @@ pub struct MemorySnapshot {
     pub vertices_even: [bool; 4],
     pub data_dim: usize,
     pub physical_base: f64,
+    #[serde(default)]
+    pub created_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -98,23 +100,23 @@ impl PersistEngine {
     ) -> Result<(UniverseSnapshot, PersistReport), PersistError> {
         let stats = universe.stats();
 
-        let nodes: Vec<NodeSnapshot> = universe.coords().iter().map(|c| {
-            let node = universe.get_node(&c).unwrap();
-            NodeSnapshot {
+        let nodes: Vec<NodeSnapshot> = universe.coords().iter().filter_map(|c| {
+            let node = universe.get_node(&c)?;
+            Some(NodeSnapshot {
                 coord: c.basis(),
                 is_even: c.is_even(),
                 dims: *node.energy().dims(),
-            }
+            })
         }).collect();
 
-        let edges: Vec<EdgeSnapshot> = hebbian.strongest_edges(usize::MAX).iter().map(|((a, b), edge)| {
+        let edges: Vec<EdgeSnapshot> = hebbian.edges_with_traversal().iter().map(|((a, b), weight, count)| {
             EdgeSnapshot {
                 a: a.basis(),
                 a_even: a.is_even(),
                 b: b.basis(),
                 b_even: b.is_even(),
-                weight: *edge,
-                traversal_count: 0,
+                weight: *weight,
+                traversal_count: *count,
             }
         }).collect();
 
@@ -130,6 +132,7 @@ impl PersistEngine {
                 vertices_even: even,
                 data_dim: m.data_dim(),
                 physical_base: m.physical_base_f64(),
+                created_at: m.created_at(),
             }
         }).collect();
 
@@ -157,7 +160,7 @@ impl PersistEngine {
             edges_serialized: snapshot.hebbian_edges.len(),
             memories_serialized: snapshot.memories.len(),
             crystals_serialized: snapshot.crystal_channels.len(),
-            bytes_written: 0,
+            bytes_written: serde_json::to_string(&snapshot).map(|s| s.len()).unwrap_or(0),
         };
 
         Ok((snapshot, report))
@@ -172,7 +175,8 @@ impl PersistEngine {
             } else {
                 Coord7D::new_odd(ns.coord)
             };
-            let field = crate::universe::energy::EnergyField::from_dims(ns.dims);
+            let field = crate::universe::energy::EnergyField::from_dims(ns.dims)
+                .map_err(|e| PersistError::Deserialization(format!("invalid energy dims: {}", e)))?;
             if universe.materialize_field(coord, field).is_err() {
                 return Err(PersistError::Deserialization(
                     format!("failed to materialize node at {:?}", ns.coord)
@@ -195,7 +199,10 @@ impl PersistEngine {
             }
         }
 
-        let memories: Vec<MemoryAtom> = snapshot.memories.iter().map(|ms| {
+        let memories: Vec<MemoryAtom> = snapshot.memories.iter().filter_map(|ms| {
+            if ms.data_dim == 0 || ms.data_dim > 28 || ms.physical_base <= 0.0 {
+                return None;
+            }
             let mut verts = [Coord7D::new_even([0; 7]); 4];
             for (i, _) in ms.vertices.iter().enumerate() {
                 verts[i] = if ms.vertices_even[i] {
@@ -204,7 +211,7 @@ impl PersistEngine {
                     Coord7D::new_odd(ms.vertices[i])
                 };
             }
-            MemoryAtom::from_parts(verts, ms.data_dim, ms.physical_base)
+            Some(MemoryAtom::from_parts_with_time(verts, ms.data_dim, ms.physical_base, ms.created_at))
         }).collect();
 
         let mut crystal = CrystalEngine::new();

@@ -72,6 +72,10 @@ pub struct BackupFileConfig {
     pub interval_secs: u64,
     #[serde(default = "default_max_generations")]
     pub max_generations: usize,
+    #[serde(default = "default_auto_persist")]
+    pub auto_persist: bool,
+    #[serde(default = "default_persist_path")]
+    pub persist_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +123,8 @@ fn default_backup() -> BackupFileConfig {
         dir: default_backup_dir(),
         interval_secs: default_backup_interval_secs(),
         max_generations: default_max_generations(),
+        auto_persist: default_auto_persist(),
+        persist_path: default_persist_path(),
     }
 }
 
@@ -140,6 +146,8 @@ fn default_log_level() -> String { "info".to_string() }
 fn default_backup_dir() -> String { "./backups".to_string() }
 fn default_backup_interval_secs() -> u64 { 300 }
 fn default_max_generations() -> usize { 10 }
+fn default_auto_persist() -> bool { true }
+fn default_persist_path() -> String { "./data/tetramem_state.json".to_string() }
 fn default_rpm() -> u64 { 1000 }
 fn default_burst() -> u64 { 50 }
 
@@ -167,7 +175,21 @@ impl AppConfig {
         let config: Self = toml::from_str(&content)
             .map_err(|e| ConfigError::Parse(e.to_string()))?;
         tracing::info!("loaded config from {}", path.display());
+        config.validate()?;
         Ok(config)
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.universe.total_energy <= 0.0 {
+            return Err(ConfigError::Parse("universe.total_energy must be > 0".to_string()));
+        }
+        if self.server.body_limit_bytes == 0 {
+            return Err(ConfigError::Parse("server.body_limit_bytes must be > 0".to_string()));
+        }
+        if self.auth.enabled && self.auth.jwt_secret == "change-me-in-production" {
+            tracing::warn!("auth enabled with default JWT secret — tokens are insecure");
+        }
+        Ok(())
     }
 
     pub fn save_default(path: &Path) -> Result<(), ConfigError> {

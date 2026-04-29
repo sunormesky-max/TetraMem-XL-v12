@@ -11,6 +11,9 @@ pub enum EnergyError {
     InvalidDimension { dim: usize },
     InvalidRatio { ratio: f64 },
     AlreadyOccupied,
+    OverRelease { attempted: f64, allocated: f64 },
+    ExpansionCap { requested: f64, cap: f64 },
+    NegativeDimension { dim: usize, value: f64 },
 }
 
 impl fmt::Display for EnergyError {
@@ -27,6 +30,15 @@ impl fmt::Display for EnergyError {
                 write!(f, "ratio {} out of range [0.0, 1.0]", ratio)
             }
             EnergyError::AlreadyOccupied => write!(f, "position already occupied"),
+            EnergyError::OverRelease { attempted, allocated } => {
+                write!(f, "over-release: attempted {:.4}, allocated {:.4}", attempted, allocated)
+            }
+            EnergyError::ExpansionCap { requested, cap } => {
+                write!(f, "expansion cap exceeded: requested {:.0}, cap {:.0}", requested, cap)
+            }
+            EnergyError::NegativeDimension { dim, value } => {
+                write!(f, "dimension {} would be negative ({:.4})", dim, value)
+            }
         }
     }
 }
@@ -44,17 +56,17 @@ impl EnergyField {
     }
 
     pub fn uniform(total: f64) -> Self {
-        assert!(total >= 0.0);
+        if total < 0.0 {
+            return Self::zero();
+        }
         let per_dim = total / DIM as f64;
         Self { dims: [per_dim; DIM] }
     }
 
     pub fn with_physical_bias(total: f64, physical_ratio: f64) -> Self {
-        assert!(total >= 0.0);
-        assert!(
-            (0.0..=1.0).contains(&physical_ratio),
-            "physical_ratio must be in [0, 1]"
-        );
+        if total < 0.0 || !(0.0..=1.0).contains(&physical_ratio) {
+            return Self::zero();
+        }
         let phys_total = total * physical_ratio;
         let dark_total = total * (1.0 - physical_ratio);
         let per_phys = if PHYSICAL_DIM > 0 {
@@ -80,9 +92,17 @@ impl EnergyField {
         }
     }
 
-    pub fn from_dims(dims: [f64; DIM]) -> Self {
-        assert!(dims.iter().all(|&d| d >= 0.0), "all dimensions must be non-negative");
-        Self { dims }
+    pub fn from_dims(dims: [f64; DIM]) -> Result<Self, EnergyError> {
+        for (i, &d) in dims.iter().enumerate() {
+            if d.is_nan() {
+                return Err(EnergyError::NegativeDimension { dim: i, value: d });
+            }
+            if d < -1e-10 {
+                return Err(EnergyError::NegativeDimension { dim: i, value: d });
+            }
+        }
+        let clamped = dims.map(|d| d.max(0.0));
+        Ok(Self { dims: clamped })
     }
 
     pub fn total(&self) -> f64 {
@@ -114,8 +134,31 @@ impl EnergyField {
         &self.dims
     }
 
-    pub fn dims_mut(&mut self) -> &mut [f64; DIM] {
-        &mut self.dims
+    pub fn redistribute_dim(&mut self, from_dim: usize, fraction: f64) -> Result<f64, EnergyError> {
+        if from_dim >= DIM {
+            return Err(EnergyError::InvalidDimension { dim: from_dim });
+        }
+        if fraction < 0.0 || fraction > 1.0 {
+            return Err(EnergyError::InvalidRatio { ratio: fraction });
+        }
+        let drain = self.dims[from_dim] * fraction;
+        if drain <= 0.0 {
+            return Ok(0.0);
+        }
+        let other_count = (DIM - 1) as f64;
+        let per_other = drain / other_count;
+        self.dims[from_dim] -= drain;
+        for d in 0..DIM {
+            if d != from_dim {
+                self.dims[d] += per_other;
+            }
+        }
+        let correction = drain - per_other * other_count;
+        if correction.abs() > 0.0 {
+            let target = if from_dim == 0 { 1 } else { 0 };
+            self.dims[target] += correction;
+        }
+        Ok(drain)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -142,14 +185,15 @@ impl EnergyField {
                 available: self.dims[from_dim],
             });
         }
-        self.dims[from_dim] -= amount;
-        self.dims[to_dim] += amount;
+        let actual_amount = amount.min(self.dims[from_dim]);
+        self.dims[from_dim] -= actual_amount;
+        self.dims[to_dim] += actual_amount;
         Ok(())
     }
 
     pub fn flow_physical_to_dark(&mut self, amount: f64) -> Result<(), EnergyError> {
         let per_phys = amount / PHYSICAL_DIM as f64;
-        let per_dark = amount / DARK_DIM as f64;
+        let _per_dark = amount / DARK_DIM as f64;
         for i in 0..PHYSICAL_DIM {
             if self.dims[i] < per_phys - 1e-15 {
                 return Err(EnergyError::InsufficientEnergy {
@@ -158,18 +202,21 @@ impl EnergyField {
                 });
             }
         }
+        let actual_per_phys = per_phys.min(self.dims[0].min(self.dims[1]).min(self.dims[2]));
+        let actual_amount = actual_per_phys * PHYSICAL_DIM as f64;
+        let actual_per_dark = actual_amount / DARK_DIM as f64;
         for i in 0..PHYSICAL_DIM {
-            self.dims[i] -= per_phys;
+            self.dims[i] -= actual_per_phys;
         }
         for i in PHYSICAL_DIM..DIM {
-            self.dims[i] += per_dark;
+            self.dims[i] += actual_per_dark;
         }
         Ok(())
     }
 
     pub fn flow_dark_to_physical(&mut self, amount: f64) -> Result<(), EnergyError> {
         let per_dark = amount / DARK_DIM as f64;
-        let per_phys = amount / PHYSICAL_DIM as f64;
+        let _per_phys = amount / PHYSICAL_DIM as f64;
         for i in PHYSICAL_DIM..DIM {
             if self.dims[i] < per_dark - 1e-15 {
                 return Err(EnergyError::InsufficientEnergy {
@@ -178,11 +225,15 @@ impl EnergyField {
                 });
             }
         }
+        let min_dark = self.dims[3].min(self.dims[4]).min(self.dims[5]).min(self.dims[6]);
+        let actual_per_dark = per_dark.min(min_dark);
+        let actual_amount = actual_per_dark * DARK_DIM as f64;
+        let actual_per_phys = actual_amount / PHYSICAL_DIM as f64;
         for i in PHYSICAL_DIM..DIM {
-            self.dims[i] -= per_dark;
+            self.dims[i] -= actual_per_dark;
         }
         for i in 0..PHYSICAL_DIM {
-            self.dims[i] += per_phys;
+            self.dims[i] += actual_per_phys;
         }
         Ok(())
     }
@@ -197,10 +248,18 @@ impl EnergyField {
         if ratio < 0.0 || ratio > 1.0 {
             return Err(EnergyError::InvalidRatio { ratio });
         }
+        let original_total: f64 = self.dims.iter().sum();
         let mut taken = [0.0f64; DIM];
         for i in 0..DIM {
-            taken[i] = self.dims[i] * ratio;
-            self.dims[i] -= taken[i];
+            let exact = self.dims[i] * ratio;
+            taken[i] = exact;
+            self.dims[i] -= exact;
+        }
+        let taken_total: f64 = taken.iter().sum();
+        let self_total: f64 = self.dims.iter().sum();
+        let correction = original_total - taken_total - self_total;
+        if correction.abs() > 0.0 {
+            taken[0] += correction;
         }
         Ok(EnergyField { dims: taken })
     }
@@ -252,12 +311,14 @@ pub struct EnergyPool {
 }
 
 impl EnergyPool {
-    pub fn new(total_budget: f64) -> Self {
-        assert!(total_budget > 0.0, "total energy must be positive");
-        Self {
+    pub fn new(total_budget: f64) -> Result<Self, EnergyError> {
+        if total_budget <= 0.0 {
+            return Err(EnergyError::NegativeAmount);
+        }
+        Ok(Self {
             total: total_budget,
             allocated: 0.0,
-        }
+        })
     }
 
     pub fn total(&self) -> f64 {
@@ -293,21 +354,63 @@ impl EnergyPool {
         Ok(amount)
     }
 
-    pub fn release(&mut self, amount: f64) {
-        self.allocated = (self.allocated - amount).max(0.0);
+    pub fn release(&mut self, amount: f64) -> Result<f64, EnergyError> {
+        if amount < 0.0 {
+            return Err(EnergyError::NegativeAmount);
+        }
+        if amount > self.allocated + 1e-10 {
+            return Err(EnergyError::OverRelease {
+                attempted: amount,
+                allocated: self.allocated,
+            });
+        }
+        let actual = amount.min(self.allocated);
+        self.allocated -= actual;
+        Ok(actual)
     }
 
-    pub fn release_field(&mut self, field: &EnergyField) {
-        self.release(field.total());
+    pub fn release_field(&mut self, field: &EnergyField) -> Result<f64, EnergyError> {
+        self.release(field.total())
     }
 
     pub fn verify_conservation(&self) -> bool {
         (self.allocated + self.available() - self.total).abs() < 1e-10
     }
 
-    pub fn expand(&mut self, additional: f64) {
-        assert!(additional > 0.0, "expansion amount must be positive");
+    pub fn expand(&mut self, additional: f64) -> Result<f64, EnergyError> {
+        if additional <= 0.0 {
+            return Err(EnergyError::NegativeAmount);
+        }
         self.total += additional;
+        Ok(additional)
+    }
+
+    pub fn expand_with_cap(&mut self, additional: f64, max_total: f64) -> Result<f64, EnergyError> {
+        if additional <= 0.0 {
+            return Err(EnergyError::NegativeAmount);
+        }
+        if self.total + additional > max_total {
+            return Err(EnergyError::ExpansionCap {
+                requested: self.total + additional,
+                cap: max_total,
+            });
+        }
+        self.total += additional;
+        Ok(additional)
+    }
+
+    pub fn shrink(&mut self, amount: f64) -> Result<f64, EnergyError> {
+        if amount <= 0.0 {
+            return Err(EnergyError::NegativeAmount);
+        }
+        if amount > self.available() {
+            return Err(EnergyError::InsufficientEnergy {
+                requested: amount,
+                available: self.available(),
+            });
+        }
+        self.total -= amount;
+        Ok(amount)
     }
 }
 
@@ -363,7 +466,7 @@ mod tests {
 
     #[test]
     fn from_dims() {
-        let f = EnergyField::from_dims([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+        let f = EnergyField::from_dims([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]).unwrap();
         assert!((f.total() - 28.0).abs() < 1e-10);
         assert!((f.physical() - 6.0).abs() < 1e-10);
         assert!((f.dark() - 22.0).abs() < 1e-10);
@@ -371,8 +474,13 @@ mod tests {
     }
 
     #[test]
+    fn from_dims_rejects_negative() {
+        assert!(EnergyField::from_dims([-1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]).is_err());
+    }
+
+    #[test]
     fn flow_between_dimensions() {
-        let mut f = EnergyField::from_dims([10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let mut f = EnergyField::from_dims([10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
         f.flow(0, 3, 3.0).unwrap();
         assert!((f.dim(0) - 7.0).abs() < 1e-10);
         assert!((f.dim(3) - 3.0).abs() < 1e-10);
@@ -397,7 +505,7 @@ mod tests {
 
     #[test]
     fn flow_insufficient_fails() {
-        let mut f = EnergyField::from_dims([2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let mut f = EnergyField::from_dims([2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
         assert!(f.flow(0, 3, 5.0).is_err());
         assert!((f.dim(0) - 2.0).abs() < 1e-10);
         assert!((f.total() - 2.0).abs() < 1e-10);
@@ -453,8 +561,8 @@ mod tests {
 
     #[test]
     fn absorb_adds_per_dimension() {
-        let mut a = EnergyField::from_dims([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0]);
-        let b = EnergyField::from_dims([4.0, 5.0, 6.0, 7.0, 0.0, 0.0, 0.0]);
+        let mut a = EnergyField::from_dims([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
+        let b = EnergyField::from_dims([4.0, 5.0, 6.0, 7.0, 0.0, 0.0, 0.0]).unwrap();
         a.absorb(&b);
         assert!((a.dim(0) - 5.0).abs() < 1e-10);
         assert!((a.dim(3) - 7.0).abs() < 1e-10);
@@ -473,7 +581,7 @@ mod tests {
 
     #[test]
     fn pool_conservation_through_operations() {
-        let mut pool = EnergyPool::new(1000.0);
+        let mut pool = EnergyPool::new(1000.0).unwrap();
 
         let a1 = pool.allocate(300.0).unwrap();
         let f1 = EnergyField::with_physical_bias(a1, 0.7);
@@ -484,25 +592,25 @@ mod tests {
         assert!((pool.allocated() - 500.0).abs() < 1e-10);
         assert!(pool.verify_conservation());
 
-        pool.release_field(&f1);
+        pool.release_field(&f1).unwrap();
         assert!((pool.allocated() - 200.0).abs() < 1e-10);
         assert!(pool.verify_conservation());
 
-        pool.release_field(&f2);
+        pool.release_field(&f2).unwrap();
         assert!((pool.available() - 1000.0).abs() < 1e-10);
         assert!(pool.verify_conservation());
     }
 
     #[test]
     fn pool_over_allocate_fails() {
-        let mut pool = EnergyPool::new(100.0);
+        let mut pool = EnergyPool::new(100.0).unwrap();
         assert!(pool.allocate(200.0).is_err());
         assert!(pool.verify_conservation());
     }
 
     #[test]
     fn full_cycle_conservation() {
-        let mut pool = EnergyPool::new(500.0);
+        let mut pool = EnergyPool::new(500.0).unwrap();
         let mut fields = Vec::new();
 
         for i in 0..5 {
@@ -517,7 +625,7 @@ mod tests {
         assert!((pool.allocated() - 250.0).abs() < 1e-10);
 
         for f in &fields {
-            pool.release_field(f);
+            pool.release_field(f).unwrap();
         }
         assert!(pool.verify_conservation());
         assert!((pool.available() - 500.0).abs() < 1e-10);

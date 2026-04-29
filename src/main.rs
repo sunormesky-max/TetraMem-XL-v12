@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tetramem_v12::universe::auth::JwtConfig;
 use tetramem_v12::universe::autoscale::AutoScaler;
+use tetramem_v12::universe::backup::BackupScheduler;
 use tetramem_v12::universe::config::AppConfig;
 use tetramem_v12::universe::coord::Coord7D;
 use tetramem_v12::universe::crystal::CrystalEngine;
@@ -12,6 +13,7 @@ use tetramem_v12::universe::memory::MemoryCodec;
 use tetramem_v12::universe::metrics;
 use tetramem_v12::universe::node::DarkUniverse;
 use tetramem_v12::universe::persist::PersistEngine;
+use tetramem_v12::universe::persist_file::PersistFile;
 use tetramem_v12::universe::pulse::{PulseEngine, PulseType};
 use tetramem_v12::universe::reasoning::ReasoningEngine;
 use tetramem_v12::universe::regulation::RegulationEngine;
@@ -59,19 +61,95 @@ fn main() {
             metrics::init_metrics();
 
             let effective_addr = addr.unwrap_or_else(|| config.server.addr.clone());
+            let persist_path = PathBuf::from(&config.backup.persist_path);
+
+            let (universe, hebbian, memories, crystal) = if PersistFile::exists(&persist_path) {
+                tracing::info!("found persisted state at {}, loading...", persist_path.display());
+                match PersistFile::load(&persist_path) {
+                    Ok((u, h, m, c)) => {
+                        let stats = u.stats();
+                        tracing::info!(
+                            "restored state: {} nodes, {} memories, {} edges, E={:.0}",
+                            stats.active_nodes, m.len(), h.edge_count(), stats.total_energy
+                        );
+                        (u, h, m, c)
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to load persisted state: {}, starting fresh", e);
+                        (DarkUniverse::new(config.universe.total_energy), HebbianMemory::new(), Vec::new(), tetramem_v12::universe::crystal::CrystalEngine::new())
+                    }
+                }
+            } else {
+                tracing::info!("no persisted state found, starting fresh");
+                (DarkUniverse::new(config.universe.total_energy), HebbianMemory::new(), Vec::new(), tetramem_v12::universe::crystal::CrystalEngine::new())
+            };
 
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
-                universe: tokio::sync::Mutex::new(DarkUniverse::new(config.universe.total_energy)),
-                hebbian: tokio::sync::Mutex::new(HebbianMemory::new()),
-                memories: tokio::sync::Mutex::new(Vec::new()),
+                universe: tokio::sync::Mutex::new(universe),
+                hebbian: tokio::sync::Mutex::new(hebbian),
+                memories: tokio::sync::Mutex::new(memories),
+                crystal: tokio::sync::Mutex::new(crystal),
+                backup: tokio::sync::Mutex::new(BackupScheduler::with_defaults()),
+                cluster: tokio::sync::Mutex::new(tetramem_v12::universe::cluster::ClusterManager::new(1, config.server.addr.clone())),
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
             });
 
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let auto_persist = config.backup.auto_persist;
+            let persist_interval = config.backup.interval_secs;
+            let state_clone = state.clone();
+            let persist_path_clone = persist_path.clone();
+
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             rt.block_on(async {
-                if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
-                    tracing::error!("server error: {}", e);
+                if auto_persist && persist_interval > 0 {
+                    let handle = tokio::spawn(async move {
+                        let mut interval = tokio::time::interval(
+                            std::time::Duration::from_secs(persist_interval)
+                        );
+                        interval.tick().await;
+                        loop {
+                            interval.tick().await;
+                            let json = {
+                                let u = state_clone.universe.lock().await;
+                                let h = state_clone.hebbian.lock().await;
+                                let m = state_clone.memories.lock().await;
+                                let c = state_clone.crystal.lock().await;
+                                tetramem_v12::universe::persist::PersistEngine::to_json(&u, &h, &m, &c)
+                            };
+                            match json {
+                                Ok(json_str) => {
+                                    if let Some(parent) = persist_path_clone.parent() {
+                                        let _ = std::fs::create_dir_all(parent);
+                                    }
+                                    let tmp = persist_path_clone.with_extension("json.tmp");
+                                    match std::fs::write(&tmp, &json_str) {
+                                        Ok(_) => {
+                                            if std::fs::rename(&tmp, &persist_path_clone).is_ok() {
+                                                tracing::debug!("auto-persist saved {} bytes", json_str.len());
+                                            }
+                                        }
+                                        Err(e) => tracing::warn!("auto-persist write failed: {}", e),
+                                    }
+                                }
+                                Err(e) => tracing::warn!("auto-persist serialize failed: {}", e),
+                            }
+                        }
+                    });
+                    tracing::info!(
+                        "auto-persist enabled, saving every {}s to {}",
+                        persist_interval,
+                        persist_path.display()
+                    );
+
+                    if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
+                        tracing::error!("server error: {}", e);
+                    }
+                    handle.abort();
+                } else {
+                    if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
+                        tracing::error!("server error: {}", e);
+                    }
                 }
             });
         }

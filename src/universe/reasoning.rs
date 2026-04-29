@@ -61,7 +61,7 @@ impl ReasoningEngine {
             }
         }
 
-        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
         results
     }
 
@@ -128,7 +128,7 @@ impl ReasoningEngine {
             }
         }
 
-        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
         results
     }
 

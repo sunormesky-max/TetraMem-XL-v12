@@ -111,12 +111,12 @@ impl UniverseObserver {
         let even_odd_ratio = if stats.odd_nodes > 0 {
             stats.even_nodes as f64 / stats.odd_nodes as f64
         } else {
-            f64::INFINITY
+            -1.0
         };
         let physical_dark_ratio = if stats.dark_energy > 0.0 {
             stats.physical_energy / stats.dark_energy
         } else if stats.physical_energy > 0.0 {
-            f64::INFINITY
+            -1.0
         } else {
             1.0
         };
@@ -244,7 +244,7 @@ impl SelfRegulator {
         _report: &HealthReport,
     ) -> RegulatorAction {
         let additional = universe.total_energy() * self.params.expansion_factor;
-        universe.expand_energy_pool(additional);
+        let _ = universe.expand_energy_pool(additional);
 
         let mut new_nodes = 0usize;
         let center = Self::find_center(universe);
@@ -297,9 +297,9 @@ impl SelfRegulator {
             [acc[0] + p[0] as i64, acc[1] + p[1] as i64, acc[2] + p[2] as i64]
         });
         [
-            (sum[0] / n) as i32,
-            (sum[1] / n) as i32,
-            (sum[2] / n) as i32,
+            ((sum[0] as f64) / (n as f64)).round() as i32,
+            ((sum[1] as f64) / (n as f64)).round() as i32,
+            ((sum[2] as f64) / (n as f64)).round() as i32,
         ]
     }
 }

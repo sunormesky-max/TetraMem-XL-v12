@@ -18,6 +18,11 @@ use tower_http::trace::TraceLayer;
 
 use crate::universe::auth::{JwtConfig, LoginRequest, LoginResponse};
 use crate::universe::autoscale::AutoScaler;
+use crate::universe::backup::{BackupScheduler, BackupTrigger};
+use crate::universe::cluster::{
+    AddNodeRequest as ClusterAddNodeRequest, ClusterManager, ClusterStatus, ProposeRequest,
+    ProposeResponse as ClusterProposeResponse, RemoveNodeRequest as ClusterRemoveNodeRequest,
+};
 use crate::universe::config::AppConfig;
 use crate::universe::coord::Coord7D;
 use crate::universe::dream::DreamEngine;
@@ -33,6 +38,9 @@ pub struct AppState {
     pub universe: Mutex<DarkUniverse>,
     pub hebbian: Mutex<HebbianMemory>,
     pub memories: Mutex<Vec<MemoryAtom>>,
+    pub crystal: Mutex<crate::universe::crystal::CrystalEngine>,
+    pub backup: Mutex<BackupScheduler>,
+    pub cluster: tokio::sync::Mutex<ClusterManager>,
     pub config: AppConfig,
     pub jwt: JwtConfig,
 }
@@ -94,6 +102,7 @@ pub struct EncodeResponse {
     pub anchor: String,
     pub data_dim: usize,
     pub manifested: bool,
+    pub created_at: u64,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +114,29 @@ pub struct DecodeRequest {
 #[derive(Serialize)]
 pub struct DecodeResponse {
     pub data: Vec<f64>,
+}
+
+#[derive(Serialize)]
+pub struct BackupInfo {
+    pub id: u64,
+    pub timestamp_ms: u64,
+    pub trigger: String,
+    pub node_count: usize,
+    pub memory_count: usize,
+    pub total_energy: f64,
+    pub conservation_ok: bool,
+    pub bytes: usize,
+    pub generation: u32,
+}
+
+#[derive(Serialize)]
+pub struct CreateBackupResponse {
+    pub backup_id: u64,
+    pub generation: u32,
+    pub node_count: usize,
+    pub memory_count: usize,
+    pub bytes: usize,
+    pub elapsed_ms: f64,
 }
 
 #[derive(Deserialize)]
@@ -241,7 +273,20 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/scale/frontier/:max_new", post(frontier_expand))
         .route("/hebbian/neighbors/:x/:y/:z", get(get_hebbian_neighbors))
         .route("/regulate", post(regulate))
-        .layer(middleware::from_fn(metrics_middleware));
+        .route("/backup/create", post(create_backup))
+        .route("/backup/list", get(list_backups))
+        .route("/cluster/status", get(cluster_status))
+        .route("/cluster/init", post(cluster_init))
+        .route("/cluster/propose", post(cluster_propose))
+        .route("/cluster/add-node", post(cluster_add_node))
+        .route("/cluster/remove-node", post(cluster_remove_node))
+        .route("/memory/timeline", get(memory_timeline))
+        .route("/memory/trace", post(memory_trace))
+        .layer(middleware::from_fn(metrics_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     Router::new()
         .merge(public_routes)
@@ -280,10 +325,10 @@ async fn login(
     ))
 }
 
-async fn get_metrics(State(_state): State<SharedState>) -> String {
-    let u = _state.universe.lock().await;
-    let h = _state.hebbian.lock().await;
-    let mems = _state.memories.lock().await;
+async fn get_metrics(State(state): State<SharedState>) -> String {
+    let u = state.universe.lock().await;
+    let h = state.hebbian.lock().await;
+    let mems = state.memories.lock().await;
     let stats = u.stats();
     metrics::update_universe_metrics(
         stats.active_nodes,
@@ -362,7 +407,7 @@ async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<Health
     let report = UniverseObserver::inspect(&u, &h, &mems);
 
     let level = report.health_level().as_str().to_string();
-    if level != "Healthy" {
+    if level == "WARNING" || level == "CRITICAL" {
         tracing::warn!(health = %level, nodes = report.node_count, "universe health degraded");
     }
 
@@ -395,6 +440,7 @@ async fn encode_memory(
         Ok(atom) => {
             let manifested = atom.is_manifested(&u);
             let anchor_str = format!("{}", atom.anchor());
+            let created_at = atom.created_at();
             tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
             mems.push(atom);
             Ok((
@@ -403,6 +449,7 @@ async fn encode_memory(
                     anchor: anchor_str,
                     data_dim: req.data.len(),
                     manifested,
+                    created_at,
                 })),
             ))
         }
@@ -448,7 +495,7 @@ async fn decode_memory(
     }
 
     Ok((
-        StatusCode::NOT_FOUND,
+        StatusCode::OK,
         Json(ApiResponse::err("memory not found")),
     ))
 }
@@ -590,12 +637,25 @@ async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<Stri
 }
 
 pub async fn start_server(state: SharedState, addr: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let app = create_router(state);
+    let app = create_router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("API server listening on http://{}", addr);
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    if state.config.backup.auto_persist {
+        let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);
+        let u = state.universe.lock().await;
+        let h = state.hebbian.lock().await;
+        let m = state.memories.lock().await;
+        let crystal = crate::universe::crystal::CrystalEngine::new();
+        match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &m, &crystal) {
+            Ok(info) => tracing::info!("final persist on shutdown: {}", info),
+            Err(e) => tracing::warn!("final persist failed: {}", e),
+        }
+    }
+
     tracing::info!("server shutdown complete");
     Ok(())
 }
@@ -604,13 +664,16 @@ async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
-            .expect("failed to install Ctrl+C handler");
+            .unwrap_or_else(|e| tracing::error!("ctrl_c handler error: {}", e));
     };
 
     #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
+            .unwrap_or_else(|e| {
+                tracing::error!("signal handler error: {}", e);
+                std::future::pending::<()>().await
+            })
             .recv()
             .await;
     };
@@ -626,4 +689,207 @@ async fn shutdown_signal() {
             tracing::info!("received SIGTERM, shutting down gracefully...");
         },
     }
+}
+
+async fn create_backup(
+    State(state): State<SharedState>,
+) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
+    let u = state.universe.lock().await;
+    let h = state.hebbian.lock().await;
+    let m = state.memories.lock().await;
+    let mut bs = state.backup.lock().await;
+
+    let crystal = crate::universe::crystal::CrystalEngine::new();
+    let report = bs.create_backup(BackupTrigger::Manual, &u, &h, &m, &crystal)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    drop(u);
+    drop(h);
+    drop(m);
+    drop(bs);
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::ok(CreateBackupResponse {
+            backup_id: report.metadata.id,
+            generation: report.metadata.generation,
+            node_count: report.metadata.node_count,
+            memory_count: report.metadata.memory_count,
+            bytes: report.metadata.bytes,
+            elapsed_ms: report.elapsed_ms,
+        })),
+    ))
+}
+
+async fn list_backups(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<Vec<BackupInfo>>>, AppError> {
+    let bs = state.backup.lock().await;
+    let list: Vec<BackupInfo> = bs.list_backups().into_iter().map(|m| {
+        let trigger = match m.trigger {
+            BackupTrigger::Manual => "MANUAL",
+            BackupTrigger::Timer => "TIMER",
+            BackupTrigger::PreOperation => "PRE-OP",
+            BackupTrigger::ConservationCheckpoint => "CONSERV",
+        };
+        BackupInfo {
+            id: m.id,
+            timestamp_ms: m.timestamp_ms,
+            trigger: trigger.to_string(),
+            node_count: m.node_count,
+            memory_count: m.memory_count,
+            total_energy: m.total_energy,
+            conservation_ok: m.conservation_ok,
+            bytes: m.bytes,
+            generation: m.generation,
+        }
+    }).collect();
+    Ok(Json(ApiResponse::ok(list)))
+}
+
+async fn cluster_status(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<ClusterStatus>>, AppError> {
+    let cm = state.cluster.lock().await;
+    let status = cm.status().await;
+    Ok(Json(ApiResponse::ok(status)))
+}
+
+#[derive(Deserialize)]
+struct ClusterInitRequest {
+    node_id: Option<u64>,
+    addr: Option<String>,
+}
+
+async fn cluster_init(
+    State(state): State<SharedState>,
+    Json(req): Json<ClusterInitRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<ClusterStatus>>), AppError> {
+    let mut cm = state.cluster.lock().await;
+    if let Some(node_id) = req.node_id {
+        let addr = req.addr.unwrap_or_else(|| state.config.server.addr.clone());
+        *cm = ClusterManager::new(node_id, addr);
+    }
+    cm.init_single_node().await.map_err(|e| AppError::Internal(e))?;
+    let status = cm.status().await;
+    Ok((StatusCode::OK, Json(ApiResponse::ok(status))))
+}
+
+async fn cluster_propose(
+    State(state): State<SharedState>,
+    Json(req): Json<ProposeRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<ClusterProposeResponse>>), AppError> {
+    let cm = state.cluster.lock().await;
+    let resp = cm.propose(req).await.map_err(|e| AppError::Internal(e))?;
+    Ok((StatusCode::OK, Json(ApiResponse::ok(resp))))
+}
+
+async fn cluster_add_node(
+    State(state): State<SharedState>,
+    Json(req): Json<ClusterAddNodeRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let mut cm = state.cluster.lock().await;
+    cm.add_peer(req.node_id, req.addr).await.map_err(|e| AppError::Internal(e))?;
+    Ok((StatusCode::OK, Json(ApiResponse::ok("node added".to_string()))))
+}
+
+async fn cluster_remove_node(
+    State(state): State<SharedState>,
+    Json(req): Json<ClusterRemoveNodeRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let mut cm = state.cluster.lock().await;
+    cm.remove_peer(req.node_id).await.map_err(|e| AppError::Internal(e))?;
+    Ok((StatusCode::OK, Json(ApiResponse::ok("node removed".to_string()))))
+}
+
+#[derive(Serialize)]
+pub struct TimelineDay {
+    pub date: String,
+    pub count: usize,
+    pub anchors: Vec<String>,
+}
+
+async fn memory_timeline(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<Vec<TimelineDay>>> {
+    let mems = state.memories.lock().await;
+    let mut day_map: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for m in mems.iter() {
+        let ts = if m.created_at() > 0 { m.created_at() } else { 0 };
+        let date = if ts > 0 {
+            chrono::DateTime::from_timestamp_millis(ts as i64)
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            "unknown".to_string()
+        };
+        day_map.entry(date).or_default().push(format!("{}", m.anchor()));
+    }
+    let timeline: Vec<TimelineDay> = day_map.into_iter().map(|(date, anchors)| TimelineDay {
+        count: anchors.len(),
+        date,
+        anchors,
+    }).collect();
+    Json(ApiResponse::ok(timeline))
+}
+
+#[derive(Serialize)]
+pub struct TraceHop {
+    pub anchor: String,
+    pub created_at: u64,
+    pub data_dim: usize,
+    pub confidence: f64,
+    pub hop: usize,
+}
+
+#[derive(Deserialize)]
+pub struct TraceRequest {
+    pub anchor: [i32; 3],
+    pub max_hops: Option<usize>,
+}
+
+async fn memory_trace(
+    State(state): State<SharedState>,
+    Json(req): Json<TraceRequest>,
+) -> Result<Json<ApiResponse<Vec<TraceHop>>>, AppError> {
+    let u = state.universe.lock().await;
+    let h = state.hebbian.lock().await;
+    let mems = state.memories.lock().await;
+    let c = state.crystal.lock().await;
+
+    let source = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let max_hops = req.max_hops.unwrap_or(10);
+
+    let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
+        &u, &h, &c, &source, max_hops,
+    );
+
+    let mut hops: Vec<TraceHop> = Vec::new();
+
+    let source_mem = mems.iter().find(|m| m.anchor() == &source);
+    if let Some(m) = source_mem {
+        hops.push(TraceHop {
+            anchor: format!("{}", m.anchor()),
+            created_at: m.created_at(),
+            data_dim: m.data_dim(),
+            confidence: 1.0,
+            hop: 0,
+        });
+    }
+
+    for r in &associations {
+        for target_str in &r.targets {
+            if let Some(m) = mems.iter().find(|m| format!("{}", m.anchor()) == *target_str) {
+                hops.push(TraceHop {
+                    anchor: target_str.clone(),
+                    created_at: m.created_at(),
+                    data_dim: m.data_dim(),
+                    confidence: r.confidence,
+                    hop: r.hops,
+                });
+            }
+        }
+    }
+
+    Ok(Json(ApiResponse::ok(hops)))
 }

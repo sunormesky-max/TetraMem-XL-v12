@@ -186,16 +186,30 @@ impl Watchdog {
         }
 
         if level >= WatchdogLevel::Emergency {
-            actions.push(WatchdogAction {
-                action: "emergency_energy_injection".to_string(),
-                detail: format!(
-                    "utilization {:.1}% — injecting {:.0} energy",
-                    stats.utilization * 100.0,
-                    stats.total_energy * 0.5
-                ),
-                level: WatchdogLevel::Emergency,
-            });
-            universe.expand_energy_pool(stats.total_energy * 0.5);
+            let injection = stats.total_energy * 0.5;
+            let cap = self.initial_energy * self.thresholds.energy_expansion_cap_ratio;
+            if stats.total_energy + injection <= cap {
+                actions.push(WatchdogAction {
+                    action: "emergency_energy_injection".to_string(),
+                    detail: format!(
+                        "utilization {:.1}% — injecting {:.0} energy (cap {:.0})",
+                        stats.utilization * 100.0,
+                        injection,
+                        cap
+                    ),
+                    level: WatchdogLevel::Emergency,
+                });
+                let _ = universe.expand_energy_pool(injection);
+            } else {
+                actions.push(WatchdogAction {
+                    action: "emergency_injection_skipped".to_string(),
+                    detail: format!(
+                        "injection {:.0} would exceed cap {:.0} (current {:.0})",
+                        injection, cap, stats.total_energy
+                    ),
+                    level: WatchdogLevel::Emergency,
+                });
+            }
         }
 
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -337,13 +351,13 @@ impl Watchdog {
     fn handle_warning(
         &self,
         universe: &mut DarkUniverse,
-        _hebbian: &mut HebbianMemory,
+        hebbian: &mut HebbianMemory,
         _crystal: &mut CrystalEngine,
         memories: &[MemoryAtom],
         stats: &crate::universe::node::UniverseStats,
         actions: &mut Vec<WatchdogAction>,
     ) {
-        let scale_report = self.scaler.auto_scale(universe, _hebbian, memories);
+        let scale_report = self.scaler.auto_scale(universe, hebbian, memories);
         if scale_report.energy_expanded_by > 0.0 || scale_report.nodes_added > 0 {
             actions.push(WatchdogAction {
                 action: "auto_scale".to_string(),

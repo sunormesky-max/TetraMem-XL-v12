@@ -232,7 +232,7 @@ impl PulseEngine {
             candidates.push((n, self.bcc_decay * bias));
         }
 
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates
     }
 }

@@ -216,17 +216,9 @@ impl RegulationEngine {
 
         for coord in &coords {
             if let Some(node) = universe.get_node_mut(coord) {
-                let dims = node.energy_mut().dims_mut();
-                let drain_amount = dims[dim] * fraction;
-                if drain_amount > 0.0 {
-                    dims[dim] -= drain_amount;
-                    total_drained += drain_amount;
-                    let redistribute_per = drain_amount / 6.0;
-                    for (d, val) in dims.iter_mut().enumerate() {
-                        if d != dim {
-                            *val += redistribute_per;
-                        }
-                    }
+                match node.energy_mut().redistribute_dim(dim, fraction) {
+                    Ok(drained) => total_drained += drained,
+                    Err(_) => continue,
                 }
             }
         }

@@ -71,8 +71,9 @@ pub struct DarkUniverse {
 
 impl DarkUniverse {
     pub fn new(total_energy: f64) -> Self {
+        let pool = EnergyPool::new(total_energy).unwrap_or_else(|_| EnergyPool::new(1.0).unwrap());
         Self {
-            pool: EnergyPool::new(total_energy),
+            pool,
             nodes: HashMap::new(),
             protected: HashSet::new(),
         }
@@ -118,8 +119,16 @@ impl DarkUniverse {
         self.pool.utilization()
     }
 
-    pub fn expand_energy_pool(&mut self, additional: f64) {
-        self.pool.expand(additional);
+    pub fn expand_energy_pool(&mut self, additional: f64) -> bool {
+        self.pool.expand(additional).is_ok()
+    }
+
+    pub fn expand_energy_pool_with_cap(&mut self, additional: f64, max_total: f64) -> bool {
+        self.pool.expand_with_cap(additional, max_total).is_ok()
+    }
+
+    pub fn shrink_energy_pool(&mut self, amount: f64) -> bool {
+        self.pool.shrink(amount).is_ok()
     }
 
     pub fn materialize_uniform(&mut self, coord: Coord7D, energy_amount: f64) -> Result<(), EnergyError> {
@@ -166,7 +175,7 @@ impl DarkUniverse {
         }
         if let Some(node) = self.nodes.remove(coord) {
             let field = node.energy;
-            self.pool.release_field(&field);
+            let _ = self.pool.release_field(&field);
             self.protected.remove(coord);
             return Some(field);
         }
@@ -203,7 +212,7 @@ impl DarkUniverse {
 
         if should_remove {
             if let Some(empty) = self.nodes.remove(from) {
-                self.pool.release_field(&empty.energy);
+                let _ = self.pool.release_field(&empty.energy);
             }
         }
 

@@ -9,14 +9,16 @@ const PHYSICAL_DIM: usize = 3;
 const MAX_DATA_DIM: usize = 28;
 const PHYSICAL_ENCODING_BASE: f64 = 50.0;
 const DATA_OFFSET: f64 = 50.0;
+const MIN_DIM_VALUE: f64 = 0.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MemoryError {
     DataTooLarge,
     EmptyData,
     NoAvailablePosition,
     InsufficientEnergy,
     NodeNotFound,
+    InvalidDataRange { index: usize, value: f64 },
 }
 
 impl fmt::Display for MemoryError {
@@ -27,6 +29,9 @@ impl fmt::Display for MemoryError {
             MemoryError::NoAvailablePosition => write!(f, "no available tetrahedron position"),
             MemoryError::InsufficientEnergy => write!(f, "insufficient universe energy"),
             MemoryError::NodeNotFound => write!(f, "memory node not found"),
+            MemoryError::InvalidDataRange { index, value } => {
+                write!(f, "data[{}] = {:.1} would make dimension negative (min base = {:.1})", index, value, DATA_OFFSET)
+            }
         }
     }
 }
@@ -38,6 +43,7 @@ pub struct MemoryAtom {
     vertices: [Coord7D; 4],
     data_dim: usize,
     physical_base: f64,
+    created_at: u64,
 }
 
 impl MemoryAtom {
@@ -53,8 +59,20 @@ impl MemoryAtom {
         self.physical_base
     }
 
+    pub fn created_at(&self) -> u64 {
+        self.created_at
+    }
+
     pub fn from_parts(vertices: [Coord7D; 4], data_dim: usize, physical_base: f64) -> Self {
-        Self { vertices, data_dim, physical_base }
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        Self { vertices, data_dim, physical_base, created_at }
+    }
+
+    pub fn from_parts_with_time(vertices: [Coord7D; 4], data_dim: usize, physical_base: f64, created_at: u64) -> Self {
+        Self { vertices, data_dim, physical_base, created_at }
     }
 
     pub fn to_tetrahedron(&self) -> Tetrahedron {
@@ -120,39 +138,59 @@ impl MemoryCodec {
 
         let physical_base = PHYSICAL_ENCODING_BASE;
 
-        let data_energy: f64 = data.iter().map(|v| (v + DATA_OFFSET).max(0.0)).sum();
-        let base_energy = (physical_base + DATA_OFFSET) * PHYSICAL_DIM as f64 * 4.0
-            + DATA_OFFSET * (DIM - PHYSICAL_DIM) as f64 * 4.0;
-        let total_needed = data_energy + base_energy;
-
-        if universe.available_energy() < total_needed {
-            return Err(MemoryError::InsufficientEnergy);
+        for (idx, &v) in data.iter().enumerate() {
+            let _node_idx = idx / DIM;
+            let dim_idx = idx % DIM;
+            let base = if dim_idx < PHYSICAL_DIM {
+                physical_base + DATA_OFFSET
+            } else {
+                DATA_OFFSET
+            };
+            if base + v < MIN_DIM_VALUE {
+                return Err(MemoryError::InvalidDataRange { index: idx, value: v });
+            }
         }
 
-        for (node_idx, &coord) in positions.iter().enumerate() {
+        let mut total_needed = 0.0f64;
+        let mut node_fields: Vec<[f64; DIM]> = Vec::with_capacity(4);
+        for (node_idx, _coord) in positions.iter().enumerate() {
             let mut dims = [DATA_OFFSET; DIM];
-
             for d in 0..PHYSICAL_DIM {
                 dims[d] = physical_base + DATA_OFFSET;
             }
-
             for d in 0..DIM {
                 let data_idx = node_idx * DIM + d;
                 if data_idx < data.len() {
                     dims[d] += data[data_idx];
                 }
             }
+            let node_total: f64 = dims.iter().sum();
+            total_needed += node_total;
+            node_fields.push(dims);
+        }
 
-            let field = EnergyField::from_dims(dims);
+        if universe.available_energy() < total_needed {
+            return Err(MemoryError::InsufficientEnergy);
+        }
+
+        for (i, &coord) in positions.iter().enumerate() {
+            let field = EnergyField::from_dims(node_fields[i])
+                .map_err(|_| MemoryError::InvalidDataRange { index: 0, value: 0.0 })?;
             universe
                 .materialize_field(coord, field)
                 .map_err(|_| MemoryError::InsufficientEnergy)?;
         }
 
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
         let atom = MemoryAtom {
             vertices: positions,
             data_dim: data.len(),
             physical_base,
+            created_at,
         };
 
         universe.protect(&atom.vertices);

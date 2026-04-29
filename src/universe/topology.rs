@@ -54,6 +54,7 @@ pub struct TopologyReport {
     pub betti: BettiVector,
     pub connected_components: usize,
     pub cycles_detected: usize,
+    #[doc = "Counts BCC neighbor pairs (tetrahedron edge candidates), not actual 4-vertex tetrahedra"]
     pub tetrahedra_count: usize,
     pub bridging_nodes: usize,
     pub isolated_nodes: usize,
@@ -92,7 +93,9 @@ impl TopologyEngine {
 
         let (bridging, isolated) = Self::find_bridging_and_isolated(&nodes, &node_set, &coordination);
 
-        let cycles = Self::find_cycles(&nodes, &node_set, &coordination);
+        let components = Self::find_connected_components(&nodes, &node_set);
+        let num_components = components.len();
+        let cycles = Self::find_cycles(&nodes, &node_set, &coordination, num_components);
 
         let tetra_count = Self::count_tetrahedra(&nodes, &node_set);
 
@@ -197,6 +200,7 @@ impl TopologyEngine {
         nodes: &[Coord7D],
         _node_set: &HashSet<Coord7D>,
         coordination: &HashMap<Coord7D, usize>,
+        num_components: usize,
     ) -> usize {
         let mut cycle_edges = 0usize;
         let mut total_edges = 0usize;
@@ -209,7 +213,7 @@ impl TopologyEngine {
 
         let node_count = nodes.len();
         if node_count > 0 && total_edges >= node_count {
-            cycle_edges = total_edges - node_count + 1;
+            cycle_edges = total_edges - node_count + num_components;
         }
 
         cycle_edges.min(total_edges / 3)

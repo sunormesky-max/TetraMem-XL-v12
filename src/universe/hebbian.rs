@@ -109,7 +109,7 @@ impl HebbianMemory {
                 result.push((*a, edge.weight));
             }
         }
-        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
 
@@ -128,16 +128,23 @@ impl HebbianMemory {
         }
 
         let mut entries: Vec<_> = self.edges.drain().collect();
-        entries.sort_by(|a, b| b.1.weight.partial_cmp(&a.1.weight).unwrap());
+        entries.sort_by(|a, b| b.1.weight.partial_cmp(&a.1.weight).unwrap_or(std::cmp::Ordering::Equal));
         entries.truncate(target);
         self.edges = entries.into_iter().collect();
     }
 
     pub fn strongest_edges(&self, n: usize) -> Vec<((Coord7D, Coord7D), f64)> {
         let mut entries: Vec<_> = self.edges.iter().map(|(k, e)| (*k, e.weight)).collect();
-        entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         entries.truncate(n);
         entries
+    }
+
+    pub fn edges_with_traversal(&self) -> Vec<((Coord7D, Coord7D), f64, usize)> {
+        self.edges
+            .iter()
+            .map(|(k, e)| (*k, e.weight, e.traversal_count))
+            .collect()
     }
 }
 

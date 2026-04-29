@@ -99,7 +99,7 @@ impl AutoScaler {
         reason: ScaleReason,
     ) -> ScaleReport {
         let additional = universe.total_energy() * self.config.scale_up_energy_factor;
-        universe.expand_energy_pool(additional);
+        let _ = universe.expand_energy_pool(additional);
 
         let center = Self::find_bounding_center(universe);
         let mut nodes_added = 0usize;
@@ -172,10 +172,15 @@ impl AutoScaler {
         }
 
         let stats = universe.stats();
-        let target_energy = stats.allocated_energy / (1.0 - self.config.scale_down_energy_factor);
+        let denominator = (1.0 - self.config.scale_down_energy_factor).max(0.01);
+        let target_energy = stats.allocated_energy / denominator;
         if target_energy < universe.total_energy() {
             let excess = universe.total_energy() - target_energy;
-            let _ = excess;
+            let shrink_amount = excess * 0.5;
+            let available = universe.available_energy();
+            if shrink_amount <= available {
+                let _ = universe.shrink_energy_pool(shrink_amount);
+            }
         }
 
         ScaleReport {
@@ -234,7 +239,7 @@ impl AutoScaler {
         if universe.available_energy() < estimated_energy {
             let needed = estimated_energy - universe.available_energy();
             let expansion = needed * 2.0;
-            universe.expand_energy_pool(expansion);
+            let _ = universe.expand_energy_pool(expansion);
             report.energy_expanded_by = expansion;
         }
 
@@ -300,7 +305,7 @@ impl AutoScaler {
         if universe.available_energy() < encode_energy {
             let needed = encode_energy - universe.available_energy();
             let expansion = needed * 3.0;
-            universe.expand_energy_pool(expansion);
+            let _ = universe.expand_energy_pool(expansion);
             report.energy_expanded_by = expansion;
         }
 
