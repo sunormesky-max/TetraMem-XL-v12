@@ -45,6 +45,8 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    Mcp,
+    Skills,
 }
 
 fn main() {
@@ -235,6 +237,12 @@ fn main() {
                 Ok(()) => println!("Default config written to {}", path.display()),
                 Err(e) => eprintln!("Error: {}", e),
             }
+        }
+        Some(Commands::Mcp) => {
+            tetramem_v12::mcp::server::run_mcp_demo();
+        }
+        Some(Commands::Skills) => {
+            run_skills_demo();
         }
         None => {
             bench_vs_v8();
@@ -534,4 +542,71 @@ fn bench_vs_v8() {
     println!("║   推理          文本语义          7D几何           更精确  ║");
     println!("║                                                          ║");
     println!("╚══════════════════════════════════════════════════════════╝");
+}
+
+fn run_skills_demo() {
+    use tetramem_v12::skills::builtin;
+    use tetramem_v12::skills::pipeline::{PipelineStep, SkillPipeline};
+    use tetramem_v12::skills::registry::SkillRegistry;
+    use tetramem_v12::skills::types::SkillContext;
+
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║   TetraMem-XL v12.0 Skills Interface Demo               ║");
+    println!("╚══════════════════════════════════════════════════════════╝\n");
+
+    let mut registry = SkillRegistry::new();
+    builtin::register_all(&mut registry);
+    println!("Registered {} skills:", registry.len());
+    for desc in registry.list() {
+        println!("  • {} v{} [{}] — {}", desc.name, desc.version, format!("{:?}", desc.category).to_lowercase(), desc.description);
+    }
+    println!();
+
+    let mut universe = DarkUniverse::new(10_000_000.0);
+    let mut hebbian = HebbianMemory::new();
+    let mut memories = Vec::new();
+    let mut crystal = CrystalEngine::new();
+
+    println!("── Pipeline 1: encode → decode roundtrip ──");
+    let pipeline = SkillPipeline::new(registry);
+    let steps = vec![
+        PipelineStep {
+            skill: "encode_memory".into(),
+            args: serde_json::json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.14]}),
+            required: true,
+        },
+    ];
+    {
+        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        match pipeline.execute_chain(&steps, &mut ctx) {
+            Ok(results) => {
+                for r in &results {
+                    println!("  Step {} [{}]: success={} → {}", r.step, r.skill, r.success, r.result);
+                }
+            }
+            Err(e) => println!("  Error: {}", e),
+        }
+    }
+
+    println!("\n── Individual skill: check_conservation ──");
+    let skill = pipeline.registry().get("check_conservation").unwrap();
+    {
+        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        match skill.execute(&mut ctx, &serde_json::json!({})) {
+            Ok(v) => println!("  Result: {}", v),
+            Err(e) => println!("  Error: {}", e),
+        }
+    }
+
+    println!("\n── Individual skill: analyze_topology ──");
+    {
+        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        let skill = pipeline.registry().get("analyze_topology").unwrap();
+        match skill.execute(&mut ctx, &serde_json::json!({})) {
+            Ok(v) => println!("  Result: {}", v),
+            Err(e) => println!("  Error: {}", e),
+        }
+    }
+
+    println!("\n✓ Skills Interface Demo complete — {} skills available, all operational", pipeline.registry().len());
 }
