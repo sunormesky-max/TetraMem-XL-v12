@@ -51,7 +51,7 @@ pub async fn dark_query(
                 physical_energy: e.physical(),
                 dark_energy: e.dark(),
                 dims,
-                manifested: node.is_manifested(),
+                manifested: node.is_manifested_with(u.manifestation_threshold()),
                 manifestation_ratio: e.manifestation_ratio(),
             })))
         }
@@ -118,11 +118,7 @@ pub async fn dark_flow(
                 dark_after: dark,
             })))
         }
-        Err(_) => Ok(Json(ApiResponse::ok(DarkFlowResponse {
-            success: false,
-            physical_after: 0.0,
-            dark_after: 0.0,
-        }))),
+        Err(e) => Err(AppError::Energy(e)),
     }
 }
 
@@ -165,14 +161,15 @@ pub async fn dark_transfer(
                 to_energy,
             })))
         }
-        Err(_) => {
-            let from_energy = u.get_node(&from).map(|n| n.energy().total()).unwrap_or(0.0);
-            let to_energy = u.get_node(&to).map(|n| n.energy().total()).unwrap_or(0.0);
-            Ok(Json(ApiResponse::ok(DarkTransferResponse {
-                success: false,
-                from_energy,
-                to_energy,
-            })))
+        Err(e) => {
+            tracing::warn!(
+                from = ?from,
+                to = ?to,
+                amount = req.amount,
+                error = %e,
+                "dark transfer failed"
+            );
+            Err(AppError::Energy(e))
         }
     }
 }
@@ -207,7 +204,10 @@ pub async fn dark_materialize(
     match u.materialize_biased(coord, req.energy, req.physical_ratio) {
         Ok(()) => {
             let (manifested, energy) = match u.get_node(&coord) {
-                Some(node) => (node.is_manifested(), node.energy().total()),
+                Some(node) => (
+                    node.is_manifested_with(u.manifestation_threshold()),
+                    node.energy().total(),
+                ),
                 None => (false, 0.0),
             };
             Ok(Json(ApiResponse::ok(DarkMaterializeResponse {
@@ -216,11 +216,7 @@ pub async fn dark_materialize(
                 energy,
             })))
         }
-        Err(_) => Ok(Json(ApiResponse::ok(DarkMaterializeResponse {
-            success: false,
-            manifested: false,
-            energy: 0.0,
-        }))),
+        Err(e) => Err(AppError::Energy(e)),
     }
 }
 
@@ -253,10 +249,10 @@ pub async fn dark_dematerialize(
             success: true,
             recovered_energy: field.total(),
         }))),
-        None => Ok(Json(ApiResponse::ok(DarkDematerializeResponse {
-            success: false,
-            recovered_energy: 0.0,
-        }))),
+        None => Err(AppError::NotFound(format!(
+            "node at {:?} not found or protected",
+            req.coord
+        ))),
     }
 }
 

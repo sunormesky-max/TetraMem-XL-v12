@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::universe::auth::JwtConfig;
+use crate::universe::auth::{JwtConfig, UserStore};
 use crate::universe::backup::BackupScheduler;
 use crate::universe::cluster::ClusterManager;
 use crate::universe::config::AppConfig;
@@ -18,6 +18,7 @@ pub struct AppState {
     pub cluster: Mutex<ClusterManager>,
     pub config: AppConfig,
     pub jwt: JwtConfig,
+    pub users: UserStore,
 }
 
 pub type SharedState = Arc<AppState>;

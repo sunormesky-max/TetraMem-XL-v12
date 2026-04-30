@@ -28,6 +28,7 @@ chrono = "0.4"
 prometheus = "0.13"
 lazy_static = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
+sha2 = "0.10"
 openraft = { version = "0.10.0-alpha.18", features = ["serde"] }
 async-trait = "0.1"
 futures = "0.3"

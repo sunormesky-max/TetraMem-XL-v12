@@ -2,6 +2,7 @@ use crate::universe::error::AppError;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -52,6 +53,83 @@ impl JwtConfig {
     }
 }
 
+fn hash_password(password: &str, salt: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{}:{}", salt, password).as_bytes());
+    let result = hasher.finalize();
+    hex_encode(&result)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserConfig {
+    pub username: String,
+    #[serde(default)]
+    pub password_hash: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "default_role")]
+    pub role: String,
+}
+
+fn default_role() -> String {
+    "user".to_string()
+}
+
+#[derive(Debug, Clone)]
+struct StoredUser {
+    username: String,
+    password_hash: String,
+    role: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserStore {
+    users: Vec<StoredUser>,
+    jwt_secret: String,
+}
+
+impl UserStore {
+    pub fn new(configs: &[UserConfig], jwt_secret: &str) -> Self {
+        let users: Vec<StoredUser> = configs
+            .iter()
+            .map(|c| {
+                let hash = if !c.password_hash.is_empty() {
+                    c.password_hash.clone()
+                } else if !c.password.is_empty() {
+                    hash_password(&c.password, jwt_secret)
+                } else {
+                    String::new()
+                };
+                StoredUser {
+                    username: c.username.clone(),
+                    password_hash: hash,
+                    role: c.role.clone(),
+                }
+            })
+            .collect();
+        Self {
+            users,
+            jwt_secret: jwt_secret.to_string(),
+        }
+    }
+
+    pub fn verify(&self, username: &str, password: &str) -> Option<&str> {
+        let expected = hash_password(password, &self.jwt_secret);
+        self.users
+            .iter()
+            .find(|u| u.username == username && u.password_hash == expected)
+            .map(|u| u.role.as_str())
+    }
+
+    pub fn has_users(&self) -> bool {
+        !self.users.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
@@ -95,5 +173,76 @@ mod tests {
         let token = config1.create_token("user1", "admin").unwrap();
         let result = config2.validate_token(&token);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn password_hashing_deterministic() {
+        let h1 = hash_password("mypassword", "salt1");
+        let h2 = hash_password("mypassword", "salt1");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn password_hash_different_salt() {
+        let h1 = hash_password("mypassword", "salt1");
+        let h2 = hash_password("mypassword", "salt2");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn user_store_verify_correct() {
+        let store = UserStore::new(
+            &[UserConfig {
+                username: "admin".to_string(),
+                password_hash: String::new(),
+                password: "secret123".to_string(),
+                role: "admin".to_string(),
+            }],
+            "jwt-secret",
+        );
+        assert_eq!(store.verify("admin", "secret123"), Some("admin"));
+    }
+
+    #[test]
+    fn user_store_verify_wrong_password() {
+        let store = UserStore::new(
+            &[UserConfig {
+                username: "admin".to_string(),
+                password_hash: String::new(),
+                password: "secret123".to_string(),
+                role: "admin".to_string(),
+            }],
+            "jwt-secret",
+        );
+        assert_eq!(store.verify("admin", "wrong"), None);
+    }
+
+    #[test]
+    fn user_store_verify_unknown_user() {
+        let store = UserStore::new(
+            &[UserConfig {
+                username: "admin".to_string(),
+                password_hash: String::new(),
+                password: "secret123".to_string(),
+                role: "admin".to_string(),
+            }],
+            "jwt-secret",
+        );
+        assert_eq!(store.verify("unknown", "secret123"), None);
+    }
+
+    #[test]
+    fn user_store_prehashed_password() {
+        let prehashed = hash_password("mypassword", "jwt-secret");
+        let store = UserStore::new(
+            &[UserConfig {
+                username: "admin".to_string(),
+                password_hash: prehashed,
+                password: String::new(),
+                role: "admin".to_string(),
+            }],
+            "jwt-secret",
+        );
+        assert_eq!(store.verify("admin", "mypassword"), Some("admin"));
     }
 }

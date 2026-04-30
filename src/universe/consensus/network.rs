@@ -37,17 +37,29 @@ use super::raft_node::TypeName;
 
 pub struct HttpRaftNetwork {
     timeout: Duration,
+    raft_secret: String,
 }
 
 impl HttpRaftNetwork {
     pub fn new(timeout: Duration) -> Self {
-        Self { timeout }
+        Self {
+            timeout,
+            raft_secret: String::new(),
+        }
+    }
+
+    pub fn with_secret(timeout: Duration, raft_secret: String) -> Self {
+        Self {
+            timeout,
+            raft_secret,
+        }
     }
 }
 
 pub struct HttpRaftConn {
     addr: String,
     client: Client,
+    raft_secret: String,
 }
 
 fn rpc_unreachable(e: impl std::fmt::Display) -> openraft::error::RPCError<TypeName> {
@@ -73,6 +85,7 @@ impl RaftNetworkFactory<TypeName> for HttpRaftNetwork {
                 .timeout(self.timeout)
                 .build()
                 .unwrap_or_default(),
+            raft_secret: self.raft_secret.clone(),
         }
     }
 }
@@ -93,6 +106,7 @@ impl NetVote<TypeName> for HttpRaftConn {
         let resp = self
             .client
             .post(&url)
+            .header("x-raft-secret", &self.raft_secret)
             .json(&rpc)
             .send()
             .await
@@ -127,11 +141,12 @@ impl NetStreamAppend<TypeName> for HttpRaftConn {
     {
         let client = self.client.clone();
         let addr = self.addr.clone();
+        let raft_secret = self.raft_secret.clone();
         let boxed: AppendStream = Box::pin(input);
 
         let stream = unfold(
-            (boxed, client, addr),
-            |(mut input, client, addr)| async move {
+            (boxed, client, addr, raft_secret),
+            |(mut input, client, addr, raft_secret)| async move {
                 let req = match input.next().await {
                     Some(r) => r,
                     None => return None,
@@ -139,14 +154,20 @@ impl NetStreamAppend<TypeName> for HttpRaftConn {
                 let prev = req.prev_log_id;
                 let last = req.entries.last().map(|e| e.log_id()).or(prev);
                 let url = format!("http://{}/raft/append", addr);
-                let result = match client.post(&url).json(&req).send().await {
+                let result = match client
+                    .post(&url)
+                    .header("x-raft-secret", &raft_secret)
+                    .json(&req)
+                    .send()
+                    .await
+                {
                     Ok(resp) => match resp.json::<AppendEntriesResponse<TypeName>>().await {
                         Ok(ae_resp) => Ok(ae_resp.into_stream_result(prev, last)),
                         Err(e) => Err(rpc_unreachable(e)),
                     },
                     Err(e) => Err(rpc_unreachable(e)),
                 };
-                Some((result, (input, client, addr)))
+                Some((result, (input, client, addr, raft_secret)))
             },
         );
 
@@ -192,6 +213,7 @@ impl NetSnapshot<TypeName> for HttpRaftConn {
         let resp = self
             .client
             .post(&url)
+            .header("x-raft-secret", &self.raft_secret)
             .json(&body)
             .send()
             .await
@@ -213,6 +235,7 @@ impl NetTransferLeader<TypeName> for HttpRaftConn {
         let url = format!("http://{}/raft/transfer", self.addr);
         self.client
             .post(&url)
+            .header("x-raft-secret", &self.raft_secret)
             .json(&req)
             .send()
             .await

@@ -191,6 +191,7 @@ pub struct ClusterManager {
     energy_reporter: Option<EnergyReporter>,
     active_quorum: Option<H6EnergyQuorum>,
     quorum_counter: u64,
+    raft_secret: String,
 }
 
 impl ClusterManager {
@@ -206,7 +207,16 @@ impl ClusterManager {
             energy_reporter: None,
             active_quorum: None,
             quorum_counter: 0,
+            raft_secret: String::new(),
         }
+    }
+
+    pub fn set_raft_secret(&mut self, secret: String) {
+        self.raft_secret = secret;
+    }
+
+    pub fn set_log_store(&mut self, log_store: LogStore) {
+        self.log_store = log_store;
     }
 
     pub fn set_conservation_validator(&mut self, v: ConservationValidator) {
@@ -230,7 +240,10 @@ impl ClusterManager {
                 .map_err(|e| format!("raft config error: {}", e))?,
         );
 
-        let network = HttpRaftNetwork::new(std::time::Duration::from_secs(5));
+        let network = HttpRaftNetwork::with_secret(
+            std::time::Duration::from_secs(5),
+            self.raft_secret.clone(),
+        );
 
         let raft: RaftNode = Raft::new(
             self.node_id,
@@ -264,8 +277,20 @@ impl ClusterManager {
     }
 
     pub async fn status(&self) -> ClusterStatus {
-        let applied_count = self.state_machine.lock().unwrap().applied_count();
-        let log_index = self.log_store.lock().unwrap().last_log_index();
+        let applied_count = match self.state_machine.lock() {
+            Ok(sm) => sm.applied_count(),
+            Err(e) => {
+                tracing::error!("state_machine lock poisoned in status(): {}", e);
+                0
+            }
+        };
+        let log_index = match self.log_store.lock() {
+            Ok(ls) => ls.last_log_index(),
+            Err(e) => {
+                tracing::error!("log_store lock poisoned in status(): {}", e);
+                0
+            }
+        };
 
         if let Some(ref raft) = self.raft {
             let rx = raft.metrics();

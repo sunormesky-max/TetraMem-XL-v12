@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use tetramem_v12::universe::api::{create_router, AppState};
-use tetramem_v12::universe::auth::JwtConfig;
+use tetramem_v12::universe::auth::{JwtConfig, UserStore};
 use tetramem_v12::universe::backup::BackupScheduler;
 use tetramem_v12::universe::cluster::ClusterManager;
 use tetramem_v12::universe::config::AppConfig;
@@ -27,6 +27,7 @@ fn build_state() -> Arc<AppState> {
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
         config: AppConfig::default(),
         jwt: JwtConfig::new("test-secret".to_string(), 3600),
+        users: UserStore::new(&[], "test-secret"),
     })
 }
 

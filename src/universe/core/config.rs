@@ -28,6 +28,8 @@ pub struct ServerConfig {
     pub body_limit_bytes: usize,
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +58,10 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     #[serde(default = "default_jwt_expiry_secs")]
     pub jwt_expiry_secs: u64,
+    #[serde(default)]
+    pub users: Vec<crate::universe::auth::UserConfig>,
+    #[serde(default = "default_raft_secret")]
+    pub raft_secret: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +106,12 @@ fn default_server() -> ServerConfig {
         timeout_secs: default_timeout_secs(),
         body_limit_bytes: default_body_limit(),
         tls: None,
+        cors_origins: default_cors_origins(),
     }
+}
+
+fn default_cors_origins() -> Vec<String> {
+    vec!["*".to_string()]
 }
 
 fn default_universe() -> UniverseConfig {
@@ -117,6 +128,8 @@ fn default_auth() -> AuthConfig {
         enabled: false,
         jwt_secret: default_jwt_secret(),
         jwt_expiry_secs: default_jwt_expiry_secs(),
+        users: Vec::new(),
+        raft_secret: default_raft_secret(),
     }
 }
 
@@ -171,6 +184,9 @@ fn default_max_timeline_days() -> usize {
 fn default_jwt_secret() -> String {
     "change-me-in-production".to_string()
 }
+fn default_raft_secret() -> String {
+    "change-raft-secret".to_string()
+}
 fn default_jwt_expiry_secs() -> u64 {
     86400
 }
@@ -222,14 +238,39 @@ impl AppConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
             tracing::info!("config file not found, using defaults: {}", path.display());
-            return Ok(Self::default());
+            let mut config = Self::default();
+            config.resolve_env_overrides();
+            config.validate()?;
+            return Ok(config);
         }
         let content = fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
-        let config: Self =
+        let mut config: Self =
             toml::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))?;
         tracing::info!("loaded config from {}", path.display());
+        config.resolve_env_overrides();
         config.validate()?;
         Ok(config)
+    }
+
+    fn resolve_env_overrides(&mut self) {
+        if let Ok(secret) = std::env::var("TETRAMEM_JWT_SECRET") {
+            if !secret.is_empty() {
+                tracing::info!("JWT secret overridden from TETRAMEM_JWT_SECRET env var");
+                self.auth.jwt_secret = secret;
+            }
+        }
+        if let Ok(secret) = std::env::var("TETRAMEM_RAFT_SECRET") {
+            if !secret.is_empty() {
+                tracing::info!("Raft secret overridden from TETRAMEM_RAFT_SECRET env var");
+                self.auth.raft_secret = secret;
+            }
+        }
+        if let Ok(origins) = std::env::var("TETRAMEM_CORS_ORIGINS") {
+            if !origins.is_empty() {
+                self.server.cors_origins =
+                    origins.split(',').map(|s| s.trim().to_string()).collect();
+            }
+        }
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -264,7 +305,11 @@ impl AppConfig {
             ));
         }
         if self.auth.enabled && self.auth.jwt_secret == "change-me-in-production" {
-            tracing::warn!("auth enabled with default JWT secret — tokens are insecure");
+            return Err(ConfigError::Parse(
+                "auth.enabled=true with default JWT secret is insecure; \
+                 set TETRAMEM_JWT_SECRET env var or auth.jwt_secret in config"
+                    .to_string(),
+            ));
         }
         if self.auth.enabled && self.auth.jwt_expiry_secs == 0 {
             return Err(ConfigError::Parse(

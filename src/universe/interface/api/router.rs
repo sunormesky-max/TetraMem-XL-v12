@@ -1,6 +1,6 @@
 use axum::{
     extract::{DefaultBodyLimit, Request, State},
-    http::StatusCode as HttpStatusCode,
+    http::{HeaderValue, StatusCode as HttpStatusCode},
     middleware::{self, Next},
     response::Response,
     routing::{get, post},
@@ -8,7 +8,7 @@ use axum::{
 };
 use std::time::Duration;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -72,11 +72,58 @@ async fn auth_middleware(
     }
 }
 
-pub fn create_router(state: SharedState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
+async fn raft_auth_middleware(
+    State(state): State<SharedState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    let secret = &state.config.auth.raft_secret;
+    if secret == "change-raft-secret" {
+        tracing::warn!("raft RPC received with default raft_secret — set auth.raft_secret or TETRAMEM_RAFT_SECRET");
+    }
+
+    let provided = req
+        .headers()
+        .get("x-raft-secret")
+        .and_then(|v| v.to_str().ok());
+
+    match provided {
+        Some(s) if s == secret => Ok(next.run(req).await),
+        _ => Err(AppError::Unauthorized(
+            "invalid or missing raft secret".to_string(),
+        )),
+    }
+}
+
+fn build_cors_layer(origins: &[String]) -> CorsLayer {
+    if origins.len() == 1 && (origins[0] == "*" || origins[0] == "any") {
+        return CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
+
+    let parsed: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| o.parse::<HeaderValue>().ok())
+        .collect();
+
+    if parsed.is_empty() {
+        tracing::warn!("no valid CORS origins parsed, allowing all");
+        return CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(parsed))
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+}
+
+pub fn create_router(state: SharedState) -> Router {
+    let cors = build_cors_layer(&state.config.server.cors_origins);
 
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
@@ -85,11 +132,17 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/stats", get(get_stats))
         .route("/metrics", get(get_metrics))
         .route("/openapi.json", get(get_openapi))
-        .route("/login", post(login))
+        .route("/login", post(login));
+
+    let raft_routes = Router::new()
         .route("/raft/vote", post(raft_vote))
         .route("/raft/append", post(raft_append))
         .route("/raft/snapshot", post(raft_snapshot))
-        .route("/raft/transfer", post(raft_transfer));
+        .route("/raft/transfer", post(raft_transfer))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            raft_auth_middleware,
+        ));
 
     let protected_routes = Router::new()
         .route("/memory/encode", post(encode_memory))
@@ -130,6 +183,7 @@ pub fn create_router(state: SharedState) -> Router {
 
     Router::new()
         .merge(public_routes)
+        .merge(raft_routes)
         .merge(protected_routes)
         .layer(DefaultBodyLimit::max(state.config.server.body_limit_bytes))
         .layer(

@@ -79,8 +79,8 @@ pub use perception::{PerceptionBudget, PerceptionReport};
 pub use persist::PersistEngine;
 pub use pulse::{PulseEngine, PulseResult, PulseType};
 pub use raft_node::{
-    new_log_store, new_state_machine, LogStore, LogStoreInner, NodeId, Request, Response,
-    StateMachineInner, StateMachineStore, TypeName,
+    new_log_store, new_log_store_with_persistence, new_state_machine, LogStore, LogStoreInner,
+    NodeId, Request, Response, StateMachineInner, StateMachineStore, TypeName,
 };
 pub use reasoning::{ReasoningEngine, ReasoningResult, ReasoningType};
 pub use regulation::{RegulationEngine, RegulationReport};

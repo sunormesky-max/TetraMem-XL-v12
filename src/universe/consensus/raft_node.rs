@@ -63,11 +63,16 @@ impl fmt::Display for Response {
 pub type LogStore = Arc<Mutex<LogStoreInner>>;
 pub type StateMachineStore = Arc<Mutex<StateMachineInner>>;
 
+fn lock_failed<T>(e: std::sync::PoisonError<T>) -> io::Error {
+    io::Error::other(format!("lock poisoned: {}", e))
+}
+
 #[derive(Debug, Default)]
 pub struct LogStoreInner {
     last_purged: Option<LogIdOf<TypeName>>,
     log: BTreeMap<u64, EntryOf<TypeName>>,
     vote: Option<VoteOf<TypeName>>,
+    db: Option<rusqlite::Connection>,
 }
 
 impl LogStoreInner {
@@ -77,6 +82,75 @@ impl LogStoreInner {
             .next_back()
             .map(|(_, e)| e.log_id().index)
             .unwrap_or(0)
+    }
+
+    fn persist_entry(&self, index: u64, entry: &EntryOf<TypeName>) {
+        if let Some(ref db) = self.db {
+            let data = match serde_json::to_string(entry) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!("failed to serialize raft log entry {}: {}", index, e);
+                    return;
+                }
+            };
+            if let Err(e) = db.execute(
+                "INSERT OR REPLACE INTO raft_log (idx, data) VALUES (?1, ?2)",
+                rusqlite::params![index as i64, &data],
+            ) {
+                tracing::error!("failed to persist raft log entry {}: {}", index, e);
+            }
+        }
+    }
+
+    fn persist_vote(&self) {
+        if let Some(ref db) = self.db {
+            if let Some(ref v) = self.vote {
+                let data = match serde_json::to_string(v) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::error!("failed to serialize raft vote: {}", e);
+                        return;
+                    }
+                };
+                if let Err(e) = db.execute(
+                    "INSERT OR REPLACE INTO raft_meta (key, value) VALUES ('vote', ?1)",
+                    rusqlite::params![&data],
+                ) {
+                    tracing::error!("failed to persist raft vote: {}", e);
+                }
+            }
+        }
+    }
+
+    fn persist_purged(&self) {
+        if let Some(ref db) = self.db {
+            if let Some(ref lid) = self.last_purged {
+                let data = match serde_json::to_string(lid) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::error!("failed to serialize last_purged: {}", e);
+                        return;
+                    }
+                };
+                if let Err(e) = db.execute(
+                    "INSERT OR REPLACE INTO raft_meta (key, value) VALUES ('last_purged', ?1)",
+                    rusqlite::params![&data],
+                ) {
+                    tracing::error!("failed to persist last_purged: {}", e);
+                }
+            }
+        }
+    }
+
+    fn delete_range(&self, start: u64, end: u64) {
+        if let Some(ref db) = self.db {
+            if let Err(e) = db.execute(
+                "DELETE FROM raft_log WHERE idx >= ?1 AND idx < ?2",
+                rusqlite::params![start as i64, end as i64],
+            ) {
+                tracing::error!("failed to delete raft log range {}..{}: {}", start, end, e);
+            }
+        }
     }
 }
 
@@ -98,6 +172,84 @@ pub fn new_log_store() -> LogStore {
     Arc::new(Mutex::new(LogStoreInner::default()))
 }
 
+pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogStore, io::Error> {
+    let conn = rusqlite::Connection::open(db_path)
+        .map_err(|e| io::Error::other(format!("failed to open raft log db: {}", e)))?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS raft_log (
+            idx INTEGER PRIMARY KEY,
+            data TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS raft_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )
+    .map_err(|e| io::Error::other(format!("raft log db init: {}", e)))?;
+
+    let mut inner = LogStoreInner::default();
+
+    {
+        let mut stmt = conn
+            .prepare("SELECT idx, data FROM raft_log ORDER BY idx")
+            .map_err(|e| io::Error::other(format!("raft log load: {}", e)))?;
+        let rows = stmt
+            .query_map([], |row| {
+                let idx: i64 = row.get(0)?;
+                let data: String = row.get(1)?;
+                Ok((idx, data))
+            })
+            .map_err(|e| io::Error::other(format!("raft log query: {}", e)))?;
+
+        for row in rows {
+            let (idx, data) = row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
+            match serde_json::from_str::<EntryOf<TypeName>>(&data) {
+                Ok(entry) => {
+                    inner.log.insert(idx as u64, entry);
+                }
+                Err(e) => {
+                    tracing::warn!("skipping corrupt raft log entry at {}: {}", idx, e);
+                }
+            }
+        }
+    }
+
+    {
+        if let Ok(val) = conn.query_row(
+            "SELECT value FROM raft_meta WHERE key = 'vote'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            match serde_json::from_str::<VoteOf<TypeName>>(&val) {
+                Ok(v) => inner.vote = Some(v),
+                Err(e) => tracing::warn!("failed to deserialize raft vote: {}", e),
+            }
+        }
+    }
+
+    {
+        if let Ok(val) = conn.query_row(
+            "SELECT value FROM raft_meta WHERE key = 'last_purged'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            match serde_json::from_str::<LogIdOf<TypeName>>(&val) {
+                Ok(lid) => inner.last_purged = Some(lid),
+                Err(e) => tracing::warn!("failed to deserialize last_purged: {}", e),
+            }
+        }
+    }
+
+    inner.db = Some(conn);
+    tracing::info!(
+        "raft log store loaded with {} entries from {}",
+        inner.log.len(),
+        db_path.display()
+    );
+    Ok(Arc::new(Mutex::new(inner)))
+}
+
 pub fn new_state_machine() -> StateMachineStore {
     Arc::new(Mutex::new(StateMachineInner::default()))
 }
@@ -115,7 +267,7 @@ impl RaftLogReader<TypeName> for LogStore {
         &mut self,
         range: RB,
     ) -> Result<Vec<EntryOf<TypeName>>, io::Error> {
-        let inner = self.lock().unwrap();
+        let inner = self.lock().map_err(lock_failed)?;
         let start = match range.start_bound().cloned() {
             Bound::Included(s) => s,
             Bound::Excluded(s) => s + 1,
@@ -135,13 +287,13 @@ impl RaftLogReader<TypeName> for LogStore {
     }
 
     async fn read_vote(&mut self) -> Result<Option<VoteOf<TypeName>>, io::Error> {
-        Ok(self.lock().unwrap().vote)
+        Ok(self.lock().map_err(lock_failed)?.vote)
     }
 }
 
 impl RaftSnapshotBuilder<TypeName> for StateMachineStore {
     async fn build_snapshot(&mut self) -> Result<SnapshotOf<TypeName>, io::Error> {
-        let sm = self.lock().unwrap();
+        let sm = self.lock().map_err(lock_failed)?;
         let data = serde_json::to_vec(&*sm).map_err(io::Error::other)?;
         let meta = snap_meta(&sm);
         Ok(SnapshotOf::<TypeName> {
@@ -155,7 +307,7 @@ impl RaftLogStorage<TypeName> for LogStore {
     type LogReader = LogStore;
 
     async fn get_log_state(&mut self) -> Result<LogState<TypeName>, io::Error> {
-        let inner = self.lock().unwrap();
+        let inner = self.lock().map_err(lock_failed)?;
         let last_log_id = inner.log.iter().next_back().map(|(_, e)| e.log_id());
         Ok(LogState {
             last_purged_log_id: inner.last_purged,
@@ -168,7 +320,11 @@ impl RaftLogStorage<TypeName> for LogStore {
     }
 
     async fn save_vote(&mut self, vote: &VoteOf<TypeName>) -> Result<(), io::Error> {
-        self.lock().unwrap().vote = Some(*vote);
+        {
+            let mut inner = self.lock().map_err(lock_failed)?;
+            inner.vote = Some(*vote);
+            inner.persist_vote();
+        }
         Ok(())
     }
 
@@ -182,8 +338,9 @@ impl RaftLogStorage<TypeName> for LogStore {
         I::IntoIter: OptionalSend,
     {
         {
-            let mut inner = self.lock().unwrap();
+            let mut inner = self.lock().map_err(lock_failed)?;
             for entry in entries {
+                inner.persist_entry(entry.log_id().index, &entry);
                 inner.log.insert(entry.log_id().index, entry);
             }
         }
@@ -195,29 +352,33 @@ impl RaftLogStorage<TypeName> for LogStore {
         &mut self,
         last_log_id: Option<LogIdOf<TypeName>>,
     ) -> Result<(), io::Error> {
-        let mut inner = self.lock().unwrap();
+        let mut inner = self.lock().map_err(lock_failed)?;
         if let Some(ref lid) = last_log_id {
             let keys_to_remove: Vec<u64> = inner
                 .log
                 .range((lid.index + 1)..)
                 .map(|(k, _)| *k)
                 .collect();
+            inner.delete_range(lid.index + 1, inner.last_log_index() + 1);
             for k in keys_to_remove {
                 inner.log.remove(&k);
             }
         } else {
+            inner.delete_range(0, inner.last_log_index() + 1);
             inner.log.clear();
         }
         Ok(())
     }
 
     async fn purge(&mut self, log_id: LogIdOf<TypeName>) -> Result<(), io::Error> {
-        let mut inner = self.lock().unwrap();
+        let mut inner = self.lock().map_err(lock_failed)?;
         let keys_to_remove: Vec<u64> = inner.log.range(..=log_id.index).map(|(k, _)| *k).collect();
+        inner.delete_range(0, log_id.index + 1);
         for k in keys_to_remove {
             inner.log.remove(&k);
         }
         inner.last_purged = Some(log_id);
+        inner.persist_purged();
         Ok(())
     }
 }
@@ -228,7 +389,7 @@ impl RaftStateMachine<TypeName> for StateMachineStore {
     async fn applied_state(
         &mut self,
     ) -> Result<(Option<LogIdOf<TypeName>>, StoredMembershipOf<TypeName>), io::Error> {
-        let sm = self.lock().unwrap();
+        let sm = self.lock().map_err(lock_failed)?;
         Ok((sm.last_applied, StoredMembershipOf::<TypeName>::default()))
     }
 
@@ -242,7 +403,7 @@ impl RaftStateMachine<TypeName> for StateMachineStore {
         tokio::pin!(entries);
         while let Some(item) = entries.next().await {
             let (entry, responder) = item?;
-            let mut sm = self.lock().unwrap();
+            let mut sm = self.lock().map_err(lock_failed)?;
             sm.last_applied = Some(entry.log_id());
             if let EntryPayload::Normal(ref req) = entry.payload {
                 sm.applied_commands
@@ -272,14 +433,14 @@ impl RaftStateMachine<TypeName> for StateMachineStore {
         meta: &SnapshotMetaOf<TypeName>,
         snapshot: SnapshotDataOf<TypeName>,
     ) -> Result<(), io::Error> {
-        let mut sm = self.lock().unwrap();
+        let mut sm = self.lock().map_err(lock_failed)?;
         sm.last_applied = meta.last_log_id;
         sm.snapshot = Some(snapshot.into_inner());
         Ok(())
     }
 
     async fn get_current_snapshot(&mut self) -> Result<Option<SnapshotOf<TypeName>>, io::Error> {
-        let sm = self.lock().unwrap();
+        let sm = self.lock().map_err(lock_failed)?;
         if sm.snapshot.is_some() || sm.last_applied.is_some() {
             let data = serde_json::to_vec(&*sm).map_err(io::Error::other)?;
             let meta = snap_meta(&sm);

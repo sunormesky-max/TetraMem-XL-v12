@@ -112,10 +112,48 @@ impl Constitution {
         let mut violations = Vec::new();
 
         match operation {
-            "energy_expansion" => {}
-            "energy_transfer" => {}
-            "materialize" => {}
-            "dematerialize" => {}
+            "energy_expansion" => {
+                if let Some(b) = self.get_bound("regulation_pressure_threshold") {
+                    if b.current <= 0.0 {
+                        violations.push(format!(
+                            "regulation_pressure_threshold {:.2} invalid for expansion",
+                            b.current
+                        ));
+                    }
+                }
+            }
+            "energy_transfer" => {
+                let energy_rule = self.rules.iter().find(|r| r.id == "energy_conservation");
+                if energy_rule.is_none() {
+                    violations.push("energy_conservation rule missing".to_string());
+                }
+            }
+            "materialize" => {
+                if let Some(b) = self.get_bound("crystal_threshold") {
+                    if b.current < b.min {
+                        violations.push(format!(
+                            "crystal_threshold {:.2} below minimum {:.2}",
+                            b.current, b.min
+                        ));
+                    }
+                }
+                let threshold_rule = self
+                    .rules
+                    .iter()
+                    .find(|r| r.id == "manifestation_threshold");
+                if threshold_rule.is_none() {
+                    violations.push("manifestation_threshold rule missing".to_string());
+                }
+            }
+            "dematerialize" => {
+                let conservation_rule = self
+                    .rules
+                    .iter()
+                    .find(|r| r.id == "conservation_verification");
+                if conservation_rule.is_none() {
+                    violations.push("conservation_verification rule missing".to_string());
+                }
+            }
             "crystal_form" => {
                 if let Some(b) = self.get_bound("crystal_threshold") {
                     if b.current < b.min {
@@ -125,11 +163,90 @@ impl Constitution {
                         ));
                     }
                 }
+                if let Some(b) = self.get_bound("super_crystal_threshold") {
+                    if b.current < b.min {
+                        violations.push(format!(
+                            "super_crystal_threshold {:.2} below minimum {:.2}",
+                            b.current, b.min
+                        ));
+                    }
+                }
+                let integrity_rule = self.rules.iter().find(|r| r.id == "tetrahedron_integrity");
+                if integrity_rule.is_none() {
+                    violations.push("tetrahedron_integrity rule missing".to_string());
+                }
             }
             "memory_merge" => {
-                for rule in &self.rules {
-                    if rule.id == "merge_energy_preserved" {
-                        break;
+                let merge_rule = self.rules.iter().find(|r| r.id == "merge_energy_preserved");
+                if merge_rule.is_none() {
+                    violations.push("merge_energy_preserved rule missing".to_string());
+                }
+                if let Some(b) = self.get_bound("merge_similarity_threshold") {
+                    if b.current < b.min {
+                        violations.push(format!(
+                            "merge_similarity_threshold {:.2} below minimum {:.2}",
+                            b.current, b.min
+                        ));
+                    }
+                }
+                let conservation_rule = self.rules.iter().find(|r| r.id == "energy_conservation");
+                if conservation_rule.is_none() {
+                    violations.push("energy_conservation rule missing".to_string());
+                }
+            }
+            "pulse_fire" => {
+                if let Some(b) = self.get_bound("pulse_face_decay") {
+                    if b.current < b.min || b.current > b.max {
+                        violations.push(format!(
+                            "pulse_face_decay {:.2} outside [{:.2}, {:.2}]",
+                            b.current, b.min, b.max
+                        ));
+                    }
+                }
+                if let Some(b) = self.get_bound("pulse_bcc_decay") {
+                    if b.current < b.min || b.current > b.max {
+                        violations.push(format!(
+                            "pulse_bcc_decay {:.2} outside [{:.2}, {:.2}]",
+                            b.current, b.min, b.max
+                        ));
+                    }
+                }
+            }
+            "hebbian_reinforce" => {
+                if let Some(b) = self.get_bound("hebbian_decay") {
+                    if b.current < b.min {
+                        violations.push(format!(
+                            "hebbian_decay {:.2} below minimum {:.2}",
+                            b.current, b.min
+                        ));
+                    }
+                }
+                if let Some(b) = self.get_bound("hebbian_reinforce") {
+                    if b.current < b.min || b.current > b.max {
+                        violations.push(format!(
+                            "hebbian_reinforce {:.2} outside [{:.2}, {:.2}]",
+                            b.current, b.min, b.max
+                        ));
+                    }
+                }
+            }
+            "dream_cycle" => {
+                if let Some(b) = self.get_bound("dream_frequency_multiplier") {
+                    if b.current <= 0.0 {
+                        violations.push(format!(
+                            "dream_frequency_multiplier {:.2} must be > 0",
+                            b.current
+                        ));
+                    }
+                }
+            }
+            "scale_up" => {
+                if let Some(b) = self.get_bound("scale_up_threshold") {
+                    if b.current < b.min || b.current > b.max {
+                        violations.push(format!(
+                            "scale_up_threshold {:.2} outside [{:.2}, {:.2}]",
+                            b.current, b.min, b.max
+                        ));
                     }
                 }
             }
@@ -223,6 +340,43 @@ mod tests {
     fn validate_operation() {
         let c = Constitution::tetramem_default();
         let check = c.validate_operation("materialize");
+        assert!(check.allowed);
+    }
+
+    #[test]
+    fn validate_operation_pulse_fire() {
+        let c = Constitution::tetramem_default();
+        let check = c.validate_operation("pulse_fire");
+        assert!(check.allowed);
+    }
+
+    #[test]
+    fn validate_operation_memory_merge() {
+        let c = Constitution::tetramem_default();
+        let check = c.validate_operation("memory_merge");
+        assert!(check.allowed);
+    }
+
+    #[test]
+    fn validate_operation_crystal_form_checks_thresholds() {
+        let mut c = Constitution::tetramem_default();
+        c.bounds
+            .iter_mut()
+            .find(|b| b.name == "crystal_threshold")
+            .unwrap()
+            .current = 0.1;
+        let check = c.validate_operation("crystal_form");
+        assert!(!check.allowed);
+        assert!(check
+            .violations
+            .iter()
+            .any(|v| v.contains("crystal_threshold")));
+    }
+
+    #[test]
+    fn validate_operation_unknown_allowed() {
+        let c = Constitution::tetramem_default();
+        let check = c.validate_operation("unknown_op");
         assert!(check.allowed);
     }
 

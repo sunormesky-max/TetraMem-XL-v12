@@ -1,10 +1,10 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use tetramem_v12::universe::cognitive::topology::TopologyEngine;
 use tetramem_v12::universe::coord::Coord7D;
+use tetramem_v12::universe::hebbian::HebbianMemory;
 use tetramem_v12::universe::memory::MemoryCodec;
 use tetramem_v12::universe::node::DarkUniverse;
 use tetramem_v12::universe::pulse::{PulseEngine, PulseType};
-use tetramem_v12::universe::hebbian::HebbianMemory;
-use tetramem_v12::universe::cognitive::topology::TopologyEngine;
 
 fn bench_materialize(c: &mut Criterion) {
     let mut u = DarkUniverse::new(100_000_000.0);
@@ -34,9 +34,7 @@ fn bench_encode_decode(c: &mut Criterion) {
     });
 
     c.bench_function("decode_14d", |b| {
-        b.iter(|| {
-            MemoryCodec::decode(black_box(&u), black_box(&mem)).unwrap()
-        })
+        b.iter(|| MemoryCodec::decode(black_box(&u), black_box(&mem)).unwrap())
     });
 }
 
@@ -46,7 +44,8 @@ fn bench_pulse(c: &mut Criterion) {
     for x in 0..20i32 {
         for y in 0..20 {
             for z in 0..20 {
-                u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6).ok();
+                u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6)
+                    .ok();
             }
         }
     }
@@ -66,26 +65,24 @@ fn bench_topology(c: &mut Criterion) {
     for x in 0..15i32 {
         for y in 0..15 {
             for z in 0..15 {
-                u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6).ok();
+                u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6)
+                    .ok();
             }
         }
     }
     c.bench_function("topology_analyze_3375nodes", |b| {
-        b.iter(|| {
-            TopologyEngine::analyze(black_box(&u))
-        })
+        b.iter(|| TopologyEngine::analyze(black_box(&u)))
     });
 }
 
 fn bench_conservation(c: &mut Criterion) {
     let mut u = DarkUniverse::new(10_000_000.0);
     for i in 0..1000i32 {
-        u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 100.0, 0.6).ok();
+        u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 100.0, 0.6)
+            .ok();
     }
     c.bench_function("verify_conservation_1000nodes", |b| {
-        b.iter(|| {
-            u.verify_conservation()
-        })
+        b.iter(|| u.verify_conservation())
     });
 }
 

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Instant;
-use tetramem_v12::universe::auth::JwtConfig;
+use tetramem_v12::universe::auth::{JwtConfig, UserStore};
 use tetramem_v12::universe::autoscale::AutoScaler;
 use tetramem_v12::universe::backup::BackupScheduler;
 use tetramem_v12::universe::config::AppConfig;
@@ -71,7 +71,8 @@ fn main() {
                     persist_path.display()
                 );
                 match PersistFile::load(&persist_path) {
-                    Ok((u, h, m, c)) => {
+                    Ok((mut u, h, m, c)) => {
+                        u.set_manifestation_threshold(config.universe.manifestation_threshold);
                         let stats = u.stats();
                         tracing::info!(
                             "restored state: {} nodes, {} memories, {} edges, E={:.0}",
@@ -98,7 +99,10 @@ fn main() {
                     Err(e) => {
                         tracing::warn!("failed to load persisted state: {}, starting fresh", e);
                         (
-                            DarkUniverse::new(config.universe.total_energy),
+                            DarkUniverse::new_with_threshold(
+                                config.universe.total_energy,
+                                config.universe.manifestation_threshold,
+                            ),
                             HebbianMemory::new(),
                             Vec::new(),
                             tetramem_v12::universe::crystal::CrystalEngine::new(),
@@ -108,7 +112,10 @@ fn main() {
             } else {
                 tracing::info!("no persisted state found, starting fresh");
                 (
-                    DarkUniverse::new(config.universe.total_energy),
+                    DarkUniverse::new_with_threshold(
+                        config.universe.total_energy,
+                        config.universe.manifestation_threshold,
+                    ),
                     HebbianMemory::new(),
                     Vec::new(),
                     tetramem_v12::universe::crystal::CrystalEngine::new(),
@@ -129,6 +136,7 @@ fn main() {
                 ),
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
+                users: UserStore::new(&config.auth.users, &config.auth.jwt_secret),
             });
 
             let auto_persist = config.backup.auto_persist;
@@ -141,38 +149,76 @@ fn main() {
                 {
                     let state_ref = state.clone();
                     let mut cm = state.cluster.lock().await;
+                    cm.set_raft_secret(config.auth.raft_secret.clone());
+
+                    let raft_db_path = std::path::PathBuf::from("./data/raft_log.db");
+                    if let Some(parent) = raft_db_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    match tetramem_v12::universe::raft_node::new_log_store_with_persistence(
+                        &raft_db_path,
+                    ) {
+                        Ok(ls) => {
+                            tracing::info!("raft log store using SQLite: {}", raft_db_path.display());
+                            cm.set_log_store(ls);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "raft log SQLite persistence unavailable ({}), using in-memory",
+                                e
+                            );
+                        }
+                    }
+
                     cm.set_conservation_validator(Box::new(move || {
-                        match state_ref.universe.try_read() {
-                            Ok(u) => {
-                                let ok = u.verify_conservation();
-                                if !ok {
-                                    tracing::error!(
-                                        "CLUSTER PROPOSE REJECTED: energy conservation violated"
-                                    );
+                        for attempt in 0..10 {
+                            match state_ref.universe.try_read() {
+                                Ok(u) => {
+                                    let ok = u.verify_conservation();
+                                    if !ok {
+                                        tracing::error!(
+                                            "CLUSTER PROPOSE REJECTED: energy conservation violated"
+                                        );
+                                    }
+                                    return ok;
                                 }
-                                ok
-                            }
-                            Err(_) => {
-                                tracing::warn!(
-                                    "conservation validator: universe lock busy, skipping check"
-                                );
-                                true
+                                Err(_) => {
+                                    if attempt < 9 {
+                                        std::thread::sleep(std::time::Duration::from_micros(
+                                            100 * (attempt as u64 + 1),
+                                        ));
+                                    }
+                                }
                             }
                         }
+                        tracing::error!(
+                            "conservation validator: failed to acquire lock after 10 retries, rejecting"
+                        );
+                        false
                     }));
                     let state_ref2 = state.clone();
                     cm.set_energy_reporter(Box::new(move || {
-                        match state_ref2.universe.try_read() {
-                            Ok(u) => {
-                                let stats = u.stats();
-                                (
-                                    stats.available_energy,
-                                    stats.active_nodes,
-                                    u.verify_conservation(),
-                                )
+                        for attempt in 0..10 {
+                            match state_ref2.universe.try_read() {
+                                Ok(u) => {
+                                    let stats = u.stats();
+                                    return (
+                                        stats.available_energy,
+                                        stats.active_nodes,
+                                        u.verify_conservation(),
+                                    );
+                                }
+                                Err(_) => {
+                                    if attempt < 9 {
+                                        std::thread::sleep(std::time::Duration::from_micros(
+                                            50 * (attempt as u64 + 1),
+                                        ));
+                                    }
+                                }
                             }
-                            Err(_) => (0.0, 0, true),
                         }
+                        tracing::warn!("energy reporter: failed to acquire lock, returning zeros");
+                        (0.0, 0, false)
                     }));
                 }
 
@@ -236,17 +282,27 @@ fn main() {
                                         let _ = std::fs::create_dir_all(parent);
                                     }
                                     let tmp = persist_path_clone.with_extension("json.tmp");
-                                    match std::fs::write(&tmp, &json_str) {
-                                        Ok(_) => {
-                                            if std::fs::rename(&tmp, &persist_path_clone).is_ok() {
-                                                tracing::debug!(
-                                                    "auto-persist saved {} bytes",
-                                                    json_str.len()
-                                                );
-                                            }
+                                    let tmp_clone = tmp.clone();
+                                    let persist_clone = persist_path_clone.clone();
+                                    let bytes = json_str.into_bytes();
+                                    let bytes_len = bytes.len();
+                                    match tokio::task::spawn_blocking(move || {
+                                        std::fs::write(&tmp_clone, &bytes)
+                                            .and_then(|_| std::fs::rename(&tmp_clone, &persist_clone))
+                                    })
+                                    .await
+                                    {
+                                        Ok(Ok(_)) => {
+                                            tracing::debug!(
+                                                "auto-persist saved {} bytes",
+                                                bytes_len
+                                            );
+                                        }
+                                        Ok(Err(e)) => {
+                                            tracing::warn!("auto-persist write failed: {}", e)
                                         }
                                         Err(e) => {
-                                            tracing::warn!("auto-persist write failed: {}", e)
+                                            tracing::warn!("auto-persist spawn_blocking failed: {}", e)
                                         }
                                     }
                                 }

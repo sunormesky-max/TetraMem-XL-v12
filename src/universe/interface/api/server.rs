@@ -25,7 +25,20 @@ pub async fn login(
 
     tracing::info!(username = %req.username, "user login attempt");
 
-    let token = state.jwt.create_token(&req.username, "user")?;
+    let role = if state.users.has_users() {
+        state
+            .users
+            .verify(&req.username, &req.password)
+            .ok_or_else(|| {
+                tracing::warn!(username = %req.username, "login failed: invalid credentials");
+                AppError::Unauthorized("invalid username or password".to_string())
+            })?
+            .to_string()
+    } else {
+        "user".to_string()
+    };
+
+    let token = state.jwt.create_token(&req.username, &role)?;
     let expires_in = state.config.auth.jwt_expiry_secs;
 
     Ok((

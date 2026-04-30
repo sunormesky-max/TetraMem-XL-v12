@@ -2,8 +2,6 @@ use crate::universe::coord::Coord7D;
 use crate::universe::energy::{EnergyError, EnergyField, EnergyPool};
 use std::collections::{HashMap, HashSet};
 
-const MANIFESTATION_THRESHOLD: f64 = 0.5;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NodeState {
     Dark,
@@ -33,20 +31,20 @@ impl DarkNode {
         &mut self.energy
     }
 
-    pub fn state(&self) -> NodeState {
-        if self.energy.is_manifested(MANIFESTATION_THRESHOLD) {
+    pub fn state(&self, threshold: f64) -> NodeState {
+        if self.energy.is_manifested(threshold) {
             NodeState::Manifested
         } else {
             NodeState::Dark
         }
     }
 
-    pub fn is_manifested(&self) -> bool {
-        self.energy.is_manifested(MANIFESTATION_THRESHOLD)
+    pub fn is_manifested_with(&self, threshold: f64) -> bool {
+        self.energy.is_manifested(threshold)
     }
 
-    pub fn is_dark(&self) -> bool {
-        !self.is_manifested()
+    pub fn is_dark_with(&self, threshold: f64) -> bool {
+        !self.is_manifested_with(threshold)
     }
 
     pub fn physical_coords(&self) -> [i32; 3] {
@@ -67,16 +65,30 @@ pub struct DarkUniverse {
     pool: EnergyPool,
     nodes: HashMap<Coord7D, DarkNode>,
     protected: HashSet<Coord7D>,
+    manifestation_threshold: f64,
 }
 
 impl DarkUniverse {
     pub fn new(total_energy: f64) -> Self {
+        Self::new_with_threshold(total_energy, 0.5)
+    }
+
+    pub fn new_with_threshold(total_energy: f64, manifestation_threshold: f64) -> Self {
         let pool = EnergyPool::new(total_energy).unwrap_or_else(|_| EnergyPool::new(1.0).unwrap());
         Self {
             pool,
             nodes: HashMap::new(),
             protected: HashSet::new(),
+            manifestation_threshold: manifestation_threshold.clamp(0.0, 1.0),
         }
+    }
+
+    pub fn manifestation_threshold(&self) -> f64 {
+        self.manifestation_threshold
+    }
+
+    pub fn set_manifestation_threshold(&mut self, threshold: f64) {
+        self.manifestation_threshold = threshold.clamp(0.0, 1.0);
     }
 
     pub fn protect(&mut self, coords: &[Coord7D]) {
@@ -112,7 +124,10 @@ impl DarkUniverse {
     }
 
     pub fn manifested_node_count(&self) -> usize {
-        self.nodes.values().filter(|n| n.is_manifested()).count()
+        self.nodes
+            .values()
+            .filter(|n| n.is_manifested_with(self.manifestation_threshold))
+            .count()
     }
 
     pub fn utilization(&self) -> f64 {
@@ -259,7 +274,10 @@ impl DarkUniverse {
     }
 
     pub fn get_manifested_nodes(&self) -> Vec<&DarkNode> {
-        self.nodes.values().filter(|n| n.is_manifested()).collect()
+        self.nodes
+            .values()
+            .filter(|n| n.is_manifested_with(self.manifestation_threshold))
+            .collect()
     }
 
     pub fn get_all_nodes(&self) -> &HashMap<Coord7D, DarkNode> {
@@ -324,7 +342,7 @@ impl DarkUniverse {
                 total_physical_energy += node.energy.physical();
                 total_dark_energy += node.energy.dark();
 
-                if node.is_manifested() {
+                if node.is_manifested_with(self.manifestation_threshold) {
                     manifested += 1;
                 } else {
                     dark += 1;
@@ -449,10 +467,16 @@ mod tests {
         let mut u = DarkUniverse::new(1000.0);
         let coord = Coord7D::new_even([0; 7]);
         u.materialize_biased(coord, 100.0, 0.8).unwrap();
-        assert!(u.get_node(&coord).unwrap().is_manifested());
+        assert!(u
+            .get_node(&coord)
+            .unwrap()
+            .is_manifested_with(u.manifestation_threshold()));
 
         u.flow_node_physical_to_dark(&coord, 50.0).unwrap();
-        assert!(!u.get_node(&coord).unwrap().is_manifested());
+        assert!(!u
+            .get_node(&coord)
+            .unwrap()
+            .is_manifested_with(u.manifestation_threshold()));
         assert!(u.verify_conservation());
     }
 
@@ -461,10 +485,16 @@ mod tests {
         let mut u = DarkUniverse::new(1000.0);
         let coord = Coord7D::new_even([0; 7]);
         u.materialize_biased(coord, 100.0, 0.2).unwrap();
-        assert!(!u.get_node(&coord).unwrap().is_manifested());
+        assert!(!u
+            .get_node(&coord)
+            .unwrap()
+            .is_manifested_with(u.manifestation_threshold()));
 
         u.flow_node_dark_to_physical(&coord, 40.0).unwrap();
-        assert!(u.get_node(&coord).unwrap().is_manifested());
+        assert!(u
+            .get_node(&coord)
+            .unwrap()
+            .is_manifested_with(u.manifestation_threshold()));
         assert!(u.verify_conservation());
     }
 

@@ -192,9 +192,12 @@ impl Tetrahedron {
     }
 
     pub fn is_manifested(&self, universe: &DarkUniverse) -> bool {
-        self.vertices
-            .iter()
-            .all(|v| universe.get_node(v).is_some_and(|n| n.is_manifested()))
+        let threshold = universe.manifestation_threshold();
+        self.vertices.iter().all(|v| {
+            universe
+                .get_node(v)
+                .is_some_and(|n| n.is_manifested_with(threshold))
+        })
     }
 
     pub fn total_energy(&self, universe: &DarkUniverse) -> f64 {
