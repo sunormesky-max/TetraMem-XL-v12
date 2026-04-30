@@ -28,6 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --lib
+      - run: cargo test --test api_integration
       - run: cargo test --test full_suite
       - run: cargo test --test scale_bench
       - run: cargo test --test stress_test
