@@ -29,6 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --lib
       - run: cargo test --test api_integration
+      - run: cargo test --test proptest_suite
       - run: cargo test --test full_suite
       - run: cargo test --test scale_bench
       - run: cargo test --test stress_test
@@ -44,6 +45,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+
+  msrv:
+    name: MSRV Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - run: cargo check --lib
+
+  bench:
+    name: Benchmarks Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --bench benchmarks --no-run
 
   build:
     name: Build Release

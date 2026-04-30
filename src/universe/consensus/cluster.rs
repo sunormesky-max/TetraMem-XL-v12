@@ -1,27 +1,14 @@
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::sync::Arc;
 
 use openraft::async_runtime::watch::WatchReceiver;
 
-use futures::Stream;
-use openraft::network::Backoff;
-use openraft::network::NetBackoff;
-use openraft::network::NetSnapshot;
-use openraft::network::NetStreamAppend;
-use openraft::network::NetTransferLeader;
-use openraft::network::NetVote;
-use openraft::network::RPCOption;
-use openraft::network::RaftNetworkFactory;
-use openraft::type_config::alias::NodeIdOf;
-use openraft::type_config::alias::SnapshotOf;
-use openraft::type_config::alias::VoteOf;
 use openraft::BasicNode;
 use openraft::Config;
-use openraft::OptionalSend;
 use openraft::Raft;
 use serde::{Deserialize, Serialize};
 
+use super::network::HttpRaftNetwork;
 use super::raft_node::{
     new_log_store, new_state_machine, LogStore, Request, StateMachineStore, TypeName,
 };
@@ -243,10 +230,12 @@ impl ClusterManager {
                 .map_err(|e| format!("raft config error: {}", e))?,
         );
 
+        let network = HttpRaftNetwork::new(std::time::Duration::from_secs(5));
+
         let raft: RaftNode = Raft::new(
             self.node_id,
             config,
-            DummyNetwork,
+            network,
             self.log_store.clone(),
             self.state_machine.clone(),
         )
@@ -413,6 +402,10 @@ impl ClusterManager {
         self.raft.is_some()
     }
 
+    pub fn raft_clone(&self) -> Option<RaftNode> {
+        self.raft.as_ref().cloned()
+    }
+
     pub fn start_energy_quorum(&mut self, required_budget: f64) -> QuorumStatus {
         self.quorum_counter += 1;
         let total_nodes = self.peers.len().max(1);
@@ -519,101 +512,6 @@ fn quorum_status(q: &H6EnergyQuorum) -> QuorumStatus {
         quorum_threshold: q.quorum_threshold,
         total_available_energy: q.total_available_energy(),
         all_conserved: q.entries.iter().all(|e| e.conservation_ok),
-    }
-}
-
-struct DummyNetwork;
-
-impl RaftNetworkFactory<TypeName> for DummyNetwork {
-    type Network = DummyConn;
-
-    async fn new_client(
-        &mut self,
-        _target: NodeIdOf<TypeName>,
-        _node: &BasicNode,
-    ) -> Self::Network {
-        DummyConn
-    }
-}
-
-struct DummyConn;
-
-fn unreachable_err() -> openraft::error::RPCError<TypeName> {
-    openraft::error::RPCError::Unreachable(openraft::error::Unreachable::new(&std::io::Error::new(
-        std::io::ErrorKind::NotConnected,
-        "single-node: no remote",
-    )))
-}
-
-impl NetBackoff<TypeName> for DummyConn {
-    fn backoff(&self) -> Backoff {
-        Backoff::new(std::iter::repeat(std::time::Duration::from_secs(1)))
-    }
-}
-
-impl NetVote<TypeName> for DummyConn {
-    async fn vote(
-        &mut self,
-        _rpc: openraft::raft::VoteRequest<TypeName>,
-        _option: RPCOption,
-    ) -> Result<openraft::raft::VoteResponse<TypeName>, openraft::error::RPCError<TypeName>> {
-        Err(unreachable_err())
-    }
-}
-
-impl NetStreamAppend<TypeName> for DummyConn {
-    fn stream_append<'s, S>(
-        &'s mut self,
-        _input: S,
-        _option: RPCOption,
-    ) -> openraft::base::BoxFuture<
-        's,
-        Result<
-            openraft::base::BoxStream<
-                's,
-                Result<
-                    openraft::raft::StreamAppendResult<TypeName>,
-                    openraft::error::RPCError<TypeName>,
-                >,
-            >,
-            openraft::error::RPCError<TypeName>,
-        >,
-    >
-    where
-        S: Stream<Item = openraft::raft::AppendEntriesRequest<TypeName>>
-            + OptionalSend
-            + Unpin
-            + 'static,
-    {
-        Box::pin(async move { Err(unreachable_err()) })
-    }
-}
-
-impl NetSnapshot<TypeName> for DummyConn {
-    async fn full_snapshot(
-        &mut self,
-        _vote: VoteOf<TypeName>,
-        _snapshot: SnapshotOf<TypeName>,
-        _cancel: impl Future<Output = openraft::error::ReplicationClosed> + OptionalSend + 'static,
-        _option: RPCOption,
-    ) -> Result<openraft::raft::SnapshotResponse<TypeName>, openraft::error::StreamingError<TypeName>>
-    {
-        Err(openraft::error::StreamingError::Unreachable(
-            openraft::error::Unreachable::new(&std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "single-node: no remote",
-            )),
-        ))
-    }
-}
-
-impl NetTransferLeader<TypeName> for DummyConn {
-    async fn transfer_leader(
-        &mut self,
-        _req: openraft::raft::TransferLeaderRequest<TypeName>,
-        _option: RPCOption,
-    ) -> Result<(), openraft::error::RPCError<TypeName>> {
-        Err(unreachable_err())
     }
 }
 

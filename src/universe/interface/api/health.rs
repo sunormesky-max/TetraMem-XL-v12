@@ -117,7 +117,11 @@ pub async fn get_openapi() -> Json<OpenApiDoc> {
         "/phase/quorum/start": {"post":{"summary":"Start energy quorum","responses":{"200":{"description":"OK"}}}},
         "/phase/quorum/confirm": {"post":{"summary":"Confirm quorum entry","responses":{"200":{"description":"OK"}}}},
         "/phase/quorum/status": {"get":{"summary":"Quorum status","responses":{"200":{"description":"OK"}}}},
-        "/phase/quorum/execute": {"post":{"summary":"Execute quorum decision","responses":{"200":{"description":"OK"}}}}
+        "/phase/quorum/execute": {"post":{"summary":"Execute quorum decision","responses":{"200":{"description":"OK"}}}},
+        "/raft/vote": {"post":{"summary":"Raft vote RPC (internal)","responses":{"200":{"description":"OK"}}}},
+        "/raft/append": {"post":{"summary":"Raft append entries RPC (internal)","responses":{"200":{"description":"OK"}}}},
+        "/raft/snapshot": {"post":{"summary":"Raft install snapshot RPC (internal)","responses":{"200":{"description":"OK"}}}},
+        "/raft/transfer": {"post":{"summary":"Raft transfer leader RPC (internal)","responses":{"200":{"description":"OK"}}}}
     }"#).unwrap_or_default();
 
     Json(OpenApiDoc {

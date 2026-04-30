@@ -33,6 +33,7 @@ use super::phase::{
     detect_phase_transition, phase_consensus, quorum_confirm, quorum_execute, quorum_start,
     quorum_status_endpoint,
 };
+use super::raft_rpc::{raft_append, raft_snapshot, raft_transfer, raft_vote};
 use super::scale::{auto_scale, frontier_expand, get_hebbian_neighbors};
 use super::server::login;
 use super::state::SharedState;
@@ -84,7 +85,11 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/stats", get(get_stats))
         .route("/metrics", get(get_metrics))
         .route("/openapi.json", get(get_openapi))
-        .route("/login", post(login));
+        .route("/login", post(login))
+        .route("/raft/vote", post(raft_vote))
+        .route("/raft/append", post(raft_append))
+        .route("/raft/snapshot", post(raft_snapshot))
+        .route("/raft/transfer", post(raft_transfer));
 
     let protected_routes = Router::new()
         .route("/memory/encode", post(encode_memory))

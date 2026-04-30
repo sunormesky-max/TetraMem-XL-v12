@@ -1,0 +1,20 @@
+name: Pull Request
+description: Contribute to TetraMem-XL v12
+labels: []
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What does this PR do and why?
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: `cargo test --lib` passes
+        - label: `cargo clippy --all-targets -- -D warnings` passes
+        - label: `cargo fmt --all -- --check` passes
+        - label: Energy conservation is preserved
