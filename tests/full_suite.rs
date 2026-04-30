@@ -22,10 +22,20 @@ struct TestResult {
 
 impl TestResult {
     fn ok(name: &str, detail: &str, ms: f64) -> Self {
-        Self { name: name.into(), passed: true, detail: detail.into(), elapsed_ms: ms }
+        Self {
+            name: name.into(),
+            passed: true,
+            detail: detail.into(),
+            elapsed_ms: ms,
+        }
     }
     fn fail(name: &str, detail: &str, ms: f64) -> Self {
-        Self { name: name.into(), passed: false, detail: detail.into(), elapsed_ms: ms }
+        Self {
+            name: name.into(),
+            passed: false,
+            detail: detail.into(),
+            elapsed_ms: ms,
+        }
     }
 }
 
@@ -46,9 +56,13 @@ fn main() {
             for y in 0..50i32 {
                 for z in 0..40i32 {
                     let c = Coord7D::new_even([x, y, z, 0, 0, 0, 0]);
-                    if u.materialize_biased(c, 10.0, 0.6).is_ok() { created += 1; }
+                    if u.materialize_biased(c, 10.0, 0.6).is_ok() {
+                        created += 1;
+                    }
                     let c2 = Coord7D::new_odd([x, y, z, 0, 0, 0, 0]);
-                    if u.materialize_biased(c2, 8.0, 0.3).is_ok() { created += 1; }
+                    if u.materialize_biased(c2, 8.0, 0.3).is_ok() {
+                        created += 1;
+                    }
                 }
             }
         }
@@ -56,7 +70,15 @@ fn main() {
         let stats = u.stats();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("A1", &format!("{}节点 守恒✓ 利用率{:.1}%", created, stats.utilization * 100.0), ms)
+            TestResult::ok(
+                "A1",
+                &format!(
+                    "{}节点 守恒✓ 利用率{:.1}%",
+                    created,
+                    stats.utilization * 100.0
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("A1", "守恒违反!", ms)
         }
@@ -99,7 +121,9 @@ fn main() {
         }
         let mut tc = 0usize;
         for i in 0..4999 {
-            if u.transfer_energy(&coords[i], &coords[i + 1], 2.0).is_ok() { tc += 1; }
+            if u.transfer_energy(&coords[i], &coords[i + 1], 2.0).is_ok() {
+                tc += 1;
+            }
         }
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -127,7 +151,11 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("A4", &format!("删除{} 守恒✓ 剩余{}", removed, u.active_node_count()), ms)
+            TestResult::ok(
+                "A4",
+                &format!("删除{} 守恒✓ 剩余{}", removed, u.active_node_count()),
+                ms,
+            )
         } else {
             TestResult::fail("A4", "守恒违反!", ms)
         }
@@ -147,7 +175,11 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok && fail_count > 0 {
-            TestResult::ok("A5", &format!("成功{} 拒绝{} 守恒✓", ok_count, fail_count), ms)
+            TestResult::ok(
+                "A5",
+                &format!("成功{} 拒绝{} 守恒✓", ok_count, fail_count),
+                ms,
+            )
         } else {
             TestResult::fail("A5", &format!("ok={} fail={}", ok, fail_count), ms)
         }
@@ -172,16 +204,22 @@ fn main() {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1000.0);
         for i in 0..5i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6).unwrap();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                .unwrap();
         }
         u.expand_energy_pool(100_000.0);
         for i in 5..100i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6).unwrap();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                .unwrap();
         }
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("A7", &format!("扩展后95节点 守恒✓ 总能{}", u.total_energy()), ms)
+            TestResult::ok(
+                "A7",
+                &format!("扩展后95节点 守恒✓ 总能{}", u.total_energy()),
+                ms,
+            )
         } else {
             TestResult::fail("A7", "守恒违反!", ms)
         }
@@ -200,13 +238,21 @@ fn main() {
             let anchor = Coord7D::new_even([dim * 10, dim * 10, dim * 10, 0, 0, 0, 0]);
             let mem = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
             let decoded = MemoryCodec::decode(&u, &mem).unwrap();
-            let err = data.iter().zip(decoded.iter()).map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
+            let err = data
+                .iter()
+                .zip(decoded.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
             max_err = max_err.max(err);
             count += 1;
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if max_err < 1e-10 {
-            TestResult::ok("B1", &format!("{}种维度 最大误差{:.2e}", count, max_err), ms)
+            TestResult::ok(
+                "B1",
+                &format!("{}种维度 最大误差{:.2e}", count, max_err),
+                ms,
+            )
         } else {
             TestResult::fail("B1", &format!("误差过大: {:.2e}", max_err), ms)
         }
@@ -220,8 +266,11 @@ fn main() {
         let _mem = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        if ok { TestResult::ok("B2", "编码28维后守恒✓", ms) }
-        else { TestResult::fail("B2", "守恒违反!", ms) }
+        if ok {
+            TestResult::ok("B2", "编码28维后守恒✓", ms)
+        } else {
+            TestResult::fail("B2", "守恒违反!", ms)
+        }
     }));
 
     results.push(run("B3: erase释放能量后守恒", || {
@@ -236,7 +285,11 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok && avail_after > avail_before {
-            TestResult::ok("B3", &format!("擦除可用能{}→{} 守恒✓", avail_before, avail_after), ms)
+            TestResult::ok(
+                "B3",
+                &format!("擦除可用能{}→{} 守恒✓", avail_before, avail_after),
+                ms,
+            )
         } else {
             TestResult::fail("B3", &format!("ok={} after={}", ok, avail_after), ms)
         }
@@ -251,14 +304,22 @@ fn main() {
             let anchor = Coord7D::new_even([cycle, 0, 0, 0, 0, 0, 0]);
             let mem = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
             let decoded = MemoryCodec::decode(&u, &mem).unwrap();
-            let err = data.iter().zip(decoded.iter()).map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
+            let err = data
+                .iter()
+                .zip(decoded.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
             max_err = max_err.max(err);
             MemoryCodec::erase(&mut u, &mem);
         }
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok && max_err < 1e-10 {
-            TestResult::ok("B4", &format!("100次循环 最大误差{:.2e} 守恒✓", max_err), ms)
+            TestResult::ok(
+                "B4",
+                &format!("100次循环 最大误差{:.2e} 守恒✓", max_err),
+                ms,
+            )
         } else {
             TestResult::fail("B4", &format!("err={:.2e} ok={}", max_err, ok), ms)
         }
@@ -278,13 +339,21 @@ fn main() {
         let mut max_err = 0.0f64;
         for (mem, data) in mems.iter().zip(datasets.iter()) {
             let decoded = MemoryCodec::decode(&u, mem).unwrap();
-            let err = data.iter().zip(decoded.iter()).map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
+            let err = data
+                .iter()
+                .zip(decoded.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
             max_err = max_err.max(err);
         }
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok && max_err < 1e-10 {
-            TestResult::ok("B5", &format!("100个14维记忆 最大误差{:.2e} 守恒✓", max_err), ms)
+            TestResult::ok(
+                "B5",
+                &format!("100个14维记忆 最大误差{:.2e} 守恒✓", max_err),
+                ms,
+            )
         } else {
             TestResult::fail("B5", &format!("err={:.2e} ok={}", max_err, ok), ms)
         }
@@ -293,20 +362,26 @@ fn main() {
     results.push(run("B6: 空数据拒绝", || {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1_000_000.0);
-        let result = MemoryCodec::encode(&mut u, &Coord7D::new_even([0,0,0,0,0,0,0]), &[]);
+        let result = MemoryCodec::encode(&mut u, &Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]), &[]);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        if result.is_err() { TestResult::ok("B6", "空数据正确拒绝", ms) }
-        else { TestResult::fail("B6", "未被拒绝!", ms) }
+        if result.is_err() {
+            TestResult::ok("B6", "空数据正确拒绝", ms)
+        } else {
+            TestResult::fail("B6", "未被拒绝!", ms)
+        }
     }));
 
     results.push(run("B7: 超量数据(>28维)拒绝", || {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1_000_000_000.0);
         let data: Vec<f64> = (0..29).map(|i| i as f64).collect();
-        let result = MemoryCodec::encode(&mut u, &Coord7D::new_even([0,0,0,0,0,0,0]), &data);
+        let result = MemoryCodec::encode(&mut u, &Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]), &data);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        if result.is_err() { TestResult::ok("B7", "29维正确拒绝", ms) }
-        else { TestResult::fail("B7", "未被拒绝!", ms) }
+        if result.is_err() {
+            TestResult::ok("B7", "29维正确拒绝", ms)
+        } else {
+            TestResult::fail("B7", "未被拒绝!", ms)
+        }
     }));
 
     // ═══ C. 脉冲引擎 — PCNN吞吐 ═══
@@ -318,21 +393,31 @@ fn main() {
         for x in 0..20i32 {
             for y in 0..20i32 {
                 for z in 0..20i32 {
-                    u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6).ok();
-                    u.materialize_biased(Coord7D::new_odd([x, y, z, 0, 0, 0, 0]), 40.0, 0.3).ok();
+                    u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6)
+                        .ok();
+                    u.materialize_biased(Coord7D::new_odd([x, y, z, 0, 0, 0, 0]), 40.0, 0.3)
+                        .ok();
                 }
             }
         }
         let mut h = HebbianMemory::new();
         let engine = PulseEngine::new();
         let mut total_visited = 0usize;
-        for pt in [PulseType::Exploratory, PulseType::Reinforcing, PulseType::Cascade] {
-            let r = engine.propagate(&Coord7D::new_even([10,10,10,0,0,0,0]), pt, &u, &mut h);
+        for pt in [
+            PulseType::Exploratory,
+            PulseType::Reinforcing,
+            PulseType::Cascade,
+        ] {
+            let r = engine.propagate(&Coord7D::new_even([10, 10, 10, 0, 0, 0, 0]), pt, &u, &mut h);
             total_visited += r.visited_nodes;
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if total_visited > 0 {
-            TestResult::ok("C1", &format!("3种脉冲 访问{} 赫布{}", total_visited, h.edge_count()), ms)
+            TestResult::ok(
+                "C1",
+                &format!("3种脉冲 访问{} 赫布{}", total_visited, h.edge_count()),
+                ms,
+            )
         } else {
             TestResult::fail("C1", "零访问!", ms)
         }
@@ -341,11 +426,13 @@ fn main() {
     results.push(run("C2: 赫布权重衰减", || {
         let t = Instant::now();
         let mut h = HebbianMemory::new();
-        let a = Coord7D::new_even([0,0,0,0,0,0,0]);
-        let b = Coord7D::new_even([1,0,0,0,0,0,0]);
+        let a = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
         h.record_path(&[a, b], 1.0);
         let before = h.get_bias(&a, &b);
-        for _ in 0..20 { h.decay_all(); }
+        for _ in 0..20 {
+            h.decay_all();
+        }
         let after = h.get_bias(&a, &b);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if after < before {
@@ -369,7 +456,11 @@ fn main() {
         let after = h.edge_count();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if after < before {
-            TestResult::ok("C3", &format!("{}边→{}边 清理了{}弱边", before, after, before - after), ms)
+            TestResult::ok(
+                "C3",
+                &format!("{}边→{}边 清理了{}弱边", before, after, before - after),
+                ms,
+            )
         } else {
             TestResult::fail("C3", &format!("边数未减少 {}→{}", before, after), ms)
         }
@@ -384,15 +475,26 @@ fn main() {
         for x in 0..5i32 {
             for y in 0..5i32 {
                 for z in 0..5i32 {
-                    u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6).ok();
-                    u.materialize_biased(Coord7D::new_odd([x, y, z, 0, 0, 0, 0]), 40.0, 0.3).ok();
+                    u.materialize_biased(Coord7D::new_even([x, y, z, 0, 0, 0, 0]), 50.0, 0.6)
+                        .ok();
+                    u.materialize_biased(Coord7D::new_odd([x, y, z, 0, 0, 0, 0]), 40.0, 0.3)
+                        .ok();
                 }
             }
         }
         let topo = TopologyEngine::analyze(&u);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if topo.connected_components >= 1 {
-            TestResult::ok("D1", &format!("{} 连通:{} Euler:{}", topo.betti, topo.connected_components, topo.betti.euler_characteristic()), ms)
+            TestResult::ok(
+                "D1",
+                &format!(
+                    "{} 连通:{} Euler:{}",
+                    topo.betti,
+                    topo.connected_components,
+                    topo.betti.euler_characteristic()
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("D1", "拓扑异常", ms)
         }
@@ -402,10 +504,11 @@ fn main() {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1_000_000.0);
         for i in 0..20i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6).ok();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                .ok();
         }
-        let from = Coord7D::new_even([0,0,0,0,0,0,0]);
-        let to = Coord7D::new_even([19,0,0,0,0,0,0]);
+        let from = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let to = Coord7D::new_even([19, 0, 0, 0, 0, 0, 0]);
         let path = TopologyEngine::find_shortest_path(&u, &from, &to);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if !path.is_empty() && *path.first().unwrap() == from && *path.last().unwrap() == to {
@@ -418,12 +521,21 @@ fn main() {
     results.push(run("D3: 不连通返回空路径", || {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1_000_000.0);
-        u.materialize_biased(Coord7D::new_even([0,0,0,0,0,0,0]), 50.0, 0.6).ok();
-        u.materialize_biased(Coord7D::new_even([100,100,100,0,0,0,0]), 50.0, 0.6).ok();
-        let path = TopologyEngine::find_shortest_path(&u, &Coord7D::new_even([0,0,0,0,0,0,0]), &Coord7D::new_even([100,100,100,0,0,0,0]));
+        u.materialize_biased(Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+            .ok();
+        u.materialize_biased(Coord7D::new_even([100, 100, 100, 0, 0, 0, 0]), 50.0, 0.6)
+            .ok();
+        let path = TopologyEngine::find_shortest_path(
+            &u,
+            &Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]),
+            &Coord7D::new_even([100, 100, 100, 0, 0, 0, 0]),
+        );
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        if path.is_empty() { TestResult::ok("D3", "不连通→空路径", ms) }
-        else { TestResult::fail("D3", "应返回空!", ms) }
+        if path.is_empty() {
+            TestResult::ok("D3", "不连通→空路径", ms)
+        } else {
+            TestResult::fail("D3", "应返回空!", ms)
+        }
     }));
 
     // ═══ E. 结晶相变 ═══
@@ -434,17 +546,28 @@ fn main() {
         let mut u = DarkUniverse::new(1_000_000.0);
         let mut h = HebbianMemory::new();
         for i in 0..10i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6).ok();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                .ok();
         }
-        let nodes: Vec<Coord7D> = (0..10).map(|i| Coord7D::new_even([i,0,0,0,0,0,0])).collect();
-        for _ in 0..10 { h.record_path(&nodes, 2.0); }
+        let nodes: Vec<Coord7D> = (0..10)
+            .map(|i| Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]))
+            .collect();
+        for _ in 0..10 {
+            h.record_path(&nodes, 2.0);
+        }
         let mut crystal = CrystalEngine::new();
         let report = crystal.crystallize(&h, &u);
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("E1", &format!("结晶{} 超级{} 锁定{:.1} 守恒✓",
-                report.new_crystals, report.new_super_crystals, report.energy_locked), ms)
+            TestResult::ok(
+                "E1",
+                &format!(
+                    "结晶{} 超级{} 锁定{:.1} 守恒✓",
+                    report.new_crystals, report.new_super_crystals, report.energy_locked
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("E1", "守恒违反!", ms)
         }
@@ -457,17 +580,23 @@ fn main() {
         for i in 0..20i32 {
             let c = Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]);
             u.materialize_biased(c, 50.0, 0.6).ok();
-            if i > 0 { h.record_path(&[Coord7D::new_even([i-1,0,0,0,0,0,0]), c], 3.0); }
+            if i > 0 {
+                h.record_path(&[Coord7D::new_even([i - 1, 0, 0, 0, 0, 0, 0]), c], 3.0);
+            }
         }
         let mut crystal = CrystalEngine::new();
         crystal.crystallize(&h, &u);
-        let from = Coord7D::new_even([0,0,0,0,0,0,0]);
-        let to = Coord7D::new_even([19,0,0,0,0,0,0]);
+        let from = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let to = Coord7D::new_even([19, 0, 0, 0, 0, 0, 0]);
         let path = crystal.crystal_path(&from, &to, 25);
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            let hops = if path.is_empty() { "无结晶路由".into() } else { format!("{}跳", path.len()-1) };
+            let hops = if path.is_empty() {
+                "无结晶路由".into()
+            } else {
+                format!("{}跳", path.len() - 1)
+            };
             TestResult::ok("E2", &format!("结晶路由: {} 守恒✓", hops), ms)
         } else {
             TestResult::fail("E2", "守恒违反!", ms)
@@ -489,8 +618,15 @@ fn main() {
         let analogies = ReasoningEngine::find_analogies(&u, &mems, 0.5);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if !analogies.is_empty() {
-            let max_conf = analogies.iter().map(|a| a.confidence).fold(0.0f64, f64::max);
-            TestResult::ok("F1", &format!("{}组类比 最高{:.3}", analogies.len(), max_conf), ms)
+            let max_conf = analogies
+                .iter()
+                .map(|a| a.confidence)
+                .fold(0.0f64, f64::max);
+            TestResult::ok(
+                "F1",
+                &format!("{}组类比 最高{:.3}", analogies.len(), max_conf),
+                ms,
+            )
         } else {
             TestResult::fail("F1", "未检测到类比!", ms)
         }
@@ -506,7 +642,9 @@ fn main() {
             let anchor = Coord7D::new_even([i * 10, 0, 0, 0, 0, 0, 0]);
             mems.push(MemoryCodec::encode(&mut u, &anchor, &data).unwrap());
         }
-        for i in 0..9 { h.record_path(&[*mems[i].anchor(), *mems[i+1].anchor()], 2.0); }
+        for i in 0..9 {
+            h.record_path(&[*mems[i].anchor(), *mems[i + 1].anchor()], 2.0);
+        }
         let chain = ReasoningEngine::infer_chain(&u, &h, mems[0].anchor(), mems[9].anchor(), 15);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if !chain.is_empty() {
@@ -522,13 +660,18 @@ fn main() {
         let mut h = HebbianMemory::new();
         for x in 0..10i32 {
             for y in 0..10i32 {
-                u.materialize_biased(Coord7D::new_even([x, y, 0, 0, 0, 0, 0]), 50.0, 0.6).ok();
+                u.materialize_biased(Coord7D::new_even([x, y, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                    .ok();
             }
         }
         let anchor = Coord7D::new_even([5, 5, 0, 0, 0, 0, 0]);
         let discoveries = ReasoningEngine::discover(&u, &mut h, &anchor, 0.5);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        TestResult::ok("F3", &format!("发现{}条线索 赫布{}", discoveries.len(), h.edge_count()), ms)
+        TestResult::ok(
+            "F3",
+            &format!("发现{}条线索 赫布{}", discoveries.len(), h.edge_count()),
+            ms,
+        )
     }));
 
     // ═══ G. 梦境引擎 ═══
@@ -550,9 +693,18 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("G1", &format!("replay:{} weaken:{} consol:{} 边{}→{} 守恒✓",
-                report.paths_replayed, report.paths_weakened, report.memories_consolidated,
-                report.hebbian_edges_before, report.hebbian_edges_after), ms)
+            TestResult::ok(
+                "G1",
+                &format!(
+                    "replay:{} weaken:{} consol:{} 边{}→{} 守恒✓",
+                    report.paths_replayed,
+                    report.paths_weakened,
+                    report.memories_consolidated,
+                    report.hebbian_edges_before,
+                    report.hebbian_edges_after
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("G1", "守恒违反!", ms)
         }
@@ -573,8 +725,14 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok && reports.len() == 10 {
-            TestResult::ok("G2", &format!("10轮完成 边{}/{} 守恒✓",
-                reports[0].hebbian_edges_before, reports[9].hebbian_edges_after), ms)
+            TestResult::ok(
+                "G2",
+                &format!(
+                    "10轮完成 边{}/{} 守恒✓",
+                    reports[0].hebbian_edges_before, reports[9].hebbian_edges_after
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("G2", &format!("ok={} rounds={}", ok, reports.len()), ms)
         }
@@ -599,8 +757,16 @@ fn main() {
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("H1", &format!("stress:{:.2} entropy:{:.3} actions:{} 守恒✓",
-                report.stress_level, report.entropy, report.actions.len()), ms)
+            TestResult::ok(
+                "H1",
+                &format!(
+                    "stress:{:.2} entropy:{:.3} actions:{} 守恒✓",
+                    report.stress_level,
+                    report.entropy,
+                    report.actions.len()
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("H1", "守恒违反!", ms)
         }
@@ -610,12 +776,26 @@ fn main() {
         let t = Instant::now();
         let mut u = DarkUniverse::new(5_000.0);
         for i in 0..50i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.8).ok();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.8)
+                .ok();
         }
-        let report = RegulationEngine::new().regulate(&mut u, &mut HebbianMemory::new(), &mut CrystalEngine::new(), &[]);
+        let report = RegulationEngine::new().regulate(
+            &mut u,
+            &mut HebbianMemory::new(),
+            &mut CrystalEngine::new(),
+            &[],
+        );
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if report.stress_level > 0.3 {
-            TestResult::ok("H2", &format!("利用率{:.0}% 应激{:.2}", u.stats().utilization * 100.0, report.stress_level), ms)
+            TestResult::ok(
+                "H2",
+                &format!(
+                    "利用率{:.0}% 应激{:.2}",
+                    u.stats().utilization * 100.0,
+                    report.stress_level
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("H2", &format!("应激过低: {:.2}", report.stress_level), ms)
         }
@@ -627,11 +807,20 @@ fn main() {
     results.push(run("I1: 低利用率不扩展", || {
         let t = Instant::now();
         let mut u = DarkUniverse::new(1_000_000.0);
-        u.materialize_biased(Coord7D::new_even([0,0,0,0,0,0,0]), 50.0, 0.6).ok();
+        u.materialize_biased(Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+            .ok();
         let report = AutoScaler::new().auto_scale(&mut u, &HebbianMemory::new(), &[]);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if report.nodes_added == 0 && u.verify_conservation() {
-            TestResult::ok("I1", &format!("利用率{:.0}% → 不扩展 原因:{:?} 守恒✓", u.stats().utilization * 100.0, report.reason), ms)
+            TestResult::ok(
+                "I1",
+                &format!(
+                    "利用率{:.0}% → 不扩展 原因:{:?} 守恒✓",
+                    u.stats().utilization * 100.0,
+                    report.reason
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("I1", &format!("nodes_added={}", report.nodes_added), ms)
         }
@@ -641,13 +830,18 @@ fn main() {
         let t = Instant::now();
         let mut u = DarkUniverse::new(5_000.0);
         for i in 0..50i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.8).ok();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.8)
+                .ok();
         }
         let report = AutoScaler::new().auto_scale(&mut u, &HebbianMemory::new(), &[]);
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("I2", &format!("扩展+{} 原因:{:?} 守恒✓", report.nodes_added, report.reason), ms)
+            TestResult::ok(
+                "I2",
+                &format!("扩展+{} 原因:{:?} 守恒✓", report.nodes_added, report.reason),
+                ms,
+            )
         } else {
             TestResult::fail("I2", "守恒违反!", ms)
         }
@@ -662,7 +856,11 @@ fn main() {
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
             let r = report.unwrap();
-            TestResult::ok("I3", &format!("预分配+{}能量 守恒✓", r.energy_expanded_by), ms)
+            TestResult::ok(
+                "I3",
+                &format!("预分配+{}能量 守恒✓", r.energy_expanded_by),
+                ms,
+            )
         } else {
             TestResult::fail("I3", "守恒违反!", ms)
         }
@@ -696,18 +894,33 @@ fn main() {
         let ok5 = c2.channel_count() == crystal.channel_count();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok1 && ok2 && ok3 && ok4 && ok5 {
-            TestResult::ok("J1", &format!("节点{} 赫布{} 记忆{} 结晶{} 守恒✓",
-                u2.active_node_count(), h2.edge_count(), mems2.len(), c2.channel_count()), ms)
+            TestResult::ok(
+                "J1",
+                &format!(
+                    "节点{} 赫布{} 记忆{} 结晶{} 守恒✓",
+                    u2.active_node_count(),
+                    h2.edge_count(),
+                    mems2.len(),
+                    c2.channel_count()
+                ),
+                ms,
+            )
         } else {
-            TestResult::fail("J1", &format!("ok={}/{}/{}/{}/{}", ok1, ok2, ok3, ok4, ok5), ms)
+            TestResult::fail(
+                "J1",
+                &format!("ok={}/{}/{}/{}/{}", ok1, ok2, ok3, ok4, ok5),
+                ms,
+            )
         }
     }));
 
     results.push(run("J2: JSON合法性", || {
         let t = Instant::now();
         let mut u = DarkUniverse::new(100_000.0);
-        u.materialize_biased(Coord7D::new_even([0,0,0,0,0,0,0]), 50.0, 0.6).ok();
-        let json = PersistEngine::to_json(&u, &HebbianMemory::new(), &[], &CrystalEngine::new()).unwrap();
+        u.materialize_biased(Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+            .ok();
+        let json =
+            PersistEngine::to_json(&u, &HebbianMemory::new(), &[], &CrystalEngine::new()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if parsed.is_object() {
@@ -791,17 +1004,39 @@ fn main() {
         let mut u = DarkUniverse::new(1_000_000.0);
         let mut h = HebbianMemory::new();
         for i in 0..5i32 {
-            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6).ok();
+            u.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+                .ok();
         }
-        h.record_path(&[Coord7D::new_even([0,0,0,0,0,0,0]), Coord7D::new_even([1,0,0,0,0,0,0])], 2.0);
+        h.record_path(
+            &[
+                Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]),
+                Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]),
+            ],
+            2.0,
+        );
         let json = PersistEngine::to_json(&u, &h, &[], &CrystalEngine::new()).unwrap();
         let (mut u2, mut h2, _, _) = PersistEngine::from_json(&json).unwrap();
-        u2.materialize_biased(Coord7D::new_even([100,0,0,0,0,0,0]), 50.0, 0.6).ok();
-        h2.record_path(&[Coord7D::new_even([100,0,0,0,0,0,0]), Coord7D::new_even([0,0,0,0,0,0,0])], 1.5);
+        u2.materialize_biased(Coord7D::new_even([100, 0, 0, 0, 0, 0, 0]), 50.0, 0.6)
+            .ok();
+        h2.record_path(
+            &[
+                Coord7D::new_even([100, 0, 0, 0, 0, 0, 0]),
+                Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]),
+            ],
+            1.5,
+        );
         let ok = u2.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("K3", &format!("恢复+操作 节点{} 赫布{} 守恒✓", u2.active_node_count(), h2.edge_count()), ms)
+            TestResult::ok(
+                "K3",
+                &format!(
+                    "恢复+操作 节点{} 赫布{} 守恒✓",
+                    u2.active_node_count(),
+                    h2.edge_count()
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("K3", "守恒违反!", ms)
         }
@@ -818,16 +1053,28 @@ fn main() {
             let y = (i / 10) * 100;
             let anchor = Coord7D::new_even([x, y, 0, 0, 0, 0, 0]);
             mems.push(MemoryCodec::encode(&mut u, &anchor, &data).unwrap());
-            if i > 0 { h.record_path(&[*mems[i as usize - 1].anchor(), *mems[i as usize].anchor()], 1.0); }
+            if i > 0 {
+                h.record_path(
+                    &[*mems[i as usize - 1].anchor(), *mems[i as usize].anchor()],
+                    1.0,
+                );
+            }
         }
         let topo = TopologyEngine::analyze(&u);
         let scale_report = AutoScaler::new().auto_scale(&mut u, &h, &mems);
         let ok = u.verify_conservation();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ok {
-            TestResult::ok("K4", &format!(
-                "100记忆 赫布{} H0={} 扩展+{} 守恒✓",
-                h.edge_count(), topo.connected_components, scale_report.nodes_added), ms)
+            TestResult::ok(
+                "K4",
+                &format!(
+                    "100记忆 赫布{} H0={} 扩展+{} 守恒✓",
+                    h.edge_count(),
+                    topo.connected_components,
+                    scale_report.nodes_added
+                ),
+                ms,
+            )
         } else {
             TestResult::fail("K4", "守恒违反!", ms)
         }
@@ -844,11 +1091,20 @@ fn main() {
 
     for r in &results {
         let icon = if r.passed { "✓" } else { "✗" };
-        println!("  {} {:<50} {:.1}ms  {}", icon, r.name, r.elapsed_ms, r.detail);
+        println!(
+            "  {} {:<50} {:.1}ms  {}",
+            icon, r.name, r.elapsed_ms, r.detail
+        );
     }
 
     println!("{}", "═".repeat(70));
-    println!("  结果: {}/{} 通过  {} 失败  总耗时: {:.0}ms", passed, passed + failed, failed, total_ms);
+    println!(
+        "  结果: {}/{} 通过  {} 失败  总耗时: {:.0}ms",
+        passed,
+        passed + failed,
+        failed,
+        total_ms
+    );
     if failed == 0 {
         println!("  ★ 全系统通过 — 能量守恒律在所有场景下坚如磐石 ★");
     } else {
@@ -858,7 +1114,8 @@ fn main() {
 }
 
 fn run<F>(name: &str, f: F) -> TestResult
-where F: FnOnce() -> TestResult,
+where
+    F: FnOnce() -> TestResult,
 {
     let r = f();
     let icon = if r.passed { "✓" } else { "✗" };

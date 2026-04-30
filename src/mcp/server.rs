@@ -64,7 +64,8 @@ impl McpServer {
                 serde_json::to_string(&JsonRpcResponse::error(
                     id,
                     JsonRpcError::internal_error("serialization failed"),
-                )).unwrap()
+                ))
+                .unwrap()
             });
 
             writeln!(stdout_lock, "{}", json)?;
@@ -91,9 +92,12 @@ impl McpServer {
                 });
                 JsonRpcResponse::success(id, result)
             }
-            "notifications/initialized" => {
-                JsonRpcResponse { jsonrpc: "2.0".into(), id: None, result: Some(Value::Null), error: None }
-            }
+            "notifications/initialized" => JsonRpcResponse {
+                jsonrpc: "2.0".into(),
+                id: None,
+                result: Some(Value::Null),
+                error: None,
+            },
             "ping" => JsonRpcResponse::success(id, json!({})),
             "tools/list" => {
                 let tools = TetraMemTools::definitions();
@@ -102,17 +106,30 @@ impl McpServer {
             "tools/call" => {
                 let params = match req.params {
                     Some(p) => p,
-                    None => return JsonRpcResponse::error(id, JsonRpcError::invalid_params("missing params")),
+                    None => {
+                        return JsonRpcResponse::error(
+                            id,
+                            JsonRpcError::invalid_params("missing params"),
+                        )
+                    }
                 };
                 let tool_name = match params.get("name").and_then(|v| v.as_str()) {
                     Some(n) => n.to_string(),
-                    None => return JsonRpcResponse::error(id, JsonRpcError::invalid_params("missing tool name")),
+                    None => {
+                        return JsonRpcResponse::error(
+                            id,
+                            JsonRpcError::invalid_params("missing tool name"),
+                        )
+                    }
                 };
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
                 let result = TetraMemTools::handle_tool(
-                    &tool_name, &args,
-                    &mut self.universe, &mut self.hebbian,
-                    &mut self.memories, &mut self.crystal,
+                    &tool_name,
+                    &args,
+                    &mut self.universe,
+                    &mut self.hebbian,
+                    &mut self.memories,
+                    &mut self.crystal,
                 );
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap_or_default())
             }
@@ -123,17 +140,33 @@ impl McpServer {
             "resources/read" => {
                 let params = match req.params {
                     Some(p) => p,
-                    None => return JsonRpcResponse::error(id, JsonRpcError::invalid_params("missing params")),
+                    None => {
+                        return JsonRpcResponse::error(
+                            id,
+                            JsonRpcError::invalid_params("missing params"),
+                        )
+                    }
                 };
                 let uri = match params.get("uri").and_then(|v| v.as_str()) {
                     Some(u) => u.to_string(),
-                    None => return JsonRpcResponse::error(id, JsonRpcError::invalid_params("missing uri")),
-                };
-                match TetraMemTools::read_resource(&uri, &self.universe, &self.hebbian, &self.memories) {
-                    Some(content) => {
-                        JsonRpcResponse::success(id, json!({ "contents": [content] }))
+                    None => {
+                        return JsonRpcResponse::error(
+                            id,
+                            JsonRpcError::invalid_params("missing uri"),
+                        )
                     }
-                    None => JsonRpcResponse::error(id, JsonRpcError::invalid_params(&format!("unknown resource: {}", uri))),
+                };
+                match TetraMemTools::read_resource(
+                    &uri,
+                    &self.universe,
+                    &self.hebbian,
+                    &self.memories,
+                ) {
+                    Some(content) => JsonRpcResponse::success(id, json!({ "contents": [content] })),
+                    None => JsonRpcResponse::error(
+                        id,
+                        JsonRpcError::invalid_params(&format!("unknown resource: {}", uri)),
+                    ),
                 }
             }
             _ => JsonRpcResponse::error(id, JsonRpcError::method_not_found(&req.method)),
@@ -158,9 +191,12 @@ pub fn run_mcp_demo() {
     println!("── Demo: materialize nodes ──");
     let args = json!({"coord": [10, 10, 10], "energy": 100.0, "physical_ratio": 0.6});
     let result = TetraMemTools::handle_tool(
-        "tetramem_materialize", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_materialize",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
@@ -168,61 +204,82 @@ pub fn run_mcp_demo() {
         let coord = [10 + i * 5, 10, 10];
         let args = json!({"coord": coord, "energy": 80.0, "physical_ratio": 0.5});
         let _ = TetraMemTools::handle_tool(
-            "tetramem_materialize", &args,
-            &mut server.universe, &mut server.hebbian,
-            &mut server.memories, &mut server.crystal,
+            "tetramem_materialize",
+            &args,
+            &mut server.universe,
+            &mut server.hebbian,
+            &mut server.memories,
+            &mut server.crystal,
         );
     }
 
     println!("── Demo: encode memory ──");
-    let args = json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.14, 0.0, 42.0]});
+    let args = json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.15, 0.0, 42.0]});
     let result = TetraMemTools::handle_tool(
-        "tetramem_encode", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_encode",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
     println!("── Demo: decode memory ──");
     let args = json!({"anchor": [10, 10, 10]});
     let result = TetraMemTools::handle_tool(
-        "tetramem_decode", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_decode",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
     println!("── Demo: fire pulse ──");
     let args = json!({"source": [10, 10, 10], "pulse_type": "reinforcing"});
     let result = TetraMemTools::handle_tool(
-        "tetramem_pulse", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_pulse",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
     println!("── Demo: stats ──");
     let args = json!({});
     let result = TetraMemTools::handle_tool(
-        "tetramem_stats", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_stats",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
     println!("── Demo: topology ──");
     let result = TetraMemTools::handle_tool(
-        "tetramem_topology", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_topology",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 
     println!("── Demo: conservation check ──");
     let result = TetraMemTools::handle_tool(
-        "tetramem_conservation_check", &args,
-        &mut server.universe, &mut server.hebbian,
-        &mut server.memories, &mut server.crystal,
+        "tetramem_conservation_check",
+        &args,
+        &mut server.universe,
+        &mut server.hebbian,
+        &mut server.memories,
+        &mut server.crystal,
     );
     println!("  {}\n", result.content[0].text);
 

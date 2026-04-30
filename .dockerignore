@@ -1,0 +1,8 @@
+target/
+.git/
+.github/
+*.md
+*.toml
+!Cargo.toml
+!tetramem.toml
+panel/

@@ -17,10 +17,22 @@ struct TestResult {
 
 impl TestResult {
     fn ok(name: &str, detail: &str, ms: f64, cons: bool) -> Self {
-        Self { name: name.to_string(), passed: true, duration_ms: ms, detail: detail.to_string(), conservation: cons }
+        Self {
+            name: name.to_string(),
+            passed: true,
+            duration_ms: ms,
+            detail: detail.to_string(),
+            conservation: cons,
+        }
     }
     fn fail(name: &str, detail: &str, ms: f64) -> Self {
-        Self { name: name.to_string(), passed: false, duration_ms: ms, detail: detail.to_string(), conservation: false }
+        Self {
+            name: name.to_string(),
+            passed: false,
+            duration_ms: ms,
+            detail: detail.to_string(),
+            conservation: false,
+        }
     }
 }
 
@@ -32,10 +44,9 @@ fn make_anchor(i: i32) -> Coord7D {
 }
 
 fn make_data(i: i32, dim: usize) -> Vec<f64> {
-    (0..dim).map(|d| {
-        let v = ((i * 7 + d as i32 * 13) as f64).sin() * 40.0;
-        v
-    }).collect()
+    (0..dim)
+        .map(|d| ((i * 7 + d as i32 * 13) as f64).sin() * 40.0)
+        .collect()
 }
 
 fn main() {
@@ -72,11 +83,19 @@ fn main() {
     for r in &results {
         let mark = if r.passed { "✓" } else { "✗" };
         let cons = if r.conservation { "守恒✓" } else { "" };
-        println!("  {} {:<45} {:>6.1}ms  {} {}", mark, r.name, r.duration_ms, r.detail, cons);
+        println!(
+            "  {} {:<45} {:>6.1}ms  {} {}",
+            mark, r.name, r.duration_ms, r.detail, cons
+        );
     }
     println!("{}", SEPARATOR);
-    println!("  结果: {}/{} 通过  总耗时: {:.0}ms  全程守恒: {}",
-        passed, total, total_ms, if all_conserved { "✓" } else { "✗" });
+    println!(
+        "  结果: {}/{} 通过  总耗时: {:.0}ms  全程守恒: {}",
+        passed,
+        total,
+        total_ms,
+        if all_conserved { "✓" } else { "✗" }
+    );
     println!("{}", SEPARATOR);
 
     if passed < total {
@@ -95,9 +114,9 @@ fn test_s1_massive_nodes() -> TestResult {
 
     let target = 10_000;
     for i in 0..target {
-        let x = (i % 100) as i32;
-        let y = ((i / 100) % 100) as i32;
-        let z = (i / 10000) as i32;
+        let x = i % 100;
+        let y = (i / 100) % 100;
+        let z = i / 10000;
         let c = Coord7D::new_even([x, y, z, 0, 0, 0, 0]);
         let amount = 10.0 + (i as f64 % 80.0);
         if u.materialize_biased(c, amount, 0.6).is_ok() {
@@ -131,10 +150,8 @@ fn test_s1_massive_nodes() -> TestResult {
             }
             _ => {
                 let idx2 = ((rng_state as usize) + 1) % nodes.len();
-                if idx != idx2 {
-                    if u.transfer_energy(&nodes[idx], &nodes[idx2], 0.001).is_ok() {
-                        transfer_count += 1;
-                    }
+                if idx != idx2 && u.transfer_energy(&nodes[idx], &nodes[idx2], 0.001).is_ok() {
+                    transfer_count += 1;
                 }
             }
         }
@@ -142,7 +159,10 @@ fn test_s1_massive_nodes() -> TestResult {
 
     let cons = u.verify_conservation();
     let ms = t.elapsed().as_secs_f64() * 1000.0;
-    let detail = format!("节点{} flow{} transfer{}", created, flow_count, transfer_count);
+    let detail = format!(
+        "节点{} flow{} transfer{}",
+        created, flow_count, transfer_count
+    );
     println!("  {} {:.0}ms", detail, ms);
     TestResult::ok(name, &detail, ms, cons)
 }
@@ -161,15 +181,21 @@ fn test_s2_memory_flood() -> TestResult {
     let mut expand_events = 0;
 
     for i in 0..rounds {
-        let data = make_data(i as i32, 7);
-        let anchor = make_anchor(i as i32);
+        let data = make_data(i, 7);
+        let anchor = make_anchor(i);
         match MemoryCodec::encode(&mut u, &anchor, &data) {
-            Ok(mem) => { mems.push(mem); datasets.push(data); },
+            Ok(mem) => {
+                mems.push(mem);
+                datasets.push(data);
+            }
             Err(_) => {
                 let _ = scaler.scale_near_anchor(&mut u, &anchor, &data);
                 expand_events += 1;
                 match MemoryCodec::encode(&mut u, &anchor, &data) {
-                    Ok(mem) => { mems.push(mem); datasets.push(data); },
+                    Ok(mem) => {
+                        mems.push(mem);
+                        datasets.push(data);
+                    }
                     Err(_) => _encode_fails += 1,
                 }
             }
@@ -180,10 +206,14 @@ fn test_s2_memory_flood() -> TestResult {
     let mut corrupt = 0;
     for (i, mem) in mems.iter().enumerate() {
         if let Ok(decoded) = MemoryCodec::decode(&u, mem) {
-            let err = datasets[i].iter().zip(decoded.iter())
+            let err = datasets[i]
+                .iter()
+                .zip(decoded.iter())
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f64, f64::max);
-            if err > 1e-10 { corrupt += 1; }
+            if err > 1e-10 {
+                corrupt += 1;
+            }
             max_err = max_err.max(err);
         } else {
             corrupt += 1;
@@ -194,7 +224,12 @@ fn test_s2_memory_flood() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "{}/{}记忆 精度{:.2e} 损坏{} 扩展{}次 能量{:.0}",
-        mems.len(), rounds, max_err, corrupt, expand_events, u.total_energy()
+        mems.len(),
+        rounds,
+        max_err,
+        corrupt,
+        expand_events,
+        u.total_energy()
     );
     println!("  {} {:.0}ms", detail, ms);
 
@@ -216,10 +251,13 @@ fn test_s3_encode_decode_hammer() -> TestResult {
     let mut datasets = Vec::new();
 
     for i in 0..mem_count {
-        let data = make_data(i as i32, 14);
-        let anchor = make_anchor(i as i32);
+        let data = make_data(i, 14);
+        let anchor = make_anchor(i);
         match MemoryCodec::encode(&mut u, &anchor, &data) {
-            Ok(mem) => { mems.push(mem); datasets.push(data); },
+            Ok(mem) => {
+                mems.push(mem);
+                datasets.push(data);
+            }
             Err(_) => continue,
         }
     }
@@ -230,7 +268,9 @@ fn test_s3_encode_decode_hammer() -> TestResult {
         for (i, mem) in mems.iter().enumerate() {
             if let Ok(decoded) = MemoryCodec::decode(&u, mem) {
                 total_decodes += 1;
-                let err = datasets[i].iter().zip(decoded.iter())
+                let err = datasets[i]
+                    .iter()
+                    .zip(decoded.iter())
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0f64, f64::max);
                 max_err = max_err.max(err);
@@ -242,10 +282,18 @@ fn test_s3_encode_decode_hammer() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "编码{} decode{}×{} 精度{:.2e}",
-        mems.len(), decode_rounds, mems.len(), max_err
+        mems.len(),
+        decode_rounds,
+        mems.len(),
+        max_err
     );
     println!("  {} {:.0}ms", detail, ms);
-    TestResult::ok(name, &format!("{}次decode 精度{:.2e}", total_decodes, max_err), ms, cons)
+    TestResult::ok(
+        name,
+        &format!("{}次decode 精度{:.2e}", total_decodes, max_err),
+        ms,
+        cons,
+    )
 }
 
 fn test_s4_erase_rewrite_cycles() -> TestResult {
@@ -259,11 +307,17 @@ fn test_s4_erase_rewrite_cycles() -> TestResult {
     let mut successful = 0;
 
     for i in 0..cycles {
-        let data = vec![(i as f64 * 1.1).sin() * 40.0, (i as f64 * 0.7).cos() * 40.0, (i as f64).sin() * 40.0];
+        let data = vec![
+            (i as f64 * 1.1).sin() * 40.0,
+            (i as f64 * 0.7).cos() * 40.0,
+            (i as f64).sin() * 40.0,
+        ];
         let anchor = Coord7D::new_even([(i % 200) * 5, 0, 0, 0, 0, 0, 0]);
         if let Ok(mem) = MemoryCodec::encode(&mut u, &anchor, &data) {
             if let Ok(decoded) = MemoryCodec::decode(&u, &mem) {
-                let err = data.iter().zip(decoded.iter())
+                let err = data
+                    .iter()
+                    .zip(decoded.iter())
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0f64, f64::max);
                 max_err = max_err.max(err);
@@ -282,8 +336,10 @@ fn test_s4_erase_rewrite_cycles() -> TestResult {
         let stats = u.stats();
         let node_total: f64 = u.get_all_nodes().values().map(|n| n.energy().total()).sum();
         let diff = (node_total - stats.allocated_energy).abs();
-        println!("  S4守恒详情: allocated={:.6} node_total={:.6} diff={:.2e}",
-            stats.allocated_energy, node_total, diff);
+        println!(
+            "  S4守恒详情: allocated={:.6} node_total={:.6} diff={:.2e}",
+            stats.allocated_energy, node_total, diff
+        );
         return TestResult::fail(name, &format!("守恒违反 diff={:.2e}", diff), ms);
     }
     TestResult::ok(name, &detail, ms, cons)
@@ -300,7 +356,7 @@ fn test_s5_energy_transfer_storm() -> TestResult {
     let mut nodes = Vec::new();
 
     for i in 0..node_count {
-        let c = Coord7D::new_even([i as i32, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]);
         u.materialize_uniform(c, 100.0).ok();
         nodes.push(c);
     }
@@ -322,14 +378,15 @@ fn test_s5_energy_transfer_storm() -> TestResult {
     let cons = u.verify_conservation();
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let avail_diff = (after_avail - before_avail).abs();
-    let detail = format!(
-        "成功{} 可用能差{:.2e}",
-        successful_transfers, avail_diff
-    );
+    let detail = format!("成功{} 可用能差{:.2e}", successful_transfers, avail_diff);
     println!("  {} {:.0}ms", detail, ms);
 
     if !cons || avail_diff > 1e-6 {
-        return TestResult::fail(name, &format!("cons={} avail_diff={:.2e}", cons, avail_diff), ms);
+        return TestResult::fail(
+            name,
+            &format!("cons={} avail_diff={:.2e}", cons, avail_diff),
+            ms,
+        );
     }
     TestResult::ok(name, &detail, ms, cons)
 }
@@ -344,8 +401,8 @@ fn test_s6_dream_cycles() -> TestResult {
     let mut mems = Vec::new();
 
     for i in 0..500 {
-        let data = make_data(i as i32, 7);
-        let anchor = make_anchor(i as i32);
+        let data = make_data(i, 7);
+        let anchor = make_anchor(i);
         if let Ok(mem) = MemoryCodec::encode(&mut u, &anchor, &data) {
             let pulse = PulseEngine::new();
             for v in mem.vertices().iter() {
@@ -375,7 +432,11 @@ fn test_s6_dream_cycles() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "记忆{} 赫布{} replay:{} weaken:{} consol:{}",
-        mems.len(), hebbian.edge_count(), total_replayed, total_weakened, total_consolidated
+        mems.len(),
+        hebbian.edge_count(),
+        total_replayed,
+        total_weakened,
+        total_consolidated
     );
     println!("  {} {:.0}ms", detail, ms);
     TestResult::ok(name, &detail, ms, cons)
@@ -401,7 +462,7 @@ fn test_s7_full_pipeline() -> TestResult {
         for j in 0..20 {
             let i = base_idx + j;
             let data = make_data(i, 14);
-            let anchor = make_anchor(i as i32);
+            let anchor = make_anchor(i);
             match MemoryCodec::encode(&mut u, &anchor, &data) {
                 Ok(mem) => {
                     let pulse = PulseEngine::new();
@@ -431,7 +492,9 @@ fn test_s7_full_pipeline() -> TestResult {
     let mut max_err = 0.0f64;
     for (i, mem) in mems.iter().enumerate() {
         if let Ok(decoded) = MemoryCodec::decode(&u, mem) {
-            let err = datasets[i].iter().zip(decoded.iter())
+            let err = datasets[i]
+                .iter()
+                .zip(decoded.iter())
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f64, f64::max);
             max_err = max_err.max(err);
@@ -442,7 +505,11 @@ fn test_s7_full_pipeline() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "记忆{} 赫布{} 结晶{} 调控动作{} 精度{:.2e}",
-        mems.len(), hebbian.edge_count(), crystal.channel_count(), total_actions, max_err
+        mems.len(),
+        hebbian.edge_count(),
+        crystal.channel_count(),
+        total_actions,
+        max_err
     );
     println!("  {} {:.0}ms", detail, ms);
     TestResult::ok(name, &detail, ms, cons)
@@ -461,8 +528,8 @@ fn test_s8_persist_restore_loop() -> TestResult {
     let mut datasets = Vec::new();
 
     for i in 0..50 {
-        let data = make_data(i as i32, 7);
-        let anchor = make_anchor(i as i32);
+        let data = make_data(i, 7);
+        let anchor = make_anchor(i);
         if let Ok(mem) = MemoryCodec::encode(&mut u, &anchor, &data) {
             let verts = mem.vertices();
             for w in 1..4 {
@@ -481,7 +548,9 @@ fn test_s8_persist_restore_loop() -> TestResult {
 
         for (i, mem) in m2.iter().enumerate() {
             if let Ok(decoded) = MemoryCodec::decode(&u2, mem) {
-                let err = datasets[i].iter().zip(decoded.iter())
+                let err = datasets[i]
+                    .iter()
+                    .zip(decoded.iter())
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0f64, f64::max);
                 max_err = max_err.max(err);
@@ -500,7 +569,13 @@ fn test_s8_persist_restore_loop() -> TestResult {
     }
 
     let ms = t.elapsed().as_secs_f64() * 1000.0;
-    let detail = format!("{}次roundtrip 赫布{} 结晶{} 精度{:.2e}", cycles, hebbian.edge_count(), crystal.channel_count(), max_err);
+    let detail = format!(
+        "{}次roundtrip 赫布{} 结晶{} 精度{:.2e}",
+        cycles,
+        hebbian.edge_count(),
+        crystal.channel_count(),
+        max_err
+    );
     println!("  {} {:.0}ms", detail, ms);
     TestResult::ok(name, &detail, ms, true)
 }
@@ -520,8 +595,8 @@ fn test_s9_regulation_under_load() -> TestResult {
     let mut reg_actions_total = 0;
 
     for round in 0..rounds {
-        let data = make_data(round as i32, 7);
-        let anchor = make_anchor(round as i32);
+        let data = make_data(round, 7);
+        let anchor = make_anchor(round);
         match MemoryCodec::encode(&mut u, &anchor, &data) {
             Ok(mem) => {
                 let verts = mem.vertices();
@@ -547,7 +622,10 @@ fn test_s9_regulation_under_load() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "记忆{} 赫布{} 结晶{} 调控动作{}",
-        mems.len(), hebbian.edge_count(), crystal.channel_count(), reg_actions_total
+        mems.len(),
+        hebbian.edge_count(),
+        crystal.channel_count(),
+        reg_actions_total
     );
     println!("  {} {:.0}ms", detail, ms);
     TestResult::ok(name, &detail, ms, cons)
@@ -589,7 +667,9 @@ fn test_s10_mixed_dimensions() -> TestResult {
     let mut dim_max_errs: HashMap<usize, f64> = HashMap::new();
     for (i, mem) in mems.iter().enumerate() {
         if let Ok(decoded) = MemoryCodec::decode(&u, mem) {
-            let err = datasets[i].iter().zip(decoded.iter())
+            let err = datasets[i]
+                .iter()
+                .zip(decoded.iter())
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f64, f64::max);
             let dim = mem.data_dim();
@@ -603,7 +683,9 @@ fn test_s10_mixed_dimensions() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "{}/2000记忆 精度{:.2e} 覆盖{}种维度",
-        mems.len(), max_err, dim_counts.len()
+        mems.len(),
+        max_err,
+        dim_counts.len()
     );
     println!("  {} {:.0}ms", detail, ms);
 
@@ -624,13 +706,13 @@ fn test_s11_conservation_after_chaos() -> TestResult {
     let mut rng_state: u64 = 42;
 
     for i in 0..500 {
-        let c = Coord7D::new_even([i as i32, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]);
         u.materialize_biased(c, 100.0, 0.5).ok();
         nodes.push(c);
     }
 
     for i in 0..100 {
-        let data = make_data(i as i32, 7);
+        let data = make_data(i, 7);
         let anchor = Coord7D::new_even([500 + i, 0, 0, 0, 0, 0, 0]);
         if let Ok(mem) = MemoryCodec::encode(&mut u, &anchor, &data) {
             mems.push(mem);
@@ -661,7 +743,9 @@ fn test_s11_conservation_after_chaos() -> TestResult {
                     } else {
                         u.flow_node_dark_to_physical(&nodes[idx], 1.0)
                     };
-                    if result.is_ok() { flow_ok += 1; }
+                    if result.is_ok() {
+                        flow_ok += 1;
+                    }
                 }
             }
             1 => {
@@ -703,7 +787,12 @@ fn test_s11_conservation_after_chaos() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "flow{} transfer{} erase{} 节点{} 记忆{} 能量{:.0}",
-        flow_ok, transfer_ok, demat_ok, nodes.len(), mems.len(), u.total_energy()
+        flow_ok,
+        transfer_ok,
+        demat_ok,
+        nodes.len(),
+        mems.len(),
+        u.total_energy()
     );
     println!("  {} {:.0}ms", detail, ms);
 
@@ -749,10 +838,14 @@ fn test_s12_longevity() -> TestResult {
 
     for (i, mem) in mems.iter().enumerate() {
         if let Ok(decoded) = MemoryCodec::decode(&u, mem) {
-            let err = datasets[i].iter().zip(decoded.iter())
+            let err = datasets[i]
+                .iter()
+                .zip(decoded.iter())
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f64, f64::max);
-            if err > 1e-10 { corrupt += 1; }
+            if err > 1e-10 {
+                corrupt += 1;
+            }
             max_err = max_err.max(err);
         } else {
             corrupt += 1;
@@ -763,8 +856,13 @@ fn test_s12_longevity() -> TestResult {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let detail = format!(
         "{}/{}记忆 精度{:.2e} 损坏{} 守恒检查{}次 节点{} 能量{:.0}",
-        mems.len(), rounds, max_err, corrupt, verify_checkpoints,
-        u.active_node_count(), u.total_energy()
+        mems.len(),
+        rounds,
+        max_err,
+        corrupt,
+        verify_checkpoints,
+        u.active_node_count(),
+        u.total_energy()
     );
     println!("  {} {:.0}ms", detail, ms);
 

@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde_json::Value;
-
-use super::types::{Skill, SkillDescriptor, SkillError, SkillSignature};
+use super::types::{Skill, SkillDescriptor, SkillSignature};
 
 pub struct SkillRegistry {
     skills: HashMap<String, Arc<dyn Skill>>,
@@ -11,7 +9,9 @@ pub struct SkillRegistry {
 
 impl SkillRegistry {
     pub fn new() -> Self {
-        Self { skills: HashMap::new() }
+        Self {
+            skills: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, skill: impl Skill + 'static) {
@@ -24,16 +24,19 @@ impl SkillRegistry {
     }
 
     pub fn list(&self) -> Vec<SkillDescriptor> {
-        self.skills.values().map(|s| {
-            let sig = s.signature();
-            let cat = infer_category(&sig.name);
-            SkillDescriptor {
-                name: sig.name,
-                version: sig.version,
-                description: sig.description,
-                category: cat,
-            }
-        }).collect()
+        self.skills
+            .values()
+            .map(|s| {
+                let sig = s.signature();
+                let cat = infer_category(&sig.name);
+                SkillDescriptor {
+                    name: sig.name,
+                    version: sig.version,
+                    description: sig.description,
+                    category: cat,
+                }
+            })
+            .collect()
     }
 
     pub fn signatures(&self) -> Vec<SkillSignature> {
@@ -46,6 +49,10 @@ impl SkillRegistry {
 
     pub fn len(&self) -> usize {
         self.skills.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
     }
 }
 

@@ -1,0 +1,69 @@
+use axum::http::StatusCode;
+use axum::{extract::State, Json};
+
+use crate::universe::backup::BackupTrigger;
+use crate::universe::error::AppError;
+
+use super::state::SharedState;
+use super::types::*;
+
+pub async fn create_backup(
+    State(state): State<SharedState>,
+) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let m = state.memories.read().await;
+    let mut bs = state.backup.write().await;
+    let crystal = state.crystal.read().await;
+
+    let report = bs
+        .create_backup(BackupTrigger::Manual, &u, &h, &m, &crystal)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    drop(u);
+    drop(h);
+    drop(m);
+    drop(bs);
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::ok(CreateBackupResponse {
+            backup_id: report.metadata.id,
+            generation: report.metadata.generation,
+            node_count: report.metadata.node_count,
+            memory_count: report.metadata.memory_count,
+            bytes: report.metadata.bytes,
+            elapsed_ms: report.elapsed_ms,
+        })),
+    ))
+}
+
+pub async fn list_backups(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<Vec<BackupInfo>>>, AppError> {
+    let bs = state.backup.read().await;
+    let list: Vec<BackupInfo> = bs
+        .list_backups()
+        .into_iter()
+        .map(|m| {
+            let trigger = match m.trigger {
+                BackupTrigger::Manual => "MANUAL",
+                BackupTrigger::Timer => "TIMER",
+                BackupTrigger::PreOperation => "PRE-OP",
+                BackupTrigger::ConservationCheckpoint => "CONSERV",
+            };
+            BackupInfo {
+                id: m.id,
+                timestamp_ms: m.timestamp_ms,
+                trigger: trigger.to_string(),
+                node_count: m.node_count,
+                memory_count: m.memory_count,
+                total_energy: m.total_energy,
+                conservation_ok: m.conservation_ok,
+                bytes: m.bytes,
+                generation: m.generation,
+            }
+        })
+        .collect();
+    Ok(Json(ApiResponse::ok(list)))
+}

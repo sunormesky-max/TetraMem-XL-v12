@@ -36,7 +36,10 @@ impl std::error::Error for SkillError {}
 
 impl SkillError {
     pub fn new(skill: &str, message: impl Into<String>) -> Self {
-        Self { skill: skill.into(), message: message.into() }
+        Self {
+            skill: skill.into(),
+            message: message.into(),
+        }
     }
 }
 

@@ -66,17 +66,28 @@ fn main() {
             let persist_path = PathBuf::from(&config.backup.persist_path);
 
             let (universe, hebbian, memories, crystal) = if PersistFile::exists(&persist_path) {
-                tracing::info!("found persisted state at {}, loading...", persist_path.display());
+                tracing::info!(
+                    "found persisted state at {}, loading...",
+                    persist_path.display()
+                );
                 match PersistFile::load(&persist_path) {
                     Ok((u, h, m, c)) => {
                         let stats = u.stats();
                         tracing::info!(
                             "restored state: {} nodes, {} memories, {} edges, E={:.0}",
-                            stats.active_nodes, m.len(), h.edge_count(), stats.total_energy
+                            stats.active_nodes,
+                            m.len(),
+                            h.edge_count(),
+                            stats.total_energy
                         );
-                        let conservation_ok = u.verify_conservation_with_tolerance(config.universe.energy_drift_tolerance);
+                        let conservation_ok = u.verify_conservation_with_tolerance(
+                            config.universe.energy_drift_tolerance,
+                        );
                         if conservation_ok {
-                            tracing::info!("POST-RESTORE conservation check: PASSED (tolerance={:.e})", config.universe.energy_drift_tolerance);
+                            tracing::info!(
+                                "POST-RESTORE conservation check: PASSED (tolerance={:.e})",
+                                config.universe.energy_drift_tolerance
+                            );
                         } else {
                             tracing::error!(
                                 "POST-RESTORE conservation check: FAILED — energy violation detected after loading persisted state"
@@ -86,21 +97,36 @@ fn main() {
                     }
                     Err(e) => {
                         tracing::warn!("failed to load persisted state: {}, starting fresh", e);
-                        (DarkUniverse::new(config.universe.total_energy), HebbianMemory::new(), Vec::new(), tetramem_v12::universe::crystal::CrystalEngine::new())
+                        (
+                            DarkUniverse::new(config.universe.total_energy),
+                            HebbianMemory::new(),
+                            Vec::new(),
+                            tetramem_v12::universe::crystal::CrystalEngine::new(),
+                        )
                     }
                 }
             } else {
                 tracing::info!("no persisted state found, starting fresh");
-                (DarkUniverse::new(config.universe.total_energy), HebbianMemory::new(), Vec::new(), tetramem_v12::universe::crystal::CrystalEngine::new())
+                (
+                    DarkUniverse::new(config.universe.total_energy),
+                    HebbianMemory::new(),
+                    Vec::new(),
+                    tetramem_v12::universe::crystal::CrystalEngine::new(),
+                )
             };
 
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
-                universe: tokio::sync::Mutex::new(universe),
-                hebbian: tokio::sync::Mutex::new(hebbian),
-                memories: tokio::sync::Mutex::new(memories),
-                crystal: tokio::sync::Mutex::new(crystal),
-                backup: tokio::sync::Mutex::new(BackupScheduler::with_defaults()),
-                cluster: tokio::sync::Mutex::new(tetramem_v12::universe::cluster::ClusterManager::new(1, config.server.addr.clone())),
+                universe: tokio::sync::RwLock::new(universe),
+                hebbian: tokio::sync::RwLock::new(hebbian),
+                memories: tokio::sync::RwLock::new(memories),
+                crystal: tokio::sync::RwLock::new(crystal),
+                backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
+                cluster: tokio::sync::Mutex::new(
+                    tetramem_v12::universe::cluster::ClusterManager::new(
+                        1,
+                        config.server.addr.clone(),
+                    ),
+                ),
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
             });
@@ -116,26 +142,34 @@ fn main() {
                     let state_ref = state.clone();
                     let mut cm = state.cluster.lock().await;
                     cm.set_conservation_validator(Box::new(move || {
-                        match state_ref.universe.try_lock() {
+                        match state_ref.universe.try_read() {
                             Ok(u) => {
                                 let ok = u.verify_conservation();
                                 if !ok {
-                                    tracing::error!("CLUSTER PROPOSE REJECTED: energy conservation violated");
+                                    tracing::error!(
+                                        "CLUSTER PROPOSE REJECTED: energy conservation violated"
+                                    );
                                 }
                                 ok
                             }
                             Err(_) => {
-                                tracing::warn!("conservation validator: universe lock busy, skipping check");
+                                tracing::warn!(
+                                    "conservation validator: universe lock busy, skipping check"
+                                );
                                 true
                             }
                         }
                     }));
                     let state_ref2 = state.clone();
                     cm.set_energy_reporter(Box::new(move || {
-                        match state_ref2.universe.try_lock() {
+                        match state_ref2.universe.try_read() {
                             Ok(u) => {
                                 let stats = u.stats();
-                                (stats.available_energy, stats.active_nodes, u.verify_conservation())
+                                (
+                                    stats.available_energy,
+                                    stats.active_nodes,
+                                    u.verify_conservation(),
+                                )
                             }
                             Err(_) => (0.0, 0, true),
                         }
@@ -144,18 +178,21 @@ fn main() {
 
                 {
                     let state_bg = state.clone();
-                    let conservation_interval = config.logging.conservation_check_interval_secs.max(10);
+                    let conservation_interval =
+                        config.logging.conservation_check_interval_secs.max(10);
                     let tracing_on = config.logging.tracing_enabled;
                     let drift_tolerance = config.universe.energy_drift_tolerance;
                     tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(
-                            std::time::Duration::from_secs(conservation_interval)
-                        );
+                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                            conservation_interval,
+                        ));
                         interval.tick().await;
                         loop {
                             interval.tick().await;
-                            if !tracing_on { continue; }
-                            let u = state_bg.universe.lock().await;
+                            if !tracing_on {
+                                continue;
+                            }
+                            let u = state_bg.universe.read().await;
                             let ok = u.verify_conservation_with_tolerance(drift_tolerance);
                             let drift = u.energy_drift();
                             let stats = u.stats();
@@ -179,18 +216,19 @@ fn main() {
 
                 if auto_persist && persist_interval > 0 {
                     let handle = tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(
-                            std::time::Duration::from_secs(persist_interval)
-                        );
+                        let mut interval =
+                            tokio::time::interval(std::time::Duration::from_secs(persist_interval));
                         interval.tick().await;
                         loop {
                             interval.tick().await;
                             let json = {
-                                let u = state_clone.universe.lock().await;
-                                let h = state_clone.hebbian.lock().await;
-                                let m = state_clone.memories.lock().await;
-                                let c = state_clone.crystal.lock().await;
-                                tetramem_v12::universe::persist::PersistEngine::to_json(&u, &h, &m, &c)
+                                let u = state_clone.universe.read().await;
+                                let h = state_clone.hebbian.read().await;
+                                let m = state_clone.memories.read().await;
+                                let c = state_clone.crystal.read().await;
+                                tetramem_v12::universe::persist::PersistEngine::to_json(
+                                    &u, &h, &m, &c,
+                                )
                             };
                             match json {
                                 Ok(json_str) => {
@@ -201,10 +239,15 @@ fn main() {
                                     match std::fs::write(&tmp, &json_str) {
                                         Ok(_) => {
                                             if std::fs::rename(&tmp, &persist_path_clone).is_ok() {
-                                                tracing::debug!("auto-persist saved {} bytes", json_str.len());
+                                                tracing::debug!(
+                                                    "auto-persist saved {} bytes",
+                                                    json_str.len()
+                                                );
                                             }
                                         }
-                                        Err(e) => tracing::warn!("auto-persist write failed: {}", e),
+                                        Err(e) => {
+                                            tracing::warn!("auto-persist write failed: {}", e)
+                                        }
                                     }
                                 }
                                 Err(e) => tracing::warn!("auto-persist serialize failed: {}", e),
@@ -217,12 +260,16 @@ fn main() {
                         persist_path.display()
                     );
 
-                    if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
+                    if let Err(e) =
+                        tetramem_v12::universe::api::start_server(state, &effective_addr).await
+                    {
                         tracing::error!("server error: {}", e);
                     }
                     handle.abort();
                 } else {
-                    if let Err(e) = tetramem_v12::universe::api::start_server(state, &effective_addr).await {
+                    if let Err(e) =
+                        tetramem_v12::universe::api::start_server(state, &effective_addr).await
+                    {
                         tracing::error!("server error: {}", e);
                     }
                 }
@@ -251,8 +298,7 @@ fn main() {
 }
 
 fn init_tracing(level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -276,18 +322,27 @@ fn bench_vs_v8() {
     let mut mem_errors = Vec::new();
     for &d in &dims {
         let data: Vec<f64> = (0..d).map(|i| (i as f64 + 1.0) * 0.1).collect();
-        let anchor = Coord7D::new_even([d as i32 * 3, d as i32 * 3, d as i32 * 3, 0, 0, 0, 0]);
+        let anchor = Coord7D::new_even([d * 3, d * 3, d * 3, 0, 0, 0, 0]);
         let mem = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
         let decoded = MemoryCodec::decode(&u, &mem).unwrap();
-        let max_err = data.iter().zip(decoded.iter())
-            .map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
+        let max_err = data
+            .iter()
+            .zip(decoded.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
         mem_errors.push(max_err);
         print!("  {}维: 误差={:.2e}", d, max_err);
     }
     println!();
     let max_total_error = mem_errors.iter().fold(0.0f64, |a, &b| a.max(b));
-    println!("  v12.0最大误差: {:.2e}  v8.0典型误差: ~0.05-0.15", max_total_error);
-    if max_total_error < 1e-10 { println!("  ✓ 精确度提升 >10万倍"); total_score += 5; }
+    println!(
+        "  v12.0最大误差: {:.2e}  v8.0典型误差: ~0.05-0.15",
+        max_total_error
+    );
+    if max_total_error < 1e-10 {
+        println!("  ✓ 精确度提升 >10万倍");
+        total_score += 5;
+    }
 
     println!("\n━━━ 2. 能量守恒 (v8.0: 近似守恒, 级联5%损耗) ━━━");
     let mut u2 = DarkUniverse::new(1_000_000.0);
@@ -295,7 +350,7 @@ fn bench_vs_v8() {
         let c = Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]);
         u2.materialize_biased(c, 100.0, 0.6).unwrap();
     }
-    let ops = vec![
+    let ops = [
         "具现1000节点",
         "100次flow物理→暗",
         "100次flow暗→物理",
@@ -322,9 +377,16 @@ fn bench_vs_v8() {
     }
     let conserved = u2.verify_conservation();
     let violation = (u2.total_energy() - u2.allocated_energy() - u2.available_energy()).abs();
-    println!("  {}操作后 守恒:{} 违反量:{:.2e}", ops.len(), if conserved { "✓" } else { "✗" }, violation);
+    println!(
+        "  {}操作后 守恒:{} 违反量:{:.2e}",
+        ops.len(),
+        if conserved { "✓" } else { "✗" },
+        violation
+    );
     println!("  v8.0级联损耗: 5%/次  v12.0: 0 (数学证明)");
-    if conserved { total_score += 5; }
+    if conserved {
+        total_score += 5;
+    }
 
     println!("\n━━━ 3. 规模与速度 (v8.0: Python ~500节点/秒) ━━━");
     let t = Instant::now();
@@ -335,15 +397,24 @@ fn bench_vs_v8() {
         for y in 0..grid {
             for z in 0..grid {
                 let c = Coord7D::new_even([x, y, z, 0, 0, 0, 0]);
-                if u3.materialize_biased(c, 50.0, 0.6).is_ok() { node_count += 1; }
+                if u3.materialize_biased(c, 50.0, 0.6).is_ok() {
+                    node_count += 1;
+                }
                 let c2 = Coord7D::new_odd([x, y, z, 0, 0, 0, 0]);
-                if u3.materialize_biased(c2, 40.0, 0.3).is_ok() { node_count += 1; }
+                if u3.materialize_biased(c2, 40.0, 0.3).is_ok() {
+                    node_count += 1;
+                }
             }
         }
     }
     let build_time = t.elapsed();
     let nodes_per_sec = node_count as f64 / build_time.as_secs_f64();
-    println!("  {}节点 晶格构建: {:.1}ms ({:.0}节点/秒)", node_count, build_time.as_secs_f64() * 1000.0, nodes_per_sec);
+    println!(
+        "  {}节点 晶格构建: {:.1}ms ({:.0}节点/秒)",
+        node_count,
+        build_time.as_secs_f64() * 1000.0,
+        nodes_per_sec
+    );
     println!("  v8.0: ~500节点/秒  v12.0: {:.0}节点/秒", nodes_per_sec);
     total_score += if nodes_per_sec > 10_000.0 { 5 } else { 3 };
 
@@ -363,7 +434,12 @@ fn bench_vs_v8() {
     }
     let pulse_time = t.elapsed();
     let pulse_count = (grid / 5).pow(3) as usize;
-    println!("  {}脉冲 访问{}节点 耗时{:.1}ms", pulse_count, total_visited, pulse_time.as_secs_f64() * 1000.0);
+    println!(
+        "  {}脉冲 访问{}节点 耗时{:.1}ms",
+        pulse_count,
+        total_visited,
+        pulse_time.as_secs_f64() * 1000.0
+    );
     println!("  赫布边: {}", h4.edge_count());
     total_score += 3;
 
@@ -371,27 +447,58 @@ fn bench_vs_v8() {
     let t = Instant::now();
     let topo = TopologyEngine::analyze(&u3);
     let topo_time = t.elapsed();
-    println!("  {} (耗时{:.1}ms)", topo.betti, topo_time.as_secs_f64() * 1000.0);
-    println!("  连通分量:{} 环路:{} 四面体:{} 桥节点:{} 离散:{}",
-        topo.connected_components, topo.cycles_detected, topo.tetrahedra_count,
-        topo.bridging_nodes, topo.isolated_nodes);
-    println!("  平均配位数:{:.1} Euler特征量:{}", topo.average_coordination, topo.betti.euler_characteristic());
+    println!(
+        "  {} (耗时{:.1}ms)",
+        topo.betti,
+        topo_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  连通分量:{} 环路:{} 四面体:{} 桥节点:{} 离散:{}",
+        topo.connected_components,
+        topo.cycles_detected,
+        topo.tetrahedra_count,
+        topo.bridging_nodes,
+        topo.isolated_nodes
+    );
+    println!(
+        "  平均配位数:{:.1} Euler特征量:{}",
+        topo.average_coordination,
+        topo.betti.euler_characteristic()
+    );
     total_score += 3;
 
     println!("\n━━━ 6. 结晶相变 (v8.0: crystallized_pathway.py) ━━━");
     let mut crystal = CrystalEngine::new();
     let report = crystal.crystallize(&h4, &u3);
-    println!("  {} 普通结晶:{} 超级结晶:{}", report, report.new_crystals, report.new_super_crystals);
+    println!(
+        "  {} 普通结晶:{} 超级结晶:{}",
+        report, report.new_crystals, report.new_super_crystals
+    );
     let path_a = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
     let path_b = Coord7D::new_even([19, 0, 0, 0, 0, 0, 0]);
     let cpath = crystal.crystal_path(&path_a, &path_b, 30);
-    println!("  结晶路由 {}→{}: {}跳", path_a, path_b, if cpath.is_empty() { "未连通".to_string() } else { format!("{}", cpath.len() - 1) });
+    println!(
+        "  结晶路由 {}→{}: {}跳",
+        path_a,
+        path_b,
+        if cpath.is_empty() {
+            "未连通".to_string()
+        } else {
+            format!("{}", cpath.len() - 1)
+        }
+    );
     total_score += 3;
 
     println!("\n━━━ 7. 几何推理 (v8.0: semantic_reasoning.py 文本推理) ━━━");
     let mut u7 = DarkUniverse::new(5_000_000.0);
     let mut mems7 = Vec::new();
-    let anchors = [[10,10,10],[15,10,10],[10,15,10],[10,10,15],[15,15,15]];
+    let anchors = [
+        [10, 10, 10],
+        [15, 10, 10],
+        [10, 15, 10],
+        [10, 10, 15],
+        [15, 15, 15],
+    ];
     let datasets: Vec<Vec<f64>> = vec![
         vec![1.0, 2.0, 3.0],
         vec![3.0, 2.0, 1.0],
@@ -406,7 +513,7 @@ fn bench_vs_v8() {
         for dx in -2..=2i32 {
             for dy in -2..=2i32 {
                 for dz in -2..=2i32 {
-                    let nc = Coord7D::new_even([a[0]+dx, a[1]+dy, a[2]+dz, 0, 0, 0, 0]);
+                    let nc = Coord7D::new_even([a[0] + dx, a[1] + dy, a[2] + dz, 0, 0, 0, 0]);
                     u7.materialize_biased(nc, 50.0, 0.6).ok();
                 }
             }
@@ -429,11 +536,19 @@ fn bench_vs_v8() {
         println!("    {} → conf={:.3}", a.source, a.confidence);
     }
 
-    let associations = ReasoningEngine::find_associations(&u7, &h7, &crystal7, mems7[0].anchor(), 3);
+    let associations =
+        ReasoningEngine::find_associations(&u7, &h7, &crystal7, mems7[0].anchor(), 3);
     println!("  联想扩展: 从mem1找到{}个关联", associations.len());
 
     let chain = ReasoningEngine::infer_chain(&u7, &h7, mems7[0].anchor(), mems7[4].anchor(), 10);
-    println!("  推理链: mem1→mem5 {}跳", if chain.is_empty() { "未连通".to_string() } else { format!("{}", chain.len()) });
+    println!(
+        "  推理链: mem1→mem5 {}跳",
+        if chain.is_empty() {
+            "未连通".to_string()
+        } else {
+            format!("{}", chain.len())
+        }
+    );
 
     let discoveries = ReasoningEngine::discover(&u7, &mut h7, mems7[0].anchor(), 0.5);
     println!("  脉冲发现: {}条新线索", discoveries.len());
@@ -444,10 +559,18 @@ fn bench_vs_v8() {
     let t = Instant::now();
     let dream_report = dream.dream(&u7, &mut h7, &mems7);
     let dream_time = t.elapsed();
-    println!("  {} (耗时{:.1}ms)", dream_report, dream_time.as_secs_f64() * 1000.0);
-    println!("  边 {}→{} 权重 {:.2}→{:.2}",
-        dream_report.hebbian_edges_before, dream_report.hebbian_edges_after,
-        dream_report.weight_before, dream_report.weight_after);
+    println!(
+        "  {} (耗时{:.1}ms)",
+        dream_report,
+        dream_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  边 {}→{} 权重 {:.2}→{:.2}",
+        dream_report.hebbian_edges_before,
+        dream_report.hebbian_edges_after,
+        dream_report.weight_before,
+        dream_report.weight_after
+    );
     total_score += 3;
 
     println!("\n━━━ 9. 维度调控 (v8.0: 6层生理模型) ━━━");
@@ -462,23 +585,37 @@ fn bench_vs_v8() {
     for d in 0..7 {
         println!("    dim{}: {:.1}", d, reg_report.dimension_pressure.dims[d]);
     }
-    println!("  不平衡度: {:.2} 应激: {:.2} 熵: {:.3}",
-        reg_report.dimension_pressure.imbalance, reg_report.stress_level, reg_report.entropy);
+    println!(
+        "  不平衡度: {:.2} 应激: {:.2} 熵: {:.3}",
+        reg_report.dimension_pressure.imbalance, reg_report.stress_level, reg_report.entropy
+    );
     total_score += 3;
 
     println!("\n━━━ 10. 自动扩展 ━━━");
     let mut u10 = DarkUniverse::new(50_000.0);
     for i in 0..20i32 {
-        u10.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 100.0, 0.8).unwrap();
+        u10.materialize_biased(Coord7D::new_even([i, 0, 0, 0, 0, 0, 0]), 100.0, 0.8)
+            .unwrap();
     }
     let stats_before = u10.stats();
-    println!("  扩展前: {}节点 利用率{:.1}%", stats_before.active_nodes, stats_before.utilization * 100.0);
+    println!(
+        "  扩展前: {}节点 利用率{:.1}%",
+        stats_before.active_nodes,
+        stats_before.utilization * 100.0
+    );
 
     let scaler = AutoScaler::new();
     let scale_report = scaler.auto_scale(&mut u10, &h7, &mems7);
     let stats_after = u10.stats();
-    println!("  扩展后: {}节点 利用率{:.1}%", stats_after.active_nodes, stats_after.utilization * 100.0);
-    println!("  +{}节点 +{:.0}能量 原因:{:?}", scale_report.nodes_added, scale_report.energy_expanded_by, scale_report.reason);
+    println!(
+        "  扩展后: {}节点 利用率{:.1}%",
+        stats_after.active_nodes,
+        stats_after.utilization * 100.0
+    );
+    println!(
+        "  +{}节点 +{:.0}能量 原因:{:?}",
+        scale_report.nodes_added, scale_report.energy_expanded_by, scale_report.reason
+    );
     assert!(u10.verify_conservation());
     println!("  扩展后守恒: ✓");
     total_score += 3;
@@ -490,11 +627,25 @@ fn bench_vs_v8() {
     let t = Instant::now();
     let (u7r, _h7r, _mems7r, _c7r) = PersistEngine::from_json(&json).unwrap();
     let deserialize_time = t.elapsed();
-    println!("  序列化: {}字节 {:.1}ms", json.len(), serialize_time.as_secs_f64() * 1000.0);
-    println!("  反序列化: {:.1}ms", deserialize_time.as_secs_f64() * 1000.0);
-    println!("  守恒保持: {} 节点保持: {}→{}",
-        if u7r.verify_conservation() { "✓" } else { "✗" },
-        u7.active_node_count(), u7r.active_node_count());
+    println!(
+        "  序列化: {}字节 {:.1}ms",
+        json.len(),
+        serialize_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  反序列化: {:.1}ms",
+        deserialize_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  守恒保持: {} 节点保持: {}→{}",
+        if u7r.verify_conservation() {
+            "✓"
+        } else {
+            "✗"
+        },
+        u7.active_node_count(),
+        u7r.active_node_count()
+    );
     total_score += 3;
 
     println!("\n━━━ 12. 综合 ━━━");
@@ -512,20 +663,32 @@ fn bench_vs_v8() {
     }
     let stats12 = u12.stats();
     let build12 = t.elapsed();
-    println!("  {}节点 ({}具现+{}暗) 构建: {:.0}ms",
-        stats12.active_nodes, stats12.manifested_nodes, stats12.dark_nodes,
-        build12.as_secs_f64() * 1000.0);
+    println!(
+        "  {}节点 ({}具现+{}暗) 构建: {:.0}ms",
+        stats12.active_nodes,
+        stats12.manifested_nodes,
+        stats12.dark_nodes,
+        build12.as_secs_f64() * 1000.0
+    );
     assert!(u12.verify_conservation());
     println!("  守恒: ✓");
 
     let t = Instant::now();
     let topo12 = TopologyEngine::analyze(&u12);
     let topo12_time = t.elapsed();
-    println!("  拓扑分析({}节点): {:.0}ms → {}", stats12.active_nodes, topo12_time.as_secs_f64() * 1000.0, topo12.betti);
+    println!(
+        "  拓扑分析({}节点): {:.0}ms → {}",
+        stats12.active_nodes,
+        topo12_time.as_secs_f64() * 1000.0,
+        topo12.betti
+    );
     total_score += 4;
 
     println!("\n╔══════════════════════════════════════════════════════════╗");
-    println!("║   总分: {}/50                                              ║", total_score);
+    println!(
+        "║   总分: {}/50                                              ║",
+        total_score
+    );
     println!("╠══════════════════════════════════════════════════════════╣");
     println!("║                                                          ║");
     println!("║   维度          v8.0              v12.0             提升  ║");
@@ -533,7 +696,11 @@ fn bench_vs_v8() {
     println!("║   记忆精确度    模糊(5-15%误差)   精确(<1e-15)     >10⁶x ║");
     println!("║   能量守恒      近似(5%损耗/级联) 严格(数学证明)   ∞     ║");
     println!("║   空间维度      3D+时间           7D暗宇宙         2.3x   ║");
-    println!("║   构建速度      ~500节点/秒       {:.0}节点/秒    {:.0}x   ║", nodes_per_sec, nodes_per_sec / 500.0);
+    println!(
+        "║   构建速度      ~500节点/秒       {:.0}节点/秒    {:.0}x   ║",
+        nodes_per_sec,
+        nodes_per_sec / 500.0
+    );
     println!("║   代码量        22,123行Python    6,001行Rust     3.7x少  ║");
     println!("║   测试覆盖      ~90个             158个           1.8x    ║");
     println!("║   持久化        WAL+gzip         JSON+守恒验证    更安全  ║");
@@ -558,7 +725,13 @@ fn run_skills_demo() {
     builtin::register_all(&mut registry);
     println!("Registered {} skills:", registry.len());
     for desc in registry.list() {
-        println!("  • {} v{} [{}] — {}", desc.name, desc.version, format!("{:?}", desc.category).to_lowercase(), desc.description);
+        println!(
+            "  • {} v{} [{}] — {}",
+            desc.name,
+            desc.version,
+            format!("{:?}", desc.category).to_lowercase(),
+            desc.description
+        );
     }
     println!();
 
@@ -569,19 +742,25 @@ fn run_skills_demo() {
 
     println!("── Pipeline 1: encode → decode roundtrip ──");
     let pipeline = SkillPipeline::new(registry);
-    let steps = vec![
-        PipelineStep {
-            skill: "encode_memory".into(),
-            args: serde_json::json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.14]}),
-            required: true,
-        },
-    ];
+    let steps = vec![PipelineStep {
+        skill: "encode_memory".into(),
+        args: serde_json::json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.15]}),
+        required: true,
+    }];
     {
-        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        let mut ctx = SkillContext {
+            universe: &mut universe,
+            hebbian: &mut hebbian,
+            memories: &mut memories,
+            crystal: &mut crystal,
+        };
         match pipeline.execute_chain(&steps, &mut ctx) {
             Ok(results) => {
                 for r in &results {
-                    println!("  Step {} [{}]: success={} → {}", r.step, r.skill, r.success, r.result);
+                    println!(
+                        "  Step {} [{}]: success={} → {}",
+                        r.step, r.skill, r.success, r.result
+                    );
                 }
             }
             Err(e) => println!("  Error: {}", e),
@@ -591,7 +770,12 @@ fn run_skills_demo() {
     println!("\n── Individual skill: check_conservation ──");
     let skill = pipeline.registry().get("check_conservation").unwrap();
     {
-        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        let mut ctx = SkillContext {
+            universe: &mut universe,
+            hebbian: &mut hebbian,
+            memories: &mut memories,
+            crystal: &mut crystal,
+        };
         match skill.execute(&mut ctx, &serde_json::json!({})) {
             Ok(v) => println!("  Result: {}", v),
             Err(e) => println!("  Error: {}", e),
@@ -600,7 +784,12 @@ fn run_skills_demo() {
 
     println!("\n── Individual skill: analyze_topology ──");
     {
-        let mut ctx = SkillContext { universe: &mut universe, hebbian: &mut hebbian, memories: &mut memories, crystal: &mut crystal };
+        let mut ctx = SkillContext {
+            universe: &mut universe,
+            hebbian: &mut hebbian,
+            memories: &mut memories,
+            crystal: &mut crystal,
+        };
         let skill = pipeline.registry().get("analyze_topology").unwrap();
         match skill.execute(&mut ctx, &serde_json::json!({})) {
             Ok(v) => println!("  Result: {}", v),
@@ -608,5 +797,8 @@ fn run_skills_demo() {
         }
     }
 
-    println!("\n✓ Skills Interface Demo complete — {} skills available, all operational", pipeline.registry().len());
+    println!(
+        "\n✓ Skills Interface Demo complete — {} skills available, all operational",
+        pipeline.registry().len()
+    );
 }

@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use super::registry::SkillRegistry;
-use super::types::{Skill, SkillContext, SkillError};
+use super::types::SkillContext;
 
 pub struct SkillPipeline {
     registry: SkillRegistry,
@@ -25,7 +25,9 @@ impl SkillPipeline {
         let mut carry = Value::Null;
 
         for (i, step) in steps.iter().enumerate() {
-            let skill = self.registry.get(&step.skill)
+            let skill = self
+                .registry
+                .get(&step.skill)
                 .ok_or_else(|| PipelineError {
                     step: i,
                     message: format!("skill not found: {}", step.skill),
