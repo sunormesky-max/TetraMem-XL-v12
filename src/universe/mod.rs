@@ -77,6 +77,11 @@ pub use functional_emotion::{
 };
 pub use hebbian::HebbianMemory;
 pub use lattice::{BccVerification, Lattice, NeighborShell, Projection, Tetrahedron};
+pub use memory::{
+    dark_coords_from_data, semantic_distance, BridgeEdge, BridgeType, ClusteringConfig,
+    ClusteringEngine, ClusteringReport, DarkGravityField, ResonanceTunnel, SemanticAnchorPlacer,
+    TopologyBridge, TunnelEdge,
+};
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
 pub use node::{DarkNode, DarkUniverse};
 pub use observer::{
