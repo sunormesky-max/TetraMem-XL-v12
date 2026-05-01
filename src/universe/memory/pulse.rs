@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::coord::Coord7D;
 use crate::universe::core::physics::UniversePhysics;
-use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::lattice::Lattice;
 use crate::universe::node::DarkUniverse;
@@ -85,7 +85,12 @@ impl NeuralPulse {
         }
     }
 
-    fn new_with_params(source: Coord7D, pulse_type: PulseType, strength: f64, max_hops: usize) -> Self {
+    fn new_with_params(
+        source: Coord7D,
+        pulse_type: PulseType,
+        strength: f64,
+        max_hops: usize,
+    ) -> Self {
         Self {
             strength,
             hops: 0,
@@ -102,7 +107,8 @@ impl NeuralPulse {
     }
 
     fn effective_hebbian_bias(&self) -> f64 {
-        self.hebbian_bias_override.unwrap_or_else(|| self.pulse_type.hebbian_bias_weight())
+        self.hebbian_bias_override
+            .unwrap_or_else(|| self.pulse_type.hebbian_bias_weight())
     }
 
     fn is_alive(&self) -> bool {
@@ -110,7 +116,10 @@ impl NeuralPulse {
     }
 
     fn current(&self) -> Coord7D {
-        *self.path.last().expect("NeuralPulse path must never be empty")
+        *self
+            .path
+            .last()
+            .expect("NeuralPulse path must never be empty")
     }
 }
 
@@ -269,8 +278,14 @@ impl PulseEngine {
         let fanout_override = emotion_config.modulated_fanout(pulse_type, pad);
 
         self.run_pulse_emotion(
-            pulse, universe, hebbian, physics,
-            &EmotionDecayParams { face_decay, bcc_decay },
+            pulse,
+            universe,
+            hebbian,
+            physics,
+            &EmotionDecayParams {
+                face_decay,
+                bcc_decay,
+            },
             fanout_override,
         )
     }
@@ -318,7 +333,9 @@ impl PulseEngine {
             }
 
             let candidates = match physics {
-                Some(p) => self.biased_neighbors_physics(&current, &pulse, universe, hebbian, &visited, p),
+                Some(p) => {
+                    self.biased_neighbors_physics(&current, &pulse, universe, hebbian, &visited, p)
+                }
                 None => self.biased_neighbors(&current, &pulse, universe, hebbian, &visited),
             };
 
@@ -406,8 +423,12 @@ impl PulseEngine {
             }
 
             let candidates = match physics {
-                Some(p) => self.biased_neighbors_emotion(&current, &pulse, universe, hebbian, &visited, p, decay),
-                None => self.biased_neighbors_emotion_nophysics(&current, &pulse, universe, hebbian, &visited, decay),
+                Some(p) => self.biased_neighbors_emotion(
+                    &current, &pulse, universe, hebbian, &visited, p, decay,
+                ),
+                None => self.biased_neighbors_emotion_nophysics(
+                    &current, &pulse, universe, hebbian, &visited, decay,
+                ),
             };
 
             let fanout = fanout_override.min(candidates.len());
@@ -611,12 +632,7 @@ impl PulseEngine {
         candidates
     }
 
-    fn dimension_modulation(
-        &self,
-        from: &[f64; DIM],
-        to: &[f64; DIM],
-        decays: &[f64; DIM],
-    ) -> f64 {
+    fn dimension_modulation(&self, from: &[f64; DIM], to: &[f64; DIM], decays: &[f64; DIM]) -> f64 {
         let mut weighted = 0.0;
         let mut count = 0usize;
         for d in 0..DIM {
@@ -811,13 +827,8 @@ mod tests {
         let physics = UniversePhysics::rich();
 
         let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
-        let result = engine.propagate_with_physics(
-            &source,
-            PulseType::Exploratory,
-            &u,
-            &mut h,
-            &physics,
-        );
+        let result =
+            engine.propagate_with_physics(&source, PulseType::Exploratory, &u, &mut h, &physics);
 
         assert!(result.visited_nodes > 1, "physics pulse should visit nodes");
         assert!(result.total_activation > 0.0);
@@ -831,15 +842,13 @@ mod tests {
         let physics = UniversePhysics::rich();
 
         let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
-        let result = engine.propagate_with_physics(
-            &source,
-            PulseType::Reinforcing,
-            &u,
-            &mut h,
-            &physics,
-        );
+        let result =
+            engine.propagate_with_physics(&source, PulseType::Reinforcing, &u, &mut h, &physics);
 
-        assert!(result.paths_recorded > 0, "physics reinforcing should record paths");
+        assert!(
+            result.paths_recorded > 0,
+            "physics reinforcing should record paths"
+        );
     }
 
     #[test]
@@ -850,15 +859,13 @@ mod tests {
         let physics = UniversePhysics::rich();
 
         let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
-        let result = engine.propagate_with_physics(
-            &source,
-            PulseType::Cascade,
-            &u,
-            &mut h,
-            &physics,
-        );
+        let result =
+            engine.propagate_with_physics(&source, PulseType::Cascade, &u, &mut h, &physics);
 
-        assert!(result.visited_nodes > 2, "physics cascade should visit many nodes");
+        assert!(
+            result.visited_nodes > 2,
+            "physics cascade should visit many nodes"
+        );
     }
 
     #[test]

@@ -10,8 +10,8 @@ use crate::universe::dream::DreamEngine;
 use crate::universe::error::AppError;
 use crate::universe::pulse::{EmotionPulseConfig, PulseEngine, PulseType};
 
-use super::types::default_pulse_type;
 use super::state::SharedState;
+use super::types::default_pulse_type;
 use super::types::*;
 
 #[derive(Deserialize)]
@@ -58,7 +58,13 @@ pub async fn emotion_pulse(
     let mut h = state.hebbian.write().await;
 
     let source = crate::universe::coord::Coord7D::new_even([
-        req.source[0], req.source[1], req.source[2], 0, 0, 0, 0,
+        req.source[0],
+        req.source[1],
+        req.source[2],
+        0,
+        0,
+        0,
+        0,
     ]);
     let pt = match req.pulse_type.to_lowercase().as_str() {
         "reinforcing" => PulseType::Reinforcing,
@@ -81,9 +87,7 @@ pub async fn emotion_pulse(
     tracing::info!(source = %source, cluster = %emotion.cluster, "firing emotion pulse");
 
     let engine = PulseEngine::new();
-    let result = engine.propagate_with_emotion(
-        &source, pt, &u, &mut h, None, &config, &pad,
-    );
+    let result = engine.propagate_with_emotion(&source, pt, &u, &mut h, None, &config, &pad);
 
     Ok(Json(ApiResponse::ok(EmotionPulseResponse {
         visited_nodes: result.visited_nodes,

@@ -23,9 +23,15 @@ pub struct Claims {
 }
 
 impl Claims {
-    pub fn sub(&self) -> &str { &self.sub }
-    pub fn role(&self) -> &str { &self.role }
-    pub fn jti(&self) -> &str { &self.jti }
+    pub fn sub(&self) -> &str {
+        &self.sub
+    }
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+    pub fn jti(&self) -> &str {
+        &self.jti
+    }
 
     pub fn anonymous(role: &str) -> Self {
         let now = Utc::now();
@@ -201,9 +207,7 @@ impl UserStore {
     pub fn verify(&self, username: &str, password: &str) -> Option<&str> {
         let user = self.users.iter().find(|u| u.username == username);
         let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAA$IrIHnE+KcLW7CRfv02DDMj/53fjTmUqsDVOHeibmAGs";
-        let hash = user
-            .map(|u| u.password_hash.as_str())
-            .unwrap_or(dummy_hash);
+        let hash = user.map(|u| u.password_hash.as_str()).unwrap_or(dummy_hash);
         let valid = verify_password(password, hash);
         if let Some(u) = user {
             if valid {

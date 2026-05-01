@@ -69,12 +69,12 @@ pub use dream::{DreamConfig, DreamEngine, DreamPhase, DreamReport};
 pub use emotion::{
     EmotionMapper, EmotionReading, EmotionalQuadrant, PadVector, PulseStrategySuggestion,
 };
-pub use functional_emotion::{
-    ArousalLevel, EmotionCluster, EmotionSource, FunctionalEmotion, Valence,
-};
 pub use energy::{EnergyField, EnergyPool};
 pub use error::AppError;
 pub use events::{EventBus, EventBusSender, UniverseEvent};
+pub use functional_emotion::{
+    ArousalLevel, EmotionCluster, EmotionSource, FunctionalEmotion, Valence,
+};
 pub use hebbian::HebbianMemory;
 pub use lattice::{BccVerification, Lattice, NeighborShell, Projection, Tetrahedron};
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};

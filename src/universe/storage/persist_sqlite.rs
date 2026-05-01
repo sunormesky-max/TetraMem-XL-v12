@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use crate::universe::cognitive::functional_emotion::EmotionSource;
 use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
-use crate::universe::cognitive::functional_emotion::EmotionSource;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
@@ -104,8 +104,9 @@ impl PersistSqlite {
 
         conn.execute_batch(
             "ALTER TABLE hebbian_edges ADD COLUMN emotion_tag TEXT DEFAULT NULL;
-             ALTER TABLE hebbian_edges ADD COLUMN emotion_weight REAL NOT NULL DEFAULT 0.0;"
-        ).ok();
+             ALTER TABLE hebbian_edges ADD COLUMN emotion_weight REAL NOT NULL DEFAULT 0.0;",
+        )
+        .ok();
 
         Ok(())
     }
@@ -125,8 +126,14 @@ impl PersistSqlite {
 
         #[cfg(unix)]
         {
-            if let Err(e) = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600)) {
-                tracing::warn!("failed to set restrictive permissions on {}: {}", path.display(), e);
+            if let Err(e) =
+                std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            {
+                tracing::warn!(
+                    "failed to set restrictive permissions on {}: {}",
+                    path.display(),
+                    e
+                );
             }
         }
 
@@ -351,7 +358,14 @@ impl PersistSqlite {
                     "Functional" => Some(EmotionSource::Functional),
                     _ => None,
                 });
-                hebbian.restore_edge(a, b, weight, count.max(1) as usize, emotion_tag, emotion_weight);
+                hebbian.restore_edge(
+                    a,
+                    b,
+                    weight,
+                    count.max(1) as usize,
+                    emotion_tag,
+                    emotion_weight,
+                );
             }
         }
 
@@ -435,7 +449,9 @@ impl PersistSqlite {
                     }
                 };
                 let verts = [make(v0, v0e), make(v1, v1e), make(v2, v2e), make(v3, v3e)];
-                mems.push(MemoryAtom::from_parts_with_importance(verts, dim, pb, created_at, importance));
+                mems.push(MemoryAtom::from_parts_with_importance(
+                    verts, dim, pb, created_at, importance,
+                ));
             }
         }
 

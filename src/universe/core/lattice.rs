@@ -1150,7 +1150,8 @@ mod tests {
         assert!(
             (d_dark_phys - d_dark_flat).abs() > 0.01,
             "rich physics should weight dark dims differently: flat={}, phys={}",
-            d_dark_flat, d_dark_phys
+            d_dark_flat,
+            d_dark_phys
         );
     }
 

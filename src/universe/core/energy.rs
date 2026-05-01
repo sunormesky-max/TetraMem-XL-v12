@@ -311,7 +311,12 @@ impl EnergyField {
         self.dims.iter().all(|&d| d >= -EPSILON_NORMAL)
     }
 
-    pub fn coupled_flow(&mut self, coupling: &CouplingMatrix, source_dim: usize, amount: f64) -> f64 {
+    pub fn coupled_flow(
+        &mut self,
+        coupling: &CouplingMatrix,
+        source_dim: usize,
+        amount: f64,
+    ) -> f64 {
         if source_dim >= DIM || amount <= 0.0 || self.dims[source_dim] <= 0.0 {
             return 0.0;
         }

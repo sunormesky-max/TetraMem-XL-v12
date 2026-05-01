@@ -2,8 +2,10 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
-use crate::universe::energy::{EnergyError, EnergyField, EnergyPool, EPSILON_NORMAL, EPSILON_RELATIVE};
 use crate::universe::core::physics::{CouplingMatrix, UniversePhysics};
+use crate::universe::energy::{
+    EnergyError, EnergyField, EnergyPool, EPSILON_NORMAL, EPSILON_RELATIVE,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -376,8 +378,10 @@ impl DarkUniverse {
         let actual = amount.min(available);
         let mut dims = *node.energy.dims();
         let net = coupling.coupled_flow(&mut dims, from_dim, actual);
-        node.energy = EnergyField::from_dims(dims)
-            .map_err(|_| EnergyError::NegativeDimension { dim: from_dim, value: 0.0 })?;
+        node.energy = EnergyField::from_dims(dims).map_err(|_| EnergyError::NegativeDimension {
+            dim: from_dim,
+            value: 0.0,
+        })?;
         Ok(net)
     }
 

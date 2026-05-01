@@ -14,7 +14,10 @@ pub struct PersistFile;
 fn validate_path(path: &Path) -> Result<(), FilePersistError> {
     let path_str = path.to_string_lossy();
     if path_str.contains("..") {
-        return Err(FilePersistError::Io(format!("path traversal detected: {}", path.display())));
+        return Err(FilePersistError::Io(format!(
+            "path traversal detected: {}",
+            path.display()
+        )));
     }
     Ok(())
 }

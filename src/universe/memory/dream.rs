@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
-use crate::universe::core::physics::UniversePhysics;
-use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
 use crate::universe::cognitive::emotion::PadVector;
+use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
+use crate::universe::core::physics::UniversePhysics;
 use crate::universe::hebbian::HebbianMemory;
-use crate::universe::memory::MemoryCodec;
 use crate::universe::memory::MemoryAtom;
+use crate::universe::memory::MemoryCodec;
 use crate::universe::node::DarkUniverse;
 use crate::universe::pulse::{EmotionPulseConfig, PulseEngine, PulseType};
 use crate::universe::reasoning::ReasoningEngine;
@@ -126,7 +126,9 @@ impl DreamEngine {
         };
 
         if !universe.verify_conservation() {
-            tracing::error!("ENERGY CONSERVATION VIOLATED after dream merge — this is a critical bug");
+            tracing::error!(
+                "ENERGY CONSERVATION VIOLATED after dream merge — this is a critical bug"
+            );
         }
 
         let edges_after = hebbian.edge_count();
@@ -437,7 +439,12 @@ impl DreamEngine {
         let replayed = self.replay_phase_emotion(universe, hebbian, &emotion, replay_rounds);
         let weakened = self.weaken_phase(hebbian);
         let consolidated = self.consolidate_phase_emotion(
-            universe, hebbian, memories, &emotion, emotion_weight, emotion_source,
+            universe,
+            hebbian,
+            memories,
+            &emotion,
+            emotion_weight,
+            emotion_source,
         );
 
         let edges_after = hebbian.edge_count();
@@ -714,9 +721,7 @@ mod tests {
         let (u, mut h, mems) = setup_dream_system();
         let dream = DreamEngine::new();
         let pad = PadVector::new(0.5, 0.5, 0.0);
-        let report = dream.dream_with_emotion(
-            &u, &mut h, &mems, &pad, EmotionSource::Functional,
-        );
+        let report = dream.dream_with_emotion(&u, &mut h, &mems, &pad, EmotionSource::Functional);
         assert!(
             u.verify_conservation(),
             "emotion dream must preserve conservation"

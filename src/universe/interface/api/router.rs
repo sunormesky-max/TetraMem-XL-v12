@@ -92,12 +92,24 @@ async fn rate_limit_middleware(
 async fn security_headers_middleware(req: Request, next: Next) -> Response {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
-    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
     headers.insert("x-xss-protection", HeaderValue::from_static("0"));
-    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
-    headers.insert("content-security-policy", HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"));
-    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), microphone=(), geolocation=()"));
+    headers.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+    );
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
     headers.insert("cache-control", HeaderValue::from_static("no-store"));
     headers.insert("pragma", HeaderValue::from_static("no-cache"));
     response
@@ -122,9 +134,13 @@ async fn auth_middleware(
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
         tracing::warn!("⚠ AUTH IS DISABLED — all requests granted read-only user role");
-        tracing::warn!("⚠ Set TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 to restore admin access (NOT for production)");
+        tracing::warn!(
+            "⚠ Set TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 to restore admin access (NOT for production)"
+        );
         let role = if std::env::var("TETRAMEM_ALLOW_NO_AUTH_ADMIN").as_deref() == Ok("1") {
-            tracing::warn!("⚠ TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 detected — granting admin (development only)");
+            tracing::warn!(
+                "⚠ TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 detected — granting admin (development only)"
+            );
             "admin"
         } else {
             "user"
@@ -180,7 +196,11 @@ async fn raft_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match provided {
-        Some(s) if subtle::ConstantTimeEq::ct_eq(s.as_bytes(), secret.as_bytes()).unwrap_u8() == 1 => Ok(next.run(req).await),
+        Some(s)
+            if subtle::ConstantTimeEq::ct_eq(s.as_bytes(), secret.as_bytes()).unwrap_u8() == 1 =>
+        {
+            Ok(next.run(req).await)
+        }
         _ => Err(AppError::Unauthorized(
             "invalid or missing raft secret".to_string(),
         )),
@@ -216,9 +236,9 @@ fn build_cors_layer(origins: &[String]) -> CorsLayer {
     if parsed.is_empty() {
         tracing::warn!("no valid CORS origins parsed, denying all cross-origin requests");
         return CorsLayer::new()
-            .allow_origin(AllowOrigin::list([
-                "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-            ]))
+            .allow_origin(AllowOrigin::list(["http://localhost:5173"
+                .parse::<HeaderValue>()
+                .unwrap()]))
             .allow_methods(methods)
             .allow_headers(headers);
     }
@@ -362,6 +382,9 @@ mod tests {
             let mut last = limiter.last_reset.lock().unwrap();
             *last = std::time::Instant::now() - std::time::Duration::from_secs(61);
         }
-        assert!(limiter.check_and_increment(), "should reset after window expiry");
+        assert!(
+            limiter.check_and_increment(),
+            "should reset after window expiry"
+        );
     }
 }

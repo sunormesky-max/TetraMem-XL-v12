@@ -21,7 +21,12 @@ impl DarkDimension {
     }
 
     pub fn all() -> &'static [DarkDimension; 4] {
-        &[DarkDimension::E, DarkDimension::S, DarkDimension::T, DarkDimension::Mu]
+        &[
+            DarkDimension::E,
+            DarkDimension::S,
+            DarkDimension::T,
+            DarkDimension::Mu,
+        ]
     }
 
     pub fn name(self) -> &'static str {
@@ -53,7 +58,11 @@ impl PhysicalDimension {
     }
 
     pub fn all() -> &'static [PhysicalDimension; 3] {
-        &[PhysicalDimension::X, PhysicalDimension::Y, PhysicalDimension::Z]
+        &[
+            PhysicalDimension::X,
+            PhysicalDimension::Y,
+            PhysicalDimension::Z,
+        ]
     }
 }
 
@@ -136,26 +145,38 @@ impl DimensionProfile {
 
     pub fn dark_anisotropy() -> Self {
         let mut profile = Self::default();
-        profile.set_dark(DarkDimension::E, DimensionPhysics {
-            metric_weight: 1.2,
-            propagation_decay: 0.85,
-            coupling_strength: 0.3,
-        });
-        profile.set_dark(DarkDimension::S, DimensionPhysics {
-            metric_weight: 1.0,
-            propagation_decay: 0.72,
-            coupling_strength: 0.5,
-        });
-        profile.set_dark(DarkDimension::T, DimensionPhysics {
-            metric_weight: 0.8,
-            propagation_decay: 0.60,
-            coupling_strength: 0.7,
-        });
-        profile.set_dark(DarkDimension::Mu, DimensionPhysics {
-            metric_weight: 1.5,
-            propagation_decay: 0.90,
-            coupling_strength: 0.2,
-        });
+        profile.set_dark(
+            DarkDimension::E,
+            DimensionPhysics {
+                metric_weight: 1.2,
+                propagation_decay: 0.85,
+                coupling_strength: 0.3,
+            },
+        );
+        profile.set_dark(
+            DarkDimension::S,
+            DimensionPhysics {
+                metric_weight: 1.0,
+                propagation_decay: 0.72,
+                coupling_strength: 0.5,
+            },
+        );
+        profile.set_dark(
+            DarkDimension::T,
+            DimensionPhysics {
+                metric_weight: 0.8,
+                propagation_decay: 0.60,
+                coupling_strength: 0.7,
+            },
+        );
+        profile.set_dark(
+            DarkDimension::Mu,
+            DimensionPhysics {
+                metric_weight: 1.5,
+                propagation_decay: 0.90,
+                coupling_strength: 0.2,
+            },
+        );
         profile
     }
 
@@ -425,7 +446,11 @@ impl PhaseTransitionConfig {
 
     pub fn manifestation_probability(&self, ratio: f64) -> f64 {
         if self.sharpness.is_infinite() || self.sharpness <= 0.0 {
-            if ratio >= self.threshold { 1.0 } else { 0.0 }
+            if ratio >= self.threshold {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             let x = self.sharpness * (ratio - self.threshold);
             1.0 / (1.0 + (-x).exp())
@@ -434,8 +459,7 @@ impl PhaseTransitionConfig {
 
     pub fn is_manifested(&self, ratio: f64) -> bool {
         if self.fluctuation_amplitude > 0.0 {
-            let noise = self.fluctuation_amplitude
-                * (simple_hash_f64(ratio) * 2.0 - 1.0);
+            let noise = self.fluctuation_amplitude * (simple_hash_f64(ratio) * 2.0 - 1.0);
             self.manifestation_probability(ratio + noise) > 0.5
         } else {
             self.manifestation_probability(ratio) > 0.5

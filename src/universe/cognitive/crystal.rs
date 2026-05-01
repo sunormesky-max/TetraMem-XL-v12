@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
-use crate::universe::coord::Coord7D;
 use crate::universe::cognitive::functional_emotion::EmotionSource;
+use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::node::DarkUniverse;
 use serde::{Deserialize, Serialize};
@@ -465,13 +465,25 @@ mod tests {
         }
 
         let weight = h.get_bias(&a, &b);
-        assert!(weight > 1.8, "edge weight should exceed threshold, got {}", weight);
+        assert!(
+            weight > 1.8,
+            "edge weight should exceed threshold, got {}",
+            weight
+        );
 
         let emotion = h.get_edge_emotion(&a, &b);
-        assert_eq!(emotion, Some(EmotionSource::Functional), "edge should have emotion tag");
+        assert_eq!(
+            emotion,
+            Some(EmotionSource::Functional),
+            "edge should have emotion tag"
+        );
 
         let mut engine = CrystalEngine::new();
         let report = engine.crystallize_emotion(&h, &u, EmotionSource::Functional);
-        assert!(report.total_crystals > 0, "emotion-tagged edges should crystallize, report={:?}", report);
+        assert!(
+            report.total_crystals > 0,
+            "emotion-tagged edges should crystallize, report={:?}",
+            report
+        );
     }
 }

@@ -16,9 +16,9 @@ use super::state::SharedState;
 use super::types::*;
 
 fn validate_cluster_addr(addr: &str) -> Result<(), AppError> {
-    let parsed: SocketAddr = addr.parse().map_err(|_| {
-        AppError::BadRequest(format!("invalid cluster address format: {}", addr))
-    })?;
+    let parsed: SocketAddr = addr
+        .parse()
+        .map_err(|_| AppError::BadRequest(format!("invalid cluster address format: {}", addr)))?;
     let ip = parsed.ip();
     if ip.is_loopback() || ip.is_multicast() {
         return Err(AppError::BadRequest(

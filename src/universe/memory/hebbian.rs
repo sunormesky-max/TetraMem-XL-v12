@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
-use crate::universe::coord::Coord7D;
 use crate::universe::cognitive::functional_emotion::EmotionSource;
+use crate::universe::coord::Coord7D;
 use std::collections::HashMap;
 
 const DEFAULT_MAX_PATHS: usize = 4000;
@@ -115,7 +115,12 @@ impl HebbianMemory {
         self.record_path_internal(path, strength, Some(source));
     }
 
-    fn record_path_internal(&mut self, path: &[Coord7D], strength: f64, emotion: Option<EmotionSource>) {
+    fn record_path_internal(
+        &mut self,
+        path: &[Coord7D],
+        strength: f64,
+        emotion: Option<EmotionSource>,
+    ) {
         if path.len() < 2 || !strength.is_finite() || strength < 0.0 {
             return;
         }

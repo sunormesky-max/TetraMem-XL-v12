@@ -6,7 +6,7 @@ description = "TetraMem-XL v12.0 - 7D Dark Universe Memory System"
 license = "AGPL-3.0-or-later"
 authors = ["sunormesky-max <sunormesky@gmail.com>"]
 repository = "https://github.com/sunormesky-max/TetraMem-XL-v12"
-rust-version = "1.75"
+rust-version = "1.80"
 keywords = ["memory", "7d", "dark-universe", "energy-conservation", "tetrahedron"]
 categories = ["data-structures", "science"]
 

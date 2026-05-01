@@ -28,9 +28,10 @@ const LOGIN_WINDOW_SECS: u64 = 300;
 const MAX_LOGIN_ENTRIES: usize = 10000;
 
 fn check_login_rate(ip_key: &str) -> Result<(), AppError> {
-    let map = LOGIN_RATE_LIMIT
-        .get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = map.lock().map_err(|e| AppError::Internal(format!("login rate limit lock: {}", e)))?;
+    let map = LOGIN_RATE_LIMIT.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = map
+        .lock()
+        .map_err(|e| AppError::Internal(format!("login rate limit lock: {}", e)))?;
     let now = Instant::now();
     if map.len() > MAX_LOGIN_ENTRIES {
         map.retain(|_, v| now.duration_since(v.first_attempt).as_secs() < LOGIN_WINDOW_SECS);
@@ -45,10 +46,13 @@ fn check_login_rate(ip_key: &str) -> Result<(), AppError> {
         }
         attempt.count += 1;
     } else {
-        map.insert(ip_key.to_string(), LoginAttempt {
-            count: 1,
-            first_attempt: now,
-        });
+        map.insert(
+            ip_key.to_string(),
+            LoginAttempt {
+                count: 1,
+                first_attempt: now,
+            },
+        );
     }
     Ok(())
 }
@@ -118,8 +122,7 @@ pub async fn start_server(
         let h = state.hebbian.read().await;
         let mems = state.memories.read().await;
         let c = state.crystal.read().await;
-        match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &mems, &c)
-        {
+        match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &mems, &c) {
             Ok(info) => tracing::info!("final persist on shutdown: {}", info),
             Err(e) => tracing::warn!("final persist failed: {}", e),
         }
@@ -138,13 +141,13 @@ async fn shutdown_signal() {
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .unwrap_or_else(|e| {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => sig.recv().await,
+            Err(e) => {
                 tracing::error!("signal handler error: {}", e);
                 std::future::pending::<()>().await
-            })
-            .recv()
-            .await;
+            }
+        };
     };
 
     #[cfg(not(unix))]
@@ -170,7 +173,10 @@ mod tests {
         for _ in 0..MAX_LOGIN_ATTEMPTS {
             check_login_rate(ip).unwrap();
         }
-        assert!(check_login_rate(ip).is_err(), "should block after max attempts");
+        assert!(
+            check_login_rate(ip).is_err(),
+            "should block after max attempts"
+        );
     }
 
     #[test]
@@ -180,7 +186,10 @@ mod tests {
             check_login_rate("10.0.0.2").unwrap();
         }
         assert!(check_login_rate("10.0.0.2").is_err());
-        assert!(check_login_rate("10.0.0.1").is_ok(), "different IP should be independent");
+        assert!(
+            check_login_rate("10.0.0.1").is_ok(),
+            "different IP should be independent"
+        );
     }
 
     #[test]
@@ -188,6 +197,9 @@ mod tests {
         for i in 0..(MAX_LOGIN_ENTRIES + 100) {
             let _ = check_login_rate(&format!("172.16.0.{}", i % 256));
         }
-        assert!(check_login_rate("172.16.1.1").is_ok(), "should still work after many entries");
+        assert!(
+            check_login_rate("172.16.1.1").is_ok(),
+            "should still work after many entries"
+        );
     }
 }

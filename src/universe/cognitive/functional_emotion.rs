@@ -74,8 +74,7 @@ impl EmotionCluster {
             | EmotionCluster::AngerHostility
             | EmotionCluster::DesperationPanic
             | EmotionCluster::SurpriseAwe => ArousalLevel::High,
-            EmotionCluster::ContentmentSerenity
-            | EmotionCluster::GuiltShame => ArousalLevel::Low,
+            EmotionCluster::ContentmentSerenity | EmotionCluster::GuiltShame => ArousalLevel::Low,
             EmotionCluster::LoveAffection
             | EmotionCluster::PrideAccomplishment
             | EmotionCluster::SadnessGrief => ArousalLevel::Medium,
@@ -177,10 +176,7 @@ impl FunctionalEmotion {
     }
 
     pub fn steered_profile_weights(&self) -> [f64; 7] {
-        let base: [f64; 7] = [
-            1.0, 1.0, 1.0,
-            1.2, 1.0, 0.8, 1.5,
-        ];
+        let base: [f64; 7] = [1.0, 1.0, 1.0, 1.2, 1.0, 0.8, 1.5];
         let valence_mod: [f64; 7] = match self.valence {
             Valence::Positive => [0.0, 0.0, 0.0, 0.2, 0.1, 0.0, 0.1],
             Valence::Negative => [0.0, 0.0, 0.0, -0.2, -0.1, 0.0, -0.1],
@@ -263,7 +259,10 @@ mod tests {
         let pad = PadVector::new(0.8, 0.8, 0.0);
         let fe = FunctionalEmotion::from_pad(pad, EmotionSource::Functional);
         let weights = fe.steered_profile_weights();
-        assert!(weights[3] > 1.2, "E dimension should be boosted for positive valence");
+        assert!(
+            weights[3] > 1.2,
+            "E dimension should be boosted for positive valence"
+        );
     }
 
     #[test]
@@ -271,7 +270,10 @@ mod tests {
         let pad = PadVector::new(-0.8, -0.8, 0.0);
         let fe = FunctionalEmotion::from_pad(pad, EmotionSource::Perceived);
         let weights = fe.steered_profile_weights();
-        assert!(weights[3] < 1.2, "E dimension should be reduced for negative valence");
+        assert!(
+            weights[3] < 1.2,
+            "E dimension should be reduced for negative valence"
+        );
     }
 
     #[test]

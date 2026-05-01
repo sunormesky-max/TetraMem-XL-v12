@@ -58,24 +58,37 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::TooManyRequests => {
-                (StatusCode::TOO_MANY_REQUESTS, "too many requests".to_string())
-            }
+            AppError::TooManyRequests => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many requests".to_string(),
+            ),
             AppError::Internal(msg) => {
                 tracing::error!("internal error: {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
             AppError::Config(e) => {
                 tracing::error!("config error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
             AppError::Io(e) => {
                 tracing::error!("io error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
             AppError::Serialize(e) => {
                 tracing::error!("serialization error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
         };
 

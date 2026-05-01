@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use crate::universe::cognitive::functional_emotion::EmotionSource;
 use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
-use crate::universe::cognitive::functional_emotion::EmotionSource;
 use serde::{Deserialize, Serialize};
 
 const CURRENT_SCHEMA_VERSION: u32 = 2;
@@ -358,7 +358,14 @@ impl PersistEngine {
                 "Functional" => Some(EmotionSource::Functional),
                 _ => None,
             });
-            hebbian.restore_edge(a, b, es.weight, es.traversal_count, emotion_tag, es.emotion_weight);
+            hebbian.restore_edge(
+                a,
+                b,
+                es.weight,
+                es.traversal_count,
+                emotion_tag,
+                es.emotion_weight,
+            );
         }
 
         let memories: Vec<MemoryAtom> = snapshot

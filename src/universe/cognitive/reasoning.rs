@@ -298,7 +298,8 @@ impl ReasoningEngine {
         physics: &UniversePhysics,
     ) -> Vec<ReasoningResult> {
         let engine = PulseEngine::new();
-        let result = engine.propagate_with_physics(seed, PulseType::Exploratory, universe, hebbian, physics);
+        let result =
+            engine.propagate_with_physics(seed, PulseType::Exploratory, universe, hebbian, physics);
 
         let mut results = Vec::new();
         if result.visited_nodes > 5 {
@@ -459,12 +460,8 @@ mod tests {
     fn discover_with_physics_works() {
         let (u, mut h, _c, mems) = setup_system();
         let physics = crate::universe::core::physics::UniversePhysics::rich();
-        let results = ReasoningEngine::discover_with_physics(
-            &u,
-            &mut h,
-            mems[0].anchor(),
-            &physics,
-        );
+        let results =
+            ReasoningEngine::discover_with_physics(&u, &mut h, mems[0].anchor(), &physics);
         assert!(
             !results.is_empty(),
             "physics discovery should find connections"

@@ -235,12 +235,14 @@ impl CognitiveAgent for EmotionAgent {
             crate::universe::functional_emotion::EmotionSource::Perceived,
         );
 
-        let func_count = ctx.hebbian.edges_by_emotion(
-            crate::universe::functional_emotion::EmotionSource::Functional,
-        ).len();
-        let perc_count = ctx.hebbian.edges_by_emotion(
-            crate::universe::functional_emotion::EmotionSource::Perceived,
-        ).len();
+        let func_count = ctx
+            .hebbian
+            .edges_by_emotion(crate::universe::functional_emotion::EmotionSource::Functional)
+            .len();
+        let perc_count = ctx
+            .hebbian
+            .edges_by_emotion(crate::universe::functional_emotion::EmotionSource::Perceived)
+            .len();
 
         AgentReport {
             agent: self.kind(),
@@ -248,8 +250,12 @@ impl CognitiveAgent for EmotionAgent {
             duration_ms: start.elapsed().as_secs_f64() * 1000.0,
             details: format!(
                 "{} cluster={} valence={:?} arousal={:?} edges[func={} perc={}]",
-                legacy_reading, functional.cluster.name(), functional.valence,
-                functional.arousal, func_count, perc_count,
+                legacy_reading,
+                functional.cluster.name(),
+                functional.valence,
+                functional.arousal,
+                func_count,
+                perc_count,
             ),
         }
     }

@@ -217,11 +217,15 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
             .map_err(|e| io::Error::other(format!("raft log query: {}", e)))?;
 
         for row in rows {
-            let (idx, data, hmac) = row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
+            let (idx, data, hmac) =
+                row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
             if !hmac.is_empty() {
                 let expected = compute_hmac(&data);
                 if hmac != expected {
-                    tracing::error!("HMAC mismatch on raft log entry {} — data may be tampered", idx);
+                    tracing::error!(
+                        "HMAC mismatch on raft log entry {} — data may be tampered",
+                        idx
+                    );
                     return Err(io::Error::other(format!(
                         "HMAC integrity check failed for raft log entry {}. Data may have been tampered with.",
                         idx
@@ -368,9 +372,9 @@ impl RaftLogStorage<TypeName> for LogStore {
         {
             let mut inner = self.lock().map_err(lock_failed)?;
             for entry in entries {
-                inner.persist_entry(entry.log_id().index, &entry).map_err(|e| {
-                    io::Error::other(e)
-                })?;
+                inner
+                    .persist_entry(entry.log_id().index, &entry)
+                    .map_err(io::Error::other)?;
                 inner.log.insert(entry.log_id().index, entry);
             }
         }

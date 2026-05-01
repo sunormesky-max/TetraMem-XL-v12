@@ -53,7 +53,9 @@ impl HttpRaftNetwork {
 
     pub fn with_secret(timeout: Duration, raft_secret: String) -> Self {
         tracing::info!("Raft network initialized with shared-secret authentication");
-        tracing::warn!("Raft RPC uses HTTP — for production, deploy behind a TLS-terminating proxy or VPN");
+        tracing::warn!(
+            "Raft RPC uses HTTP — for production, deploy behind a TLS-terminating proxy or VPN"
+        );
         Self {
             timeout,
             raft_secret,
