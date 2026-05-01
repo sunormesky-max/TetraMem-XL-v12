@@ -6,3 +6,4 @@ pub mod coord;
 pub mod energy;
 pub mod lattice;
 pub mod node;
+pub mod physics;
