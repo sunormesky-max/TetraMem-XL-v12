@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
+use crate::universe::core::physics::UniversePhysics;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
@@ -258,6 +259,66 @@ impl ReasoningEngine {
         }
         (dot / (norm_a * norm_b)).clamp(0.0, 1.0)
     }
+
+    pub fn energy_similarity_physics(
+        universe: &DarkUniverse,
+        a: &MemoryAtom,
+        b: &MemoryAtom,
+        physics: &UniversePhysics,
+    ) -> f64 {
+        let mut dot = 0.0f64;
+        let mut norm_a_sq = 0.0f64;
+        let mut norm_b_sq = 0.0f64;
+
+        for (va, vb) in a.vertices().iter().zip(b.vertices().iter()) {
+            if let (Some(na), Some(nb)) = (universe.get_node(va), universe.get_node(vb)) {
+                let da = na.energy().dims();
+                let db = nb.energy().dims();
+                let w = physics.profile.metric_weights();
+                for i in 0..7 {
+                    dot += w[i] * da[i] * db[i];
+                    norm_a_sq += w[i] * da[i] * da[i];
+                    norm_b_sq += w[i] * db[i] * db[i];
+                }
+            }
+        }
+
+        let norm_a = norm_a_sq.sqrt();
+        let norm_b = norm_b_sq.sqrt();
+        if norm_a < 1e-15 || norm_b < 1e-15 {
+            return 0.0;
+        }
+        (dot / (norm_a * norm_b)).clamp(0.0, 1.0)
+    }
+
+    pub fn discover_with_physics(
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        seed: &Coord7D,
+        physics: &UniversePhysics,
+    ) -> Vec<ReasoningResult> {
+        let engine = PulseEngine::new();
+        let result = engine.propagate_with_physics(seed, PulseType::Exploratory, universe, hebbian, physics);
+
+        let mut results = Vec::new();
+        if result.visited_nodes > 5 {
+            let strong = hebbian.strongest_edges(5);
+            for ((a, b), w) in &strong {
+                if *a == *seed || *b == *seed {
+                    let target = if *a == *seed { b } else { a };
+                    results.push(ReasoningResult {
+                        result_type: ReasoningType::Discovery,
+                        source: format!("{}", seed),
+                        targets: vec![format!("{}", target)],
+                        confidence: w.min(1.0),
+                        hops: 1,
+                    });
+                }
+            }
+        }
+
+        results
+    }
 }
 
 #[cfg(test)]
@@ -392,5 +453,30 @@ mod tests {
         };
         let s = format!("{}", r);
         assert!(s.contains("Analogy"));
+    }
+
+    #[test]
+    fn discover_with_physics_works() {
+        let (u, mut h, _c, mems) = setup_system();
+        let physics = crate::universe::core::physics::UniversePhysics::rich();
+        let results = ReasoningEngine::discover_with_physics(
+            &u,
+            &mut h,
+            mems[0].anchor(),
+            &physics,
+        );
+        assert!(
+            !results.is_empty(),
+            "physics discovery should find connections"
+        );
+    }
+
+    #[test]
+    fn energy_similarity_physics_works() {
+        let (u, _h, _c, mems) = setup_system();
+        let physics = crate::universe::core::physics::UniversePhysics::rich();
+        let sim = ReasoningEngine::energy_similarity_physics(&u, &mems[0], &mems[2], &physics);
+        assert!(sim > 0.0, "physics similarity should be positive");
+        assert!(sim <= 1.0, "similarity should be at most 1.0");
     }
 }

@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::{Coord7D, Parity};
+use crate::universe::core::physics::UniversePhysics;
 use crate::universe::node::DarkUniverse;
 use std::collections::HashSet;
 use std::fmt;
@@ -148,6 +149,24 @@ impl Lattice {
             }
         }
 
+        result
+    }
+
+    pub fn neighbors_by_physics_distance(
+        center: &Coord7D,
+        universe: &DarkUniverse,
+        physics: &UniversePhysics,
+    ) -> Vec<(Coord7D, f64)> {
+        let center_f = center.as_f64();
+        let mut result = Vec::new();
+
+        for n in Self::all_neighbors_present(center, universe) {
+            let n_f = n.as_f64();
+            let dist = physics.weighted_distance_sq(&center_f, &n_f);
+            result.push((n, dist));
+        }
+
+        result.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
 }
@@ -306,6 +325,43 @@ impl Tetrahedron {
         edges
     }
 
+    pub fn projected_volume_3d_physics(&self, physics: &UniversePhysics) -> f64 {
+        let p: Vec<[f64; 3]> = self
+            .vertices
+            .iter()
+            .map(|c| Projection::to_3d_physics(c, physics))
+            .collect();
+
+        let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+        let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+        let c = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
+
+        let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]);
+
+        det.abs() / 6.0
+    }
+
+    pub fn projected_edge_lengths_3d_physics(&self, physics: &UniversePhysics) -> [f64; 6] {
+        let p: Vec<[f64; 3]> = self
+            .vertices
+            .iter()
+            .map(|c| Projection::to_3d_physics(c, physics))
+            .collect();
+        let mut edges = [0.0f64; 6];
+        let mut idx = 0;
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                edges[idx] = ((p[i][0] - p[j][0]).powi(2)
+                    + (p[i][1] - p[j][1]).powi(2)
+                    + (p[i][2] - p[j][2]).powi(2))
+                .sqrt();
+                idx += 1;
+            }
+        }
+        edges
+    }
+
     pub fn is_mixed_parity(&self) -> bool {
         let has_even = self.vertices.iter().any(|v| v.is_even());
         let has_odd = self.vertices.iter().any(|v| v.is_odd());
@@ -336,10 +392,21 @@ impl Projection {
         [f[0], f[1], f[2]]
     }
 
+    pub fn to_3d_physics(coord: &Coord7D, physics: &UniversePhysics) -> [f64; 3] {
+        let f = coord.as_f64();
+        physics.project_to_physical(&f)
+    }
+
     pub fn dist_sq_3d(a: &Coord7D, b: &Coord7D) -> f64 {
         let pa = Self::to_3d(a);
         let pb = Self::to_3d(b);
         (pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2)
+    }
+
+    pub fn dist_sq_3d_physics(a: &Coord7D, b: &Coord7D, physics: &UniversePhysics) -> f64 {
+        let fa = a.as_f64();
+        let fb = b.as_f64();
+        physics.weighted_distance_sq(&fa, &fb)
     }
 
     pub fn verify_bcc(universe: &DarkUniverse) -> BccVerification {
@@ -1065,5 +1132,64 @@ mod tests {
             (d_7d - d_3d - 1.0).abs() < 1e-10,
             "dark dims contribute 1.0"
         );
+    }
+
+    #[test]
+    fn physics_projection_uses_metric() {
+        use crate::universe::core::physics::UniversePhysics;
+        let physics = UniversePhysics::rich();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([0, 0, 0, 1, 0, 0, 0]);
+        let d_flat = Projection::dist_sq_3d(&a, &b);
+        let d_phys = Projection::dist_sq_3d_physics(&a, &b, &physics);
+        assert!((d_flat - 1.0).abs() < 1e-10);
+        assert!(d_phys > 0.0, "physics distance should be positive");
+        let d_dark_phys = Projection::dist_sq_3d_physics(&a, &c, &physics);
+        let d_dark_flat = Projection::dist_sq_3d(&a, &c);
+        assert!(
+            (d_dark_phys - d_dark_flat).abs() > 0.01,
+            "rich physics should weight dark dims differently: flat={}, phys={}",
+            d_dark_flat, d_dark_phys
+        );
+    }
+
+    #[test]
+    fn physics_tetrahedron_volume_differs() {
+        use crate::universe::core::physics::UniversePhysics;
+        let physics = UniversePhysics::rich();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([0, 1, 0, 0, 0, 0, 0]);
+        let d = Coord7D::new_even([0, 0, 1, 0, 0, 0, 0]);
+        let tet = Tetrahedron::new([a, b, c, d]);
+        let vol_flat = tet.projected_volume_3d();
+        let vol_phys = tet.projected_volume_3d_physics(&physics);
+        assert!(vol_phys > 0.0);
+        assert!(vol_flat > 0.0);
+    }
+
+    #[test]
+    fn neighbors_by_physics_distance_sorted() {
+        use crate::universe::core::physics::UniversePhysics;
+        let mut u = DarkUniverse::new(1000000.0);
+        for x in 0..3i32 {
+            for y in 0..3i32 {
+                for z in 0..3i32 {
+                    let even = Coord7D::new_even([x, y, z, 0, 0, 0, 0]);
+                    u.materialize_uniform(even, 100.0).unwrap();
+                }
+            }
+        }
+        let center = Coord7D::new_even([1, 1, 1, 0, 0, 0, 0]);
+        let physics = UniversePhysics::rich();
+        let neighbors = Lattice::neighbors_by_physics_distance(&center, &u, &physics);
+        assert!(!neighbors.is_empty());
+        for i in 1..neighbors.len() {
+            assert!(
+                neighbors[i].1 >= neighbors[i - 1].1 - 1e-10,
+                "neighbors should be sorted by distance"
+            );
+        }
     }
 }

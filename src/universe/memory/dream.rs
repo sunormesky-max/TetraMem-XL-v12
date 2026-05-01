@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use crate::universe::core::physics::UniversePhysics;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryCodec;
 use crate::universe::memory::MemoryAtom;
@@ -300,6 +301,117 @@ impl DreamEngine {
         }
         reports
     }
+
+    pub fn dream_with_physics(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        physics: &UniversePhysics,
+    ) -> DreamReport {
+        let edges_before = hebbian.edge_count();
+        let weight_before = hebbian.total_weight();
+
+        let replayed = self.replay_phase_physics(universe, hebbian, physics);
+        let weakened = self.weaken_phase(hebbian);
+        let consolidated = self.consolidate_phase_physics(universe, hebbian, memories, physics);
+
+        let edges_after = hebbian.edge_count();
+        let weight_after = hebbian.total_weight();
+
+        DreamReport {
+            phase: DreamPhase::Consolidate,
+            paths_replayed: replayed,
+            paths_weakened: weakened,
+            memories_consolidated: consolidated,
+            memories_merged: 0,
+            hebbian_edges_before: edges_before,
+            hebbian_edges_after: edges_after,
+            weight_before,
+            weight_after,
+        }
+    }
+
+    fn replay_phase_physics(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        physics: &UniversePhysics,
+    ) -> usize {
+        let engine = PulseEngine::new();
+        let strong = hebbian.strongest_edges(20);
+        let mut replayed = 0;
+
+        for ((a, b), w) in &strong {
+            if *w < self.config.min_replay_strength {
+                continue;
+            }
+
+            for _ in 0..self.config.replay_rounds {
+                let r = engine.propagate_with_physics(
+                    a,
+                    self.config.replay_pulse_type,
+                    universe,
+                    hebbian,
+                    physics,
+                );
+                replayed += r.paths_recorded;
+
+                let r2 = engine.propagate_with_physics(
+                    b,
+                    self.config.replay_pulse_type,
+                    universe,
+                    hebbian,
+                    physics,
+                );
+                replayed += r2.paths_recorded;
+            }
+        }
+
+        replayed
+    }
+
+    fn consolidate_phase_physics(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        physics: &UniversePhysics,
+    ) -> usize {
+        if memories.len() < 2 {
+            return 0;
+        }
+
+        let mut consolidated = 0;
+        for i in 0..memories.len() {
+            for j in (i + 1)..memories.len() {
+                let ai = memories[i].anchor();
+                let aj = memories[j].anchor();
+                let bias = hebbian.get_bias(ai, aj);
+                if bias >= self.config.consolidation_hebbian_threshold {
+                    let path = vec![*ai, *aj];
+                    hebbian.record_path(&path, bias * 1.5);
+                    consolidated += 1;
+                }
+            }
+        }
+
+        let engine = PulseEngine::new();
+        for mem in memories {
+            let anchor = mem.anchor();
+            if universe.get_node(anchor).is_some() {
+                engine.propagate_with_physics(
+                    anchor,
+                    PulseType::Reinforcing,
+                    universe,
+                    hebbian,
+                    physics,
+                );
+            }
+        }
+
+        consolidated
+    }
 }
 
 impl std::fmt::Display for DreamReport {
@@ -448,5 +560,18 @@ mod tests {
         let report = dream.dream(&u, &mut h, &mems);
         let s = format!("{}", report);
         assert!(s.contains("Dream["));
+    }
+
+    #[test]
+    fn dream_with_physics_works() {
+        let (u, mut h, mems) = setup_dream_system();
+        let physics = crate::universe::core::physics::UniversePhysics::rich();
+        let dream = DreamEngine::new();
+        let report = dream.dream_with_physics(&u, &mut h, &mems, &physics);
+        let _ = report.paths_replayed;
+        assert!(
+            u.verify_conservation(),
+            "physics dream must preserve conservation"
+        );
     }
 }

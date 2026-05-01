@@ -3,6 +3,8 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use std::fmt;
 
+use crate::universe::core::physics::CouplingMatrix;
+
 const DIM: usize = 7;
 const PHYSICAL_DIM: usize = 3;
 const DARK_DIM: usize = 4;
@@ -307,6 +309,34 @@ impl EnergyField {
 
     pub fn verify_integrity(&self) -> bool {
         self.dims.iter().all(|&d| d >= -EPSILON_NORMAL)
+    }
+
+    pub fn coupled_flow(&mut self, coupling: &CouplingMatrix, source_dim: usize, amount: f64) -> f64 {
+        if source_dim >= DIM || amount <= 0.0 || self.dims[source_dim] <= 0.0 {
+            return 0.0;
+        }
+        let actual = amount.min(self.dims[source_dim]);
+        self.dims[source_dim] -= actual;
+        let mut total_coupled = 0.0;
+        let mut coupled_count = 0usize;
+        for j in 0..DIM {
+            if j != source_dim && coupling.get(source_dim, j) > 0.0 {
+                coupled_count += 1;
+            }
+        }
+        if coupled_count > 0 {
+            let per_coupled = actual * 0.1;
+            for j in 0..DIM {
+                if j != source_dim && coupling.get(source_dim, j) > 0.0 {
+                    let transfer = per_coupled * coupling.get(source_dim, j);
+                    self.dims[j] += transfer;
+                    total_coupled += transfer;
+                }
+            }
+        }
+        let remainder = actual - total_coupled;
+        self.dims[source_dim] += remainder;
+        actual
     }
 }
 
@@ -671,5 +701,31 @@ mod tests {
         }
         assert!(pool.verify_conservation());
         assert!((pool.available() - 500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn coupled_flow_moves_energy() {
+        use crate::universe::core::physics::CouplingMatrix;
+        let coupling = CouplingMatrix::from_profile(
+            &crate::universe::core::physics::DimensionProfile::dark_anisotropy(),
+        );
+        let mut f = EnergyField::from_dims([100.0; 7]).unwrap();
+        let total_before = f.total();
+        let net = f.coupled_flow(&coupling, 0, 10.0);
+        assert!(net > 0.0, "coupled flow should produce net transfer");
+        assert!(
+            (f.total() - total_before).abs() < 1e-10,
+            "coupled flow should conserve total energy"
+        );
+        assert!(f.dim(0) < 100.0, "source dim should decrease");
+    }
+
+    #[test]
+    fn coupled_flow_zero_amount_is_noop() {
+        use crate::universe::core::physics::CouplingMatrix;
+        let coupling = CouplingMatrix::new();
+        let mut f = EnergyField::from_dims([100.0; 7]).unwrap();
+        let net = f.coupled_flow(&coupling, 0, 0.0);
+        assert_eq!(net, 0.0);
     }
 }
