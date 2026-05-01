@@ -150,9 +150,11 @@ impl PersistEngine {
             })
             .collect();
         edges.sort_by(|a, b| {
-            a.a.cmp(&b.a)
-                .then(a.b.cmp(&b.b))
-                .then(a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal))
+            a.a.cmp(&b.a).then(a.b.cmp(&b.b)).then(
+                a.weight
+                    .partial_cmp(&b.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         });
 
         let mem_snapshots: Vec<MemorySnapshot> = memories
@@ -274,9 +276,11 @@ impl PersistEngine {
     ) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), PersistError> {
         let mut sorted_edges = snapshot.hebbian_edges.clone();
         sorted_edges.sort_by(|a, b| {
-            a.a.cmp(&b.a)
-                .then(a.b.cmp(&b.b))
-                .then(a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal))
+            a.a.cmp(&b.a).then(a.b.cmp(&b.b)).then(
+                a.weight
+                    .partial_cmp(&b.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         });
         let mut sorted_channels = snapshot.crystal_channels.clone();
         sorted_channels.sort_by(|a, b| a.a.cmp(&b.a).then(a.b.cmp(&b.b)));
@@ -331,16 +335,23 @@ impl PersistEngine {
             ^ edge_hash
             ^ chan_hash;
 
-        if !skip_checksum && snapshot.conservation_checksum != 0 && checksum != snapshot.conservation_checksum {
+        if !skip_checksum
+            && snapshot.conservation_checksum != 0
+            && checksum != snapshot.conservation_checksum
+        {
             return Err(PersistError::ConservationViolation(format!(
                 "snapshot checksum mismatch: stored={} computed={}",
                 snapshot.conservation_checksum, checksum
             )));
         }
-        if skip_checksum && snapshot.conservation_checksum != 0 && checksum != snapshot.conservation_checksum {
+        if skip_checksum
+            && snapshot.conservation_checksum != 0
+            && checksum != snapshot.conservation_checksum
+        {
             tracing::debug!(
                 "JSON checksum drift (f64 precision): stored={} computed={}",
-                snapshot.conservation_checksum, checksum
+                snapshot.conservation_checksum,
+                checksum
             );
         }
 
@@ -578,9 +589,23 @@ mod tests {
             let (u2, h2, _mems2, c2) = PersistEngine::from_json(&json)
                 .map_err(|e| panic!("cycle {}: {:?}", cycle, e))
                 .unwrap();
-            assert!(u2.verify_conservation(), "must conserve after roundtrip cycle {}", cycle);
-            assert_eq!(h2.edge_count(), h.edge_count(), "edge count cycle {}", cycle);
-            assert_eq!(c2.channel_count(), crystal.channel_count(), "channel count cycle {}", cycle);
+            assert!(
+                u2.verify_conservation(),
+                "must conserve after roundtrip cycle {}",
+                cycle
+            );
+            assert_eq!(
+                h2.edge_count(),
+                h.edge_count(),
+                "edge count cycle {}",
+                cycle
+            );
+            assert_eq!(
+                c2.channel_count(),
+                crystal.channel_count(),
+                "channel count cycle {}",
+                cycle
+            );
         }
     }
 }
