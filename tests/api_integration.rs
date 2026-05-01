@@ -27,6 +27,9 @@ fn build_state() -> Arc<AppState> {
         memories: tokio::sync::RwLock::new(Vec::new()),
         memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         crystal: tokio::sync::RwLock::new(CrystalEngine::new()),
+        perception: tokio::sync::RwLock::new(
+            tetramem_v12::universe::perception::PerceptionBudget::new(10_000_000.0),
+        ),
         backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
         config,

@@ -27,6 +27,12 @@ pub struct PerceptionAlloc {
     created_at: Instant,
 }
 
+impl PerceptionAlloc {
+    pub fn amount(&self) -> f64 {
+        self.amount
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PerceptionReport {
     pub total_budget: f64,

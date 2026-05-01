@@ -26,7 +26,7 @@ use super::backup_ops::{create_backup, list_backups};
 use super::cluster_ops::{
     cluster_add_node, cluster_init, cluster_propose, cluster_remove_node, cluster_status,
 };
-use super::cognitive::{fire_pulse, regulate, run_dream};
+use super::cognitive::{fire_pulse, perception_replenish, perception_status, regulate, run_dream};
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
     dark_transfer,
@@ -301,6 +301,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/emotion/pulse", post(emotion_pulse))
         .route("/emotion/dream", post(emotion_dream))
         .route("/emotion/status", get(emotion_status))
+        .route("/perception/status", get(perception_status))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
@@ -325,6 +326,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/phase/quorum/execute", post(quorum_execute))
         .route("/physics/configure", post(physics_configure))
         .route("/emotion/crystallize", post(emotion_crystallize))
+        .route("/perception/replenish", post(perception_replenish))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(admin_middleware))
         .layer(middleware::from_fn(metrics_middleware))

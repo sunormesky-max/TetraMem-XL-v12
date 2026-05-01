@@ -13,6 +13,7 @@ use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
+use crate::universe::perception::PerceptionBudget;
 
 pub struct AppState {
     pub universe: RwLock<DarkUniverse>,
@@ -20,6 +21,7 @@ pub struct AppState {
     pub memories: RwLock<Vec<MemoryAtom>>,
     pub memory_index: RwLock<HashMap<String, usize>>,
     pub crystal: RwLock<CrystalEngine>,
+    pub perception: RwLock<PerceptionBudget>,
     pub backup: RwLock<BackupScheduler>,
     pub cluster: Mutex<ClusterManager>,
     pub config: AppConfig,

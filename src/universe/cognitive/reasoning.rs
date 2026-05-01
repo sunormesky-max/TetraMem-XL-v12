@@ -7,6 +7,7 @@ use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
+use crate::universe::perception::{PerceptionBudget, PerceptionError};
 use crate::universe::pulse::{PulseEngine, PulseType};
 use std::collections::HashSet;
 
@@ -319,6 +320,71 @@ impl ReasoningEngine {
         }
 
         results
+    }
+
+    pub fn find_analogies_gated(
+        universe: &DarkUniverse,
+        memories: &[MemoryAtom],
+        threshold: f64,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<Vec<ReasoningResult>, PerceptionError> {
+        let base_cost = (memories.len() as f64 * 0.5).max(1.0);
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let results = Self::find_analogies(universe, memories, threshold);
+        let actual = (results.len() as f64 * 0.1).min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(results)
+    }
+
+    pub fn find_associations_gated(
+        universe: &DarkUniverse,
+        hebbian: &HebbianMemory,
+        crystal: &CrystalEngine,
+        source: &Coord7D,
+        max_hops: usize,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<Vec<ReasoningResult>, PerceptionError> {
+        let base_cost = (max_hops as f64 * 2.0).max(1.0);
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let results = Self::find_associations(universe, hebbian, crystal, source, max_hops);
+        let actual = (results.len() as f64 * 0.3).min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(results)
+    }
+
+    pub fn infer_chain_gated(
+        universe: &DarkUniverse,
+        hebbian: &HebbianMemory,
+        start: &Coord7D,
+        end: &Coord7D,
+        max_hops: usize,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<Vec<ReasoningResult>, PerceptionError> {
+        let base_cost = (max_hops as f64 * 1.5).max(1.0);
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let results = Self::infer_chain(universe, hebbian, start, end, max_hops);
+        let actual = (results.len() as f64 * 0.5).min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(results)
+    }
+
+    pub fn discover_gated(
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        seed: &Coord7D,
+        pulse_strength: f64,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<Vec<ReasoningResult>, PerceptionError> {
+        let base_cost = 5.0;
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let results = Self::discover(universe, hebbian, seed, pulse_strength);
+        let actual = (results.len() as f64 * 1.0).min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(results)
     }
 }
 

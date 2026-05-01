@@ -106,3 +106,38 @@ pub async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<
     let descriptions: Vec<String> = actions.iter().map(|a| a.description.clone()).collect();
     Json(ApiResponse::ok(descriptions))
 }
+
+pub async fn perception_status(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<PerceptionStatusResponse>> {
+    let p = state.perception.read().await;
+    let report = p.report();
+    Json(ApiResponse::ok(PerceptionStatusResponse {
+        total_budget: report.total_budget,
+        allocated: report.allocated,
+        available: report.total_budget - report.allocated,
+        spent: report.spent,
+        returned: report.returned,
+        utilization: report.utilization,
+    }))
+}
+
+pub async fn perception_replenish(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<PerceptionStatusResponse>>, AppError> {
+    {
+        let u = state.universe.read().await;
+        let mut p = state.perception.write().await;
+        p.replenish(u.total_energy());
+    }
+    let p = state.perception.read().await;
+    let report = p.report();
+    Ok(Json(ApiResponse::ok(PerceptionStatusResponse {
+        total_budget: report.total_budget,
+        allocated: report.allocated,
+        available: report.total_budget - report.allocated,
+        spent: report.spent,
+        returned: report.returned,
+        utilization: report.utilization,
+    })))
+}

@@ -8,6 +8,7 @@ use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::memory::MemoryCodec;
 use crate::universe::node::DarkUniverse;
+use crate::universe::perception::{PerceptionBudget, PerceptionError};
 use crate::universe::pulse::{EmotionPulseConfig, PulseEngine, PulseType};
 use crate::universe::reasoning::ReasoningEngine;
 
@@ -334,6 +335,42 @@ impl DreamEngine {
             weight_before,
             weight_after,
         }
+    }
+
+    pub fn dream_gated(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<DreamReport, PerceptionError> {
+        let base_cost = (memories.len() as f64 * 1.0 + 5.0).max(2.0);
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let report = self.dream(universe, hebbian, memories);
+        let work = (report.paths_replayed + report.memories_consolidated) as f64 * 0.2;
+        let actual = work.min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(report)
+    }
+
+    pub fn dream_with_merge_gated(
+        &self,
+        universe: &mut DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &mut Vec<MemoryAtom>,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<DreamReport, PerceptionError> {
+        let base_cost = (memories.len() as f64 * 1.5 + 8.0).max(3.0);
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let report = self.dream_with_merge(universe, hebbian, memories);
+        let work = (report.paths_replayed + report.memories_consolidated + report.memories_merged)
+            as f64
+            * 0.3;
+        let actual = work.min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(report)
     }
 
     fn replay_phase_physics(

@@ -92,7 +92,7 @@ pub use observer::{
     HealthLevel, HealthReport, RegulatorAction, RegulatorActionType, RegulatorParams,
     SelfRegulator, UniverseObserver,
 };
-pub use perception::{PerceptionBudget, PerceptionReport};
+pub use perception::{PerceptionBudget, PerceptionError, PerceptionReport};
 pub use persist::PersistEngine;
 pub use pulse::{EmotionDecayParams, EmotionPulseConfig, PulseEngine, PulseResult, PulseType};
 pub use raft_node::{

@@ -125,12 +125,15 @@ fn main() {
                 )
             };
 
+            let perception_budget =
+                tetramem_v12::universe::perception::PerceptionBudget::new(universe.total_energy());
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
                 universe: tokio::sync::RwLock::new(universe),
                 hebbian: tokio::sync::RwLock::new(hebbian),
                 memories: tokio::sync::RwLock::new(memories),
                 memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
                 crystal: tokio::sync::RwLock::new(crystal),
+                perception: tokio::sync::RwLock::new(perception_budget),
                 backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
                 cluster: tokio::sync::Mutex::new(
                     tetramem_v12::universe::cluster::ClusterManager::new(

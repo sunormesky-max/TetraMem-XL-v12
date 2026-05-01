@@ -5,6 +5,7 @@ use crate::universe::cognitive::functional_emotion::EmotionSource;
 use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::node::DarkUniverse;
+use crate::universe::perception::{PerceptionBudget, PerceptionError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -303,6 +304,39 @@ impl CrystalEngine {
             }
         }
         vec![]
+    }
+
+    pub fn crystallize_gated(
+        &mut self,
+        hebbian: &HebbianMemory,
+        universe: &DarkUniverse,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<CrystalReport, PerceptionError> {
+        let base_cost = 3.0;
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let report = self.crystallize(hebbian, universe);
+        let actual = (report.new_crystals as f64 * 0.5 + report.new_super_crystals as f64 * 1.0)
+            .min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(report)
+    }
+
+    pub fn crystallize_emotion_gated(
+        &mut self,
+        hebbian: &HebbianMemory,
+        universe: &DarkUniverse,
+        emotion_source: EmotionSource,
+        perception: &mut PerceptionBudget,
+        topology_level: usize,
+    ) -> Result<CrystalReport, PerceptionError> {
+        let base_cost = 4.0;
+        let alloc = perception.allocate(base_cost, topology_level)?;
+        let report = self.crystallize_emotion(hebbian, universe, emotion_source);
+        let actual = (report.new_crystals as f64 * 0.5 + report.new_super_crystals as f64 * 1.0)
+            .min(alloc.amount());
+        perception.settle(alloc, actual)?;
+        Ok(report)
     }
 }
 

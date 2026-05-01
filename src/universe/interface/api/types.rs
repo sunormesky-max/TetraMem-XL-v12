@@ -217,3 +217,13 @@ pub struct QuorumExecuteRequest {
     #[serde(default)]
     pub force: bool,
 }
+
+#[derive(Serialize)]
+pub struct PerceptionStatusResponse {
+    pub total_budget: f64,
+    pub allocated: f64,
+    pub available: f64,
+    pub spent: f64,
+    pub returned: f64,
+    pub utilization: f64,
+}
