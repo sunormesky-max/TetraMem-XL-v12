@@ -14,7 +14,6 @@ use super::state::SharedState;
 use super::types::*;
 
 pub async fn auto_scale(State(state): State<SharedState>) -> Json<ApiResponse<ScaleResponse>> {
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
     let h = state.hebbian.read().await;
     let mems = state.memories.read().await;
@@ -47,7 +46,6 @@ pub async fn frontier_expand(
             max_new
         )));
     }
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     let scaler = AutoScaler::new();

@@ -12,6 +12,8 @@ use crate::universe::metrics;
 use super::state::SharedState;
 use super::types::*;
 
+const MAX_DATA_VALUE: f64 = 1e15;
+
 fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
     for &v in c {
         if !(-10000..=10000).contains(&v) {
@@ -28,7 +30,6 @@ pub async fn encode_memory(
     State(state): State<SharedState>,
     Json(req): Json<EncodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<EncodeResponse>>), AppError> {
-    let _write_guard = state.write_guard.lock().await;
     if req.data.is_empty() || req.data.len() > 28 {
         return Err(AppError::BadRequest(format!(
             "data length must be between 1 and 28, got {}",
@@ -42,9 +43,16 @@ pub async fn encode_memory(
                 "data values must be finite".to_string(),
             ));
         }
+        if v.abs() > MAX_DATA_VALUE {
+            return Err(AppError::BadRequest(format!(
+                "data value {} exceeds maximum allowed magnitude",
+                v
+            )));
+        }
     }
     let mut u = state.universe.write().await;
     let mut mems = state.memories.write().await;
+    let mut idx = state.memory_index.write().await;
 
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
@@ -59,7 +67,9 @@ pub async fn encode_memory(
             let anchor_str = format!("{}", atom.anchor());
             let created_at = atom.created_at();
             tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
+            let i = mems.len();
             mems.push(atom);
+            idx.insert(anchor_str.clone(), i);
             Ok((
                 StatusCode::OK,
                 Json(ApiResponse::ok(EncodeResponse {
@@ -87,28 +97,32 @@ pub async fn decode_memory(
     validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
     let mems = state.memories.read().await;
+    let idx = state.memory_index.read().await;
 
     if let Some(c) = metrics::API_DECODE_TOTAL.get() {
         c.inc();
     }
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor_str = format!("{}", &anchor);
 
-    for mem in mems.iter() {
-        if mem.anchor() == &anchor && mem.data_dim() == req.data_dim {
-            match MemoryCodec::decode(&u, mem) {
-                Ok(data) => {
-                    tracing::debug!(anchor = %anchor, dims = data.len(), "memory decoded");
-                    return Ok((
-                        StatusCode::OK,
-                        Json(ApiResponse::ok(DecodeResponse { data })),
-                    ));
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "memory decode failed");
-                    return Ok((
-                        StatusCode::BAD_REQUEST,
-                        Json(ApiResponse::err(format!("decode failed: {}", e))),
-                    ));
+    if let Some(&i) = idx.get(&anchor_str) {
+        if let Some(mem) = mems.get(i) {
+            if mem.data_dim() == req.data_dim {
+                match MemoryCodec::decode(&u, mem) {
+                    Ok(data) => {
+                        tracing::debug!(anchor = %anchor, dims = data.len(), "memory decoded");
+                        return Ok((
+                            StatusCode::OK,
+                            Json(ApiResponse::ok(DecodeResponse { data })),
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "memory decode failed");
+                        return Ok((
+                            StatusCode::BAD_REQUEST,
+                            Json(ApiResponse::err(format!("decode failed: {}", e))),
+                        ));
+                    }
                 }
             }
         }

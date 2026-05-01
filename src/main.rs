@@ -129,8 +129,8 @@ fn main() {
                 universe: tokio::sync::RwLock::new(universe),
                 hebbian: tokio::sync::RwLock::new(hebbian),
                 memories: tokio::sync::RwLock::new(memories),
+                memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
                 crystal: tokio::sync::RwLock::new(crystal),
-                write_guard: tokio::sync::Mutex::new(()),
                 backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
                 cluster: tokio::sync::Mutex::new(
                     tetramem_v12::universe::cluster::ClusterManager::new(
@@ -151,6 +151,13 @@ fn main() {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             rt.block_on(async {
                 {
+                    {
+                        let mems = state.memories.read().await;
+                        let mut idx = state.memory_index.write().await;
+                        for (i, m) in mems.iter().enumerate() {
+                            idx.insert(format!("{}", m.anchor()), i);
+                        }
+                    }
                     let state_ref = state.clone();
                     let mut cm = state.cluster.lock().await;
                     cm.set_raft_secret(config.auth.raft_secret.clone());

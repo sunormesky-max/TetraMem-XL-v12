@@ -13,7 +13,6 @@ use super::types::*;
 pub async fn create_backup(
     State(state): State<SharedState>,
 ) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
-    let _write_guard = state.write_guard.lock().await;
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let mems = state.memories.read().await;

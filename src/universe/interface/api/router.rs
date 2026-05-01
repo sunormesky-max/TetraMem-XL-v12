@@ -47,17 +47,15 @@ use super::state::SharedState;
 struct RateLimiter {
     count: AtomicU64,
     max: u64,
-    burst: u64,
     window_secs: u64,
     last_reset: std::sync::Mutex<std::time::Instant>,
 }
 
 impl RateLimiter {
-    fn new(max: u64, burst: u64, window_secs: u64) -> Self {
+    fn new(max: u64, _burst: u64, window_secs: u64) -> Self {
         Self {
             count: AtomicU64::new(0),
             max,
-            burst,
             window_secs,
             last_reset: std::sync::Mutex::new(std::time::Instant::now()),
         }
@@ -67,12 +65,12 @@ impl RateLimiter {
         {
             let mut last = self.last_reset.lock().unwrap();
             if last.elapsed() >= std::time::Duration::from_secs(self.window_secs) {
-                self.count.store(0, Ordering::Relaxed);
+                self.count.store(0, Ordering::SeqCst);
                 *last = std::time::Instant::now();
             }
         }
-        let current = self.count.fetch_add(1, Ordering::Relaxed);
-        current < self.max + self.burst
+        let current = self.count.fetch_add(1, Ordering::SeqCst);
+        current < self.max
     }
 }
 
@@ -90,14 +88,14 @@ async fn rate_limit_middleware(
 async fn security_headers_middleware(req: Request, next: Next) -> Response {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
-    headers.insert("x-content-type-options", "nosniff".parse().unwrap());
-    headers.insert("x-frame-options", "DENY".parse().unwrap());
-    headers.insert("x-xss-protection", "0".parse().unwrap());
-    headers.insert("referrer-policy", "strict-origin-when-cross-origin".parse().unwrap());
-    headers.insert("content-security-policy", "default-src 'none'; frame-ancestors 'none'".parse().unwrap());
-    headers.insert("permissions-policy", "camera=(), microphone=(), geolocation=()".parse().unwrap());
-    headers.insert("cache-control", "no-store".parse().unwrap());
-    headers.insert("pragma", "no-cache".parse().unwrap());
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("x-xss-protection", HeaderValue::from_static("0"));
+    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers.insert("content-security-policy", HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"));
+    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), microphone=(), geolocation=()"));
+    headers.insert("cache-control", HeaderValue::from_static("no-store"));
+    headers.insert("pragma", HeaderValue::from_static("no-cache"));
     response
 }
 
@@ -178,7 +176,7 @@ async fn raft_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match provided {
-        Some(s) if constant_time_eq(s.as_bytes(), secret.as_bytes()) => Ok(next.run(req).await),
+        Some(s) if subtle::ConstantTimeEq::ct_eq(s.as_bytes(), secret.as_bytes()).unwrap_u8() == 1 => Ok(next.run(req).await),
         _ => Err(AppError::Unauthorized(
             "invalid or missing raft secret".to_string(),
         )),
@@ -186,12 +184,24 @@ async fn raft_auth_middleware(
 }
 
 fn build_cors_layer(origins: &[String]) -> CorsLayer {
+    let methods = [
+        axum::http::Method::GET,
+        axum::http::Method::POST,
+        axum::http::Method::OPTIONS,
+    ];
+    let headers = [
+        axum::http::HeaderName::from_static("authorization"),
+        axum::http::HeaderName::from_static("content-type"),
+        axum::http::HeaderName::from_static("x-raft-secret"),
+        axum::http::HeaderName::from_static("x-request-id"),
+    ];
+
     if origins.len() == 1 && (origins[0] == "*" || origins[0] == "any") {
         tracing::warn!("CORS allows all origins — only use in development");
         return CorsLayer::new()
             .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any);
+            .allow_methods(methods)
+            .allow_headers(headers);
     }
 
     let parsed: Vec<HeaderValue> = origins
@@ -205,14 +215,14 @@ fn build_cors_layer(origins: &[String]) -> CorsLayer {
             .allow_origin(AllowOrigin::list([
                 "http://localhost:5173".parse::<HeaderValue>().unwrap(),
             ]))
-            .allow_methods(Any)
-            .allow_headers(Any);
+            .allow_methods(methods)
+            .allow_headers(headers);
     }
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(parsed))
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods(methods)
+        .allow_headers(headers)
 }
 
 pub fn create_router(state: SharedState) -> Router {
@@ -315,13 +325,30 @@ pub fn create_router(state: SharedState) -> Router {
         .with_state(state)
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let len = std::cmp::max(a.len(), b.len());
-    let mut result: u8 = (a.len() ^ b.len()) as u8;
-    for i in 0..len {
-        let x = a.get(i).copied().unwrap_or(0);
-        let y = b.get(i).copied().unwrap_or(0);
-        result |= x ^ y;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limiter_blocks_after_max() {
+        let limiter = RateLimiter::new(5, 10, 60);
+        for _ in 0..5 {
+            assert!(limiter.check_and_increment());
+        }
+        assert!(!limiter.check_and_increment(), "should block after max");
+        assert!(!limiter.check_and_increment(), "should stay blocked");
     }
-    result == 0
+
+    #[test]
+    fn rate_limiter_resets_after_window() {
+        let limiter = RateLimiter::new(2, 10, 60);
+        assert!(limiter.check_and_increment());
+        assert!(limiter.check_and_increment());
+        assert!(!limiter.check_and_increment());
+        {
+            let mut last = limiter.last_reset.lock().unwrap();
+            *last = std::time::Instant::now() - std::time::Duration::from_secs(61);
+        }
+        assert!(limiter.check_and_increment(), "should reset after window expiry");
+    }
 }

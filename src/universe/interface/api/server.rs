@@ -25,12 +25,16 @@ static LOGIN_RATE_LIMIT: std::sync::OnceLock<Mutex<HashMap<String, LoginAttempt>
 
 const MAX_LOGIN_ATTEMPTS: u32 = 10;
 const LOGIN_WINDOW_SECS: u64 = 300;
+const MAX_LOGIN_ENTRIES: usize = 10000;
 
 fn check_login_rate(ip_key: &str) -> Result<(), AppError> {
     let map = LOGIN_RATE_LIMIT
         .get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = map.lock().unwrap();
+    let mut map = map.lock().map_err(|e| AppError::Internal(format!("login rate limit lock: {}", e)))?;
     let now = Instant::now();
+    if map.len() > MAX_LOGIN_ENTRIES {
+        map.retain(|_, v| now.duration_since(v.first_attempt).as_secs() < LOGIN_WINDOW_SECS);
+    }
     if let Some(attempt) = map.get_mut(ip_key) {
         if attempt.first_attempt.elapsed().as_secs() > LOGIN_WINDOW_SECS {
             attempt.count = 0;
@@ -153,5 +157,37 @@ async fn shutdown_signal() {
         _ = terminate => {
             tracing::info!("received SIGTERM, shutting down gracefully...");
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_rate_limit_blocks_after_max_attempts() {
+        let ip = "192.168.1.1";
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            check_login_rate(ip).unwrap();
+        }
+        assert!(check_login_rate(ip).is_err(), "should block after max attempts");
+    }
+
+    #[test]
+    fn login_rate_limit_different_ips_independent() {
+        check_login_rate("10.0.0.1").unwrap();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            check_login_rate("10.0.0.2").unwrap();
+        }
+        assert!(check_login_rate("10.0.0.2").is_err());
+        assert!(check_login_rate("10.0.0.1").is_ok(), "different IP should be independent");
+    }
+
+    #[test]
+    fn login_rate_limit_respects_max_entries() {
+        for i in 0..(MAX_LOGIN_ENTRIES + 100) {
+            let _ = check_login_rate(&format!("172.16.0.{}", i % 256));
+        }
+        assert!(check_login_rate("172.16.1.1").is_ok(), "should still work after many entries");
     }
 }

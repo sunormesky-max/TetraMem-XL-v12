@@ -33,7 +33,6 @@ pub async fn phase_consensus(
     State(state): State<SharedState>,
     Json(req): Json<PhaseConsensusRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let _write_guard = state.write_guard.lock().await;
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
@@ -121,7 +120,6 @@ pub async fn quorum_start(
         }
     }
 
-    let _write_guard = state.write_guard.lock().await;
     let mut cm = state.cluster.lock().await;
     let status = cm.start_energy_quorum(budget);
 
@@ -144,7 +142,6 @@ pub async fn quorum_confirm(
             "available_energy must be non-negative and finite".to_string(),
         ));
     }
-    let _write_guard = state.write_guard.lock().await;
     let mut cm = state.cluster.lock().await;
     let status = cm.confirm_energy_quorum(entry.clone());
 
@@ -170,7 +167,6 @@ pub async fn quorum_execute(
     State(state): State<SharedState>,
     Json(req): Json<QuorumExecuteRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let _write_guard = state.write_guard.lock().await;
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;

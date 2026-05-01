@@ -63,7 +63,6 @@ pub async fn fire_pulse(
 }
 
 pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<DreamResponse>> {
-    let _write_guard = state.write_guard.lock().await;
     let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
     let mems = state.memories.read().await;
@@ -95,7 +94,6 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
 }
 
 pub async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<String>>> {
-    let _write_guard = state.write_guard.lock().await;
     let u = state.universe.read().await;
     let mems = state.memories.read().await;
     let mut h = state.hebbian.write().await;

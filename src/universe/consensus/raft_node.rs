@@ -413,6 +413,12 @@ impl RaftLogStorage<TypeName> for LogStore {
     }
 }
 
+// DESIGN NOTE: The Raft state machine records commands to `applied_commands` for
+// audit/durability but does NOT execute them against the DarkUniverse. This is intentional:
+// full state replication would require AppState access inside async Raft trait methods,
+// which introduces complex lock ordering and error recovery concerns. Instead, Raft provides
+// log replication (consensus on command ordering), and a separate replay/applier layer can
+// consume `applied_commands` to apply state changes. See ARCHITECTURE.md for the full design.
 impl RaftStateMachine<TypeName> for StateMachineStore {
     type SnapshotBuilder = StateMachineStore;
 

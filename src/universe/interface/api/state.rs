@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -17,8 +18,8 @@ pub struct AppState {
     pub universe: RwLock<DarkUniverse>,
     pub hebbian: RwLock<HebbianMemory>,
     pub memories: RwLock<Vec<MemoryAtom>>,
+    pub memory_index: RwLock<HashMap<String, usize>>,
     pub crystal: RwLock<CrystalEngine>,
-    pub write_guard: Mutex<()>,
     pub backup: RwLock<BackupScheduler>,
     pub cluster: Mutex<ClusterManager>,
     pub config: AppConfig,

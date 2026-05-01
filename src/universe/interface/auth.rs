@@ -15,6 +15,7 @@ pub struct Claims {
     sub: String,
     exp: i64,
     iat: i64,
+    nbf: i64,
     role: String,
     jti: String,
     iss: String,
@@ -27,12 +28,14 @@ impl Claims {
     pub fn jti(&self) -> &str { &self.jti }
 
     pub fn anonymous(role: &str) -> Self {
+        let now = Utc::now();
         Self {
             sub: "anonymous".to_string(),
-            exp: i64::MAX,
-            iat: 0,
+            exp: (now + Duration::hours(24)).timestamp(),
+            iat: now.timestamp(),
+            nbf: now.timestamp(),
             role: role.to_string(),
-            jti: "anonymous".to_string(),
+            jti: uuid::Uuid::new_v4().to_string(),
             iss: "tetramem-v12".to_string(),
             aud: "tetramem-api".to_string(),
         }
@@ -59,8 +62,9 @@ impl JwtConfig {
             sub: subject.to_string(),
             exp: (now + Duration::seconds(self.expiry_secs as i64)).timestamp(),
             iat: now.timestamp(),
+            nbf: now.timestamp(),
             role: role.to_string(),
-            jti: format!("{}-{}", subject, now.timestamp_nanos_opt().unwrap_or(0)),
+            jti: uuid::Uuid::new_v4().to_string(),
             iss: "tetramem-v12".to_string(),
             aud: "tetramem-api".to_string(),
         };
@@ -78,7 +82,7 @@ impl JwtConfig {
 
     pub fn validate_token(&self, token: &str) -> Result<Claims, AppError> {
         let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.set_required_spec_claims(&["exp", "iat", "sub", "jti", "iss", "aud"]);
+        validation.set_required_spec_claims(&["exp", "iat", "nbf", "sub", "jti", "iss", "aud"]);
         validation.leeway = 60;
         validation.set_issuer(&["tetramem-v12"]);
         validation.set_audience(&["tetramem-api"]);

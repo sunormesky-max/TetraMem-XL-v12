@@ -10,6 +10,24 @@ use crate::universe::error::AppError;
 use super::state::SharedState;
 use super::types::*;
 
+const MAX_FLOW_AMOUNT: f64 = 1e15;
+
+fn validate_positive_finite(val: f64, name: &str) -> Result<(), AppError> {
+    if val <= 0.0 || !val.is_finite() {
+        return Err(AppError::BadRequest(format!(
+            "{} must be positive and finite",
+            name
+        )));
+    }
+    if val > MAX_FLOW_AMOUNT {
+        return Err(AppError::BadRequest(format!(
+            "{} exceeds maximum allowed value",
+            name
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct Coord7DRequest {
     pub coord: [i32; 7],
@@ -102,17 +120,12 @@ pub async fn dark_flow(
     State(state): State<SharedState>,
     Json(req): Json<DarkFlowRequest>,
 ) -> Result<Json<ApiResponse<DarkFlowResponse>>, AppError> {
-    if req.amount <= 0.0 || !req.amount.is_finite() {
-        return Err(AppError::BadRequest(
-            "amount must be positive and finite".to_string(),
-        ));
-    }
+    validate_positive_finite(req.amount, "amount")?;
     validate_coord_7(&req.coord)?;
     let coord = match req.parity.as_str() {
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
     };
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     let result = match req.direction.as_str() {
@@ -165,11 +178,7 @@ pub async fn dark_transfer(
     State(state): State<SharedState>,
     Json(req): Json<DarkTransferRequest>,
 ) -> Result<Json<ApiResponse<DarkTransferResponse>>, AppError> {
-    if req.amount <= 0.0 || !req.amount.is_finite() {
-        return Err(AppError::BadRequest(
-            "amount must be positive and finite".to_string(),
-        ));
-    }
+    validate_positive_finite(req.amount, "amount")?;
     validate_coord_7(&req.from)?;
     validate_coord_7(&req.to)?;
     let parity_fn = match req.parity.as_str() {
@@ -179,7 +188,6 @@ pub async fn dark_transfer(
     let from = parity_fn(req.from);
     let to = parity_fn(req.to);
 
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.transfer_energy(&from, &to, req.amount) {
@@ -225,11 +233,7 @@ pub async fn dark_materialize(
     State(state): State<SharedState>,
     Json(req): Json<DarkMaterializeRequest>,
 ) -> Result<Json<ApiResponse<DarkMaterializeResponse>>, AppError> {
-    if req.energy <= 0.0 || !req.energy.is_finite() {
-        return Err(AppError::BadRequest(
-            "energy must be positive and finite".to_string(),
-        ));
-    }
+    validate_positive_finite(req.energy, "energy")?;
     if req.physical_ratio < 0.0 || req.physical_ratio > 1.0 || !req.physical_ratio.is_finite() {
         return Err(AppError::BadRequest(
             "physical_ratio must be between 0.0 and 1.0 and finite".to_string(),
@@ -241,7 +245,6 @@ pub async fn dark_materialize(
         _ => Coord7D::new_even(req.coord),
     };
 
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.materialize_biased(coord, req.energy, req.physical_ratio) {
@@ -286,7 +289,6 @@ pub async fn dark_dematerialize(
         _ => Coord7D::new_even(req.coord),
     };
 
-    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.dematerialize(&coord) {

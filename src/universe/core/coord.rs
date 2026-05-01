@@ -98,7 +98,7 @@ impl Coord7D {
     pub fn shifted(&self, offset: &Coord7D) -> Coord7D {
         let mut new_basis = [0i32; DIM];
         for (i, (a, b)) in self.basis.iter().zip(offset.basis.iter()).enumerate() {
-            new_basis[i] = a + b;
+            new_basis[i] = a.saturating_add(*b);
         }
         let new_parity = match (self.parity, offset.parity) {
             (Parity::Even, Parity::Even) => Parity::Even,
