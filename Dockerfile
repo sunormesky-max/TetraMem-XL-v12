@@ -3,7 +3,13 @@ FROM rust:slim-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --locked --release && rm -rf src
+RUN mkdir -p src benches tests && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "" > benches/benchmarks.rs && \
+    echo "" > tests/full_suite.rs && \
+    echo "" > tests/scale_bench.rs && \
+    echo "" > tests/stress_test.rs && \
+    cargo build --locked --release && rm -rf src benches tests
 
 COPY src/ src/
 RUN touch src/main.rs && cargo build --locked --release
