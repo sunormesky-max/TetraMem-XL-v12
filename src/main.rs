@@ -57,8 +57,8 @@ fn main() {
     match cli.command {
         Some(Commands::Serve { addr }) => {
             let config = AppConfig::load(&cli.config).unwrap_or_else(|e| {
-                tracing::warn!("config load error: {}, using defaults", e);
-                AppConfig::default()
+                eprintln!("fatal: config load error: {}\nfix your config file or run 'tetramem-v12 config' to generate a default", e);
+                std::process::exit(1);
             });
             metrics::init_metrics();
 
@@ -127,6 +127,7 @@ fn main() {
                 hebbian: tokio::sync::RwLock::new(hebbian),
                 memories: tokio::sync::RwLock::new(memories),
                 crystal: tokio::sync::RwLock::new(crystal),
+                write_guard: tokio::sync::Mutex::new(()),
                 backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
                 cluster: tokio::sync::Mutex::new(
                     tetramem_v12::universe::cluster::ClusterManager::new(
@@ -153,7 +154,7 @@ fn main() {
 
                     let raft_db_path = std::path::PathBuf::from("./data/raft_log.db");
                     if let Some(parent) = raft_db_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                        let _ = tokio::fs::create_dir_all(parent).await;
                     }
                     match tetramem_v12::universe::raft_node::new_log_store_with_persistence(
                         &raft_db_path,
@@ -173,8 +174,8 @@ fn main() {
                     cm.set_conservation_validator(Box::new(move || {
                         for attempt in 0..10 {
                             match state_ref.universe.try_read() {
-                                Ok(u) => {
-                                    let ok = u.verify_conservation();
+                                Ok(guard) => {
+                                    let ok = guard.verify_conservation();
                                     if !ok {
                                         tracing::error!(
                                             "CLUSTER PROPOSE REJECTED: energy conservation violated"
@@ -200,12 +201,12 @@ fn main() {
                     cm.set_energy_reporter(Box::new(move || {
                         for attempt in 0..10 {
                             match state_ref2.universe.try_read() {
-                                Ok(u) => {
-                                    let stats = u.stats();
+                                Ok(guard) => {
+                                    let stats = guard.stats();
                                     return (
                                         stats.available_energy,
                                         stats.active_nodes,
-                                        u.verify_conservation(),
+                                        guard.verify_conservation(),
                                     );
                                 }
                                 Err(_) => {
@@ -270,16 +271,16 @@ fn main() {
                             let json = {
                                 let u = state_clone.universe.read().await;
                                 let h = state_clone.hebbian.read().await;
-                                let m = state_clone.memories.read().await;
+                                let mems = state_clone.memories.read().await;
                                 let c = state_clone.crystal.read().await;
                                 tetramem_v12::universe::persist::PersistEngine::to_json(
-                                    &u, &h, &m, &c,
+                                    &u, &h, &mems, &c,
                                 )
                             };
                             match json {
                                 Ok(json_str) => {
-                                    if let Some(parent) = persist_path_clone.parent() {
-                                        let _ = std::fs::create_dir_all(parent);
+                                if let Some(parent) = persist_path_clone.parent() {
+                                    let _ = tokio::fs::create_dir_all(parent).await;
                                     }
                                     let tmp = persist_path_clone.with_extension("json.tmp");
                                     let tmp_clone = tmp.clone();

@@ -1,5 +1,10 @@
+# TetraMem-XL v12.0 Configuration
+# IMPORTANT: Change the default admin password hash before deploying!
+# Default password: "changeme" (hash generated with argon2id)
+# To generate a new hash, use: cargo test password_hashing_and_verify
+
 [server]
-addr = "0.0.0.0:3456"
+addr = "127.0.0.1:3456"
 timeout_secs = 30
 body_limit_bytes = 10485760
 
@@ -8,9 +13,14 @@ total_energy = 10000000.0
 manifestation_threshold = 0.5
 
 [auth]
-enabled = false
-jwt_secret = "change-me-in-production"
+enabled = true
+raft_secret = "CHANGE-ME-TO-A-UNIQUE-RANDOM-SECRET"
 jwt_expiry_secs = 86400
+
+[[auth.users]]
+username = "admin"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$l7+kFgPk+WRQHfRzEvZgGA$IrIHnE+KcLW7CRfv02DDMj/53fjTmUqsDVOHeibmAGs"
+role = "admin"
 
 [logging]
 level = "info"

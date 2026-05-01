@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use tetramem_v12::universe::api::{create_router, AppState};
-use tetramem_v12::universe::auth::{JwtConfig, UserStore};
+use tetramem_v12::universe::auth::{JwtConfig, UserConfig, UserStore};
 use tetramem_v12::universe::backup::BackupScheduler;
 use tetramem_v12::universe::cluster::ClusterManager;
 use tetramem_v12::universe::config::AppConfig;
@@ -23,11 +23,20 @@ fn build_state() -> Arc<AppState> {
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
         memories: tokio::sync::RwLock::new(Vec::new()),
         crystal: tokio::sync::RwLock::new(CrystalEngine::new()),
+        write_guard: tokio::sync::Mutex::new(()),
         backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
         config: AppConfig::default(),
         jwt: JwtConfig::new("test-secret".to_string(), 3600),
-        users: UserStore::new(&[], "test-secret"),
+        users: UserStore::new(
+            &[UserConfig {
+                username: "testuser".to_string(),
+                password: "testpassword123".to_string(),
+                password_hash: String::new(),
+                role: "admin".to_string(),
+            }],
+            "test-secret",
+        ),
     })
 }
 

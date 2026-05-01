@@ -1,4 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use tetramem_v12::universe::cognitive::topology::TopologyEngine;
 use tetramem_v12::universe::coord::Coord7D;
 use tetramem_v12::universe::hebbian::HebbianMemory;

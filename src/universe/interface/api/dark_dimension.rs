@@ -25,6 +25,18 @@ fn parse_coord(req: &Coord7DRequest) -> Coord7D {
     }
 }
 
+fn validate_coord_7(c: &[i32; 7]) -> Result<(), AppError> {
+    for &v in c {
+        if !(-10000..=10000).contains(&v) {
+            return Err(AppError::BadRequest(format!(
+                "coordinate value {} out of range [-10000, 10000]",
+                v
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct DarkQueryResponse {
     pub exists: bool,
@@ -39,6 +51,7 @@ pub async fn dark_query(
     State(state): State<SharedState>,
     Json(req): Json<Coord7DRequest>,
 ) -> Result<Json<ApiResponse<DarkQueryResponse>>, AppError> {
+    validate_coord_7(&req.coord)?;
     let coord = parse_coord(&req);
     let u = state.universe.read().await;
 
@@ -86,6 +99,12 @@ pub async fn dark_flow(
     State(state): State<SharedState>,
     Json(req): Json<DarkFlowRequest>,
 ) -> Result<Json<ApiResponse<DarkFlowResponse>>, AppError> {
+    if req.amount <= 0.0 || !req.amount.is_finite() {
+        return Err(AppError::BadRequest(
+            "amount must be positive and finite".to_string(),
+        ));
+    }
+    validate_coord_7(&req.coord)?;
     let coord = match req.parity.as_str() {
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
@@ -142,6 +161,13 @@ pub async fn dark_transfer(
     State(state): State<SharedState>,
     Json(req): Json<DarkTransferRequest>,
 ) -> Result<Json<ApiResponse<DarkTransferResponse>>, AppError> {
+    if req.amount <= 0.0 || !req.amount.is_finite() {
+        return Err(AppError::BadRequest(
+            "amount must be positive and finite".to_string(),
+        ));
+    }
+    validate_coord_7(&req.from)?;
+    validate_coord_7(&req.to)?;
     let parity_fn = match req.parity.as_str() {
         "odd" => Coord7D::new_odd as fn([i32; 7]) -> Coord7D,
         _ => Coord7D::new_even as fn([i32; 7]) -> Coord7D,
@@ -194,6 +220,17 @@ pub async fn dark_materialize(
     State(state): State<SharedState>,
     Json(req): Json<DarkMaterializeRequest>,
 ) -> Result<Json<ApiResponse<DarkMaterializeResponse>>, AppError> {
+    if req.energy <= 0.0 || !req.energy.is_finite() {
+        return Err(AppError::BadRequest(
+            "energy must be positive and finite".to_string(),
+        ));
+    }
+    if req.physical_ratio < 0.0 || req.physical_ratio > 1.0 || !req.physical_ratio.is_finite() {
+        return Err(AppError::BadRequest(
+            "physical_ratio must be between 0.0 and 1.0 and finite".to_string(),
+        ));
+    }
+    validate_coord_7(&req.coord)?;
     let coord = match req.parity.as_str() {
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
@@ -237,6 +274,7 @@ pub async fn dark_dematerialize(
     State(state): State<SharedState>,
     Json(req): Json<DarkDematerializeRequest>,
 ) -> Result<Json<ApiResponse<DarkDematerializeResponse>>, AppError> {
+    validate_coord_7(&req.coord)?;
     let coord = match req.parity.as_str() {
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),

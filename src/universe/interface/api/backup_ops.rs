@@ -12,17 +12,18 @@ pub async fn create_backup(
 ) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let m = state.memories.read().await;
+    let mems = state.memories.read().await;
+    let c = state.crystal.read().await;
     let mut bs = state.backup.write().await;
-    let crystal = state.crystal.read().await;
 
     let report = bs
-        .create_backup(BackupTrigger::Manual, &u, &h, &m, &crystal)
+        .create_backup(BackupTrigger::Manual, &u, &h, &mems, &c)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     drop(u);
     drop(h);
-    drop(m);
+    drop(mems);
+    drop(c);
     drop(bs);
 
     Ok((

@@ -205,7 +205,9 @@ impl EventBus {
     }
 
     pub fn publish(&self, event: UniverseEvent) {
-        let _ = self.sender.send(event);
+        if self.sender.send(event).is_err() {
+            tracing::warn!("eventbus publish: receiver dropped, event discarded");
+        }
     }
 
     pub fn subscribe(
@@ -273,7 +275,9 @@ pub struct EventBusSender {
 
 impl EventBusSender {
     pub fn publish(&self, event: UniverseEvent) {
-        let _ = self.inner.send(event);
+        if self.inner.send(event).is_err() {
+            tracing::warn!("EventBusSender publish: receiver dropped, event discarded");
+        }
     }
 }
 

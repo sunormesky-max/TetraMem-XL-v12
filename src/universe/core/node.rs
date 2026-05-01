@@ -1,5 +1,5 @@
 use crate::universe::coord::Coord7D;
-use crate::universe::energy::{EnergyError, EnergyField, EnergyPool};
+use crate::universe::energy::{EnergyError, EnergyField, EnergyPool, EPSILON_NORMAL, EPSILON_RELATIVE};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,7 +194,13 @@ impl DarkUniverse {
         }
         if let Some(node) = self.nodes.remove(coord) {
             let field = node.energy;
-            let _ = self.pool.release_field(&field);
+            if let Err(e) = self.pool.release_field(&field) {
+                tracing::error!(
+                    "dematerialize: release_field failed for {:?}: {:?}",
+                    coord,
+                    e
+                );
+            }
             self.protected.remove(coord);
             return Some(field);
         }
@@ -228,7 +234,13 @@ impl DarkUniverse {
 
         if should_remove {
             if let Some(empty) = self.nodes.remove(from) {
-                let _ = self.pool.release_field(&empty.energy);
+                if let Err(e) = self.pool.release_field(&empty.energy) {
+                    tracing::error!(
+                        "transfer_energy: release_field failed for {:?}: {:?}",
+                        from,
+                        e
+                    );
+                }
             }
         }
 
@@ -305,7 +317,7 @@ impl DarkUniverse {
         }
         let diff = (node_total - self.pool.allocated()).abs();
         let scale = self.pool.allocated().max(1.0);
-        diff / scale < 1e-12 || diff < 1e-10
+        diff / scale < EPSILON_RELATIVE || diff < EPSILON_NORMAL
     }
 
     pub fn verify_conservation_with_tolerance(&self, tolerance: f64) -> bool {

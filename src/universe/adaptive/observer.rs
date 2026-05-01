@@ -250,7 +250,12 @@ impl SelfRegulator {
         _report: &HealthReport,
     ) -> RegulatorAction {
         let additional = universe.total_energy() * self.params.expansion_factor;
-        let _ = universe.expand_energy_pool(additional);
+        if !universe.expand_energy_pool(additional) {
+            tracing::error!(
+                "execute_expansion: failed to expand energy pool by {:.0}",
+                additional
+            );
+        }
 
         let mut new_nodes = 0usize;
         let center = Self::find_center(universe);

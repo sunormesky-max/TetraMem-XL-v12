@@ -1,8 +1,11 @@
 use crate::universe::error::AppError;
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -53,54 +56,92 @@ impl JwtConfig {
     }
 }
 
-fn hash_password(password: &str, salt: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}", salt, password).as_bytes());
-    let result = hasher.finalize();
-    hex_encode(&result)
+fn hash_password(password: &str) -> Result<String, AppError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let hash = argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| AppError::Internal(format!("argon2 hash: {}", e)))?;
+    Ok(hash.to_string())
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+fn verify_password(password: &str, hash: &str) -> bool {
+    let parsed = match PasswordHash::new(hash) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct UserConfig {
     pub username: String,
     #[serde(default)]
     pub password_hash: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub password: String,
     #[serde(default = "default_role")]
     pub role: String,
+}
+
+impl std::fmt::Debug for UserConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hash_preview = if self.password_hash.is_empty() {
+            "(empty)"
+        } else {
+            "(set)"
+        };
+        let pw_status = if self.password.is_empty() {
+            "(empty)"
+        } else {
+            "(provided)"
+        };
+        f.debug_struct("UserConfig")
+            .field("username", &self.username)
+            .field("password_hash", &hash_preview)
+            .field("password", &pw_status)
+            .field("role", &self.role)
+            .finish()
+    }
 }
 
 fn default_role() -> String {
     "user".to_string()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct StoredUser {
     username: String,
     password_hash: String,
     role: String,
 }
 
+impl std::fmt::Debug for StoredUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredUser")
+            .field("username", &self.username)
+            .field("password_hash", &"(redacted)")
+            .field("role", &self.role)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UserStore {
     users: Vec<StoredUser>,
-    jwt_secret: String,
 }
 
 impl UserStore {
-    pub fn new(configs: &[UserConfig], jwt_secret: &str) -> Self {
+    pub fn new(configs: &[UserConfig], _jwt_secret: &str) -> Self {
         let users: Vec<StoredUser> = configs
             .iter()
             .map(|c| {
                 let hash = if !c.password_hash.is_empty() {
                     c.password_hash.clone()
                 } else if !c.password.is_empty() {
-                    hash_password(&c.password, jwt_secret)
+                    hash_password(&c.password).unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -111,17 +152,13 @@ impl UserStore {
                 }
             })
             .collect();
-        Self {
-            users,
-            jwt_secret: jwt_secret.to_string(),
-        }
+        Self { users }
     }
 
     pub fn verify(&self, username: &str, password: &str) -> Option<&str> {
-        let expected = hash_password(password, &self.jwt_secret);
         self.users
             .iter()
-            .find(|u| u.username == username && u.password_hash == expected)
+            .find(|u| u.username == username && verify_password(password, &u.password_hash))
             .map(|u| u.role.as_str())
     }
 
@@ -176,16 +213,16 @@ mod tests {
     }
 
     #[test]
-    fn password_hashing_deterministic() {
-        let h1 = hash_password("mypassword", "salt1");
-        let h2 = hash_password("mypassword", "salt1");
-        assert_eq!(h1, h2);
+    fn password_hashing_and_verify() {
+        let h1 = hash_password("mypassword").unwrap();
+        assert!(verify_password("mypassword", &h1));
+        assert!(!verify_password("wrongpassword", &h1));
     }
 
     #[test]
-    fn password_hash_different_salt() {
-        let h1 = hash_password("mypassword", "salt1");
-        let h2 = hash_password("mypassword", "salt2");
+    fn password_hash_unique_per_call() {
+        let h1 = hash_password("mypassword").unwrap();
+        let h2 = hash_password("mypassword").unwrap();
         assert_ne!(h1, h2);
     }
 
@@ -233,7 +270,7 @@ mod tests {
 
     #[test]
     fn user_store_prehashed_password() {
-        let prehashed = hash_password("mypassword", "jwt-secret");
+        let prehashed = hash_password("mypassword").unwrap();
         let store = UserStore::new(
             &[UserConfig {
                 username: "admin".to_string(),

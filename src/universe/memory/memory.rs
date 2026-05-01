@@ -224,14 +224,20 @@ impl MemoryCodec {
 
         for (i, &coord) in positions.iter().enumerate() {
             let field = EnergyField::from_dims(node_fields[i]).map_err(|_| {
+                for &prev_coord in &positions[..i] {
+                    universe.dematerialize(&prev_coord);
+                }
                 MemoryError::InvalidDataRange {
                     index: 0,
                     value: 0.0,
                 }
             })?;
-            universe
-                .materialize_field(coord, field)
-                .map_err(|_| MemoryError::InsufficientEnergy)?;
+            if universe.materialize_field(coord, field).is_err() {
+                for &prev_coord in &positions[..i] {
+                    universe.dematerialize(&prev_coord);
+                }
+                return Err(MemoryError::InsufficientEnergy);
+            }
         }
 
         let created_at = std::time::SystemTime::now()

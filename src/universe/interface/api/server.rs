@@ -22,21 +22,22 @@ pub async fn login(
             "password must be at least 8 characters".to_string(),
         ));
     }
+    if req.password.len() > 128 {
+        return Err(AppError::BadRequest(
+            "password must be at most 128 characters".to_string(),
+        ));
+    }
 
     tracing::info!(username = %req.username, "user login attempt");
 
-    let role = if state.users.has_users() {
-        state
-            .users
-            .verify(&req.username, &req.password)
-            .ok_or_else(|| {
-                tracing::warn!(username = %req.username, "login failed: invalid credentials");
-                AppError::Unauthorized("invalid username or password".to_string())
-            })?
-            .to_string()
-    } else {
-        "user".to_string()
-    };
+    let role = state
+        .users
+        .verify(&req.username, &req.password)
+        .ok_or_else(|| {
+            tracing::warn!(username = %req.username, "login failed: invalid credentials");
+            AppError::Unauthorized("invalid username or password".to_string())
+        })?
+        .to_string();
 
     let token = state.jwt.create_token(&req.username, &role)?;
     let expires_in = state.config.auth.jwt_expiry_secs;
@@ -62,9 +63,9 @@ pub async fn start_server(
         let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);
         let u = state.universe.read().await;
         let h = state.hebbian.read().await;
-        let m = state.memories.read().await;
-        let crystal = state.crystal.read().await;
-        match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &m, &crystal)
+        let mems = state.memories.read().await;
+        let c = state.crystal.read().await;
+        match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &mems, &c)
         {
             Ok(info) => tracing::info!("final persist on shutdown: {}", info),
             Err(e) => tracing::warn!("final persist failed: {}", e),

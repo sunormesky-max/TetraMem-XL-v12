@@ -239,7 +239,15 @@ impl RegulationEngine {
             if let Some(node) = universe.get_node_mut(coord) {
                 match node.energy_mut().redistribute_dim(dim, fraction) {
                     Ok(drained) => total_drained += drained,
-                    Err(_) => continue,
+                    Err(e) => {
+                        tracing::debug!(
+                            "redistribute_dim({}) failed for {:?}: {:?}",
+                            dim,
+                            coord,
+                            e
+                        );
+                        continue;
+                    }
                 }
             }
         }

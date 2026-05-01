@@ -101,7 +101,12 @@ impl AutoScaler {
 
     pub fn scale_up(&self, universe: &mut DarkUniverse, reason: ScaleReason) -> ScaleReport {
         let additional = universe.total_energy() * self.config.scale_up_energy_factor;
-        let _ = universe.expand_energy_pool(additional);
+        if !universe.expand_energy_pool(additional) {
+            tracing::error!(
+                "scale_up: failed to expand energy pool by {:.0}",
+                additional
+            );
+        }
 
         let center = Self::find_bounding_center(universe);
         let mut nodes_added = 0usize;
@@ -178,8 +183,11 @@ impl AutoScaler {
             let excess = universe.total_energy() - target_energy;
             let shrink_amount = excess * 0.5;
             let available = universe.available_energy();
-            if shrink_amount <= available {
-                let _ = universe.shrink_energy_pool(shrink_amount);
+            if shrink_amount <= available && !universe.shrink_energy_pool(shrink_amount) {
+                tracing::error!(
+                    "scale_down: failed to shrink energy pool by {:.0}",
+                    shrink_amount
+                );
             }
         }
 
@@ -240,7 +248,12 @@ impl AutoScaler {
         if universe.available_energy() < estimated_energy {
             let needed = estimated_energy - universe.available_energy();
             let expansion = needed * 2.0;
-            let _ = universe.expand_energy_pool(expansion);
+            if !universe.expand_energy_pool(expansion) {
+                tracing::error!(
+                    "scale_to_fit_memory: failed to expand energy pool by {:.0}",
+                    expansion
+                );
+            }
             report.energy_expanded_by = expansion;
         }
 
@@ -311,7 +324,12 @@ impl AutoScaler {
         if universe.available_energy() < encode_energy {
             let needed = encode_energy - universe.available_energy();
             let expansion = needed * 3.0;
-            let _ = universe.expand_energy_pool(expansion);
+            if !universe.expand_energy_pool(expansion) {
+                tracing::error!(
+                    "scale_near_anchor: failed to expand energy pool by {:.0}",
+                    expansion
+                );
+            }
             report.energy_expanded_by = expansion;
         }
 

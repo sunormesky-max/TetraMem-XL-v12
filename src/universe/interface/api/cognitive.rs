@@ -1,6 +1,7 @@
 use axum::{extract::State, Json};
 
 use crate::universe::dream::DreamEngine;
+use crate::universe::error::AppError;
 use crate::universe::metrics;
 use crate::universe::observer::{SelfRegulator, UniverseObserver};
 use crate::universe::pulse::{PulseEngine, PulseType};
@@ -8,14 +9,29 @@ use crate::universe::pulse::{PulseEngine, PulseType};
 use super::state::SharedState;
 use super::types::*;
 
+fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
+    for &v in c {
+        if !(-10000..=10000).contains(&v) {
+            return Err(AppError::BadRequest(format!(
+                "coordinate value {} out of range [-10000, 10000]",
+                v
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub async fn fire_pulse(
     State(state): State<SharedState>,
     Json(req): Json<PulseRequest>,
-) -> Json<ApiResponse<PulseResponse>> {
+) -> Result<Json<ApiResponse<PulseResponse>>, AppError> {
+    validate_coord_3(&req.source)?;
     let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
 
-    metrics::API_PULSE_TOTAL.inc();
+    if let Some(c) = metrics::API_PULSE_TOTAL.get() {
+        c.inc();
+    }
     let source = crate::universe::coord::Coord7D::new_even([
         req.source[0],
         req.source[1],
@@ -35,12 +51,12 @@ pub async fn fire_pulse(
     let engine = PulseEngine::new();
     let result = engine.propagate(&source, pt, &u, &mut h);
 
-    Json(ApiResponse::ok(PulseResponse {
+    Ok(Json(ApiResponse::ok(PulseResponse {
         visited_nodes: result.visited_nodes,
         total_activation: result.total_activation,
         paths_recorded: result.paths_recorded,
         final_strength: result.final_strength,
-    }))
+    })))
 }
 
 pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<DreamResponse>> {
@@ -48,7 +64,9 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
     let mut h = state.hebbian.write().await;
     let mems = state.memories.read().await;
 
-    metrics::API_DREAM_TOTAL.inc();
+    if let Some(c) = metrics::API_DREAM_TOTAL.get() {
+        c.inc();
+    }
     tracing::info!("running dream cycle");
 
     let dream = DreamEngine::new();
@@ -74,8 +92,8 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
 
 pub async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<String>>> {
     let u = state.universe.read().await;
-    let mut h = state.hebbian.write().await;
     let mems = state.memories.read().await;
+    let mut h = state.hebbian.write().await;
 
     let report = UniverseObserver::inspect(&u, &h, &mems);
     let regulator = SelfRegulator::new();

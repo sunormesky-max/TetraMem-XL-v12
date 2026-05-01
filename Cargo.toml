@@ -11,32 +11,33 @@ keywords = ["memory", "7d", "dark-universe", "energy-conservation", "tetrahedron
 categories = ["data-structures", "science"]
 
 [dependencies]
-axum = "0.7"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-toml = "0.8"
-thiserror = "2"
-clap = { version = "4", features = ["derive"] }
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "propagate-header", "timeout", "limit", "metrics"] }
-tower = { version = "0.5", features = ["full"] }
-uuid = { version = "1", features = ["v4"] }
-jsonwebtoken = "9"
-chrono = "0.4"
-prometheus = "0.13"
-lazy_static = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
-sha2 = "0.10"
-openraft = { version = "0.10.0-alpha.18", features = ["serde"] }
-async-trait = "0.1"
-futures = "0.3"
+axum = "0.7.5"
+tokio = { version = "1.38.0", features = ["full"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.118"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+toml = "0.8.14"
+thiserror = "2.0.4"
+clap = { version = "4.5.7", features = ["derive"] }
+tower-http = { version = "0.6.2", features = ["cors", "trace", "request-id", "propagate-header", "timeout", "limit", "metrics"] }
+tower = { version = "0.5.1", features = ["full"] }
+uuid = { version = "1.9.1", features = ["v4"] }
+jsonwebtoken = "9.3.0"
+chrono = "0.4.38"
+prometheus = "0.13.4"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+sha2 = "0.10.8"
+argon2 = "0.5.3"
+rand_core = { version = "0.6.4", features = ["std"] }
+openraft = { version = "=0.10.0-alpha.18", features = ["serde"] }
+async-trait = "0.1.80"
+futures = "0.3.30"
 reqwest = { version = "0.13.3", features = ["json"] }
 
 [dev-dependencies]
 criterion = "0.8.2"
-http-body-util = "0.1"
+http-body-util = "0.1.2"
 proptest = "1.11.0"
 
 [[bench]]

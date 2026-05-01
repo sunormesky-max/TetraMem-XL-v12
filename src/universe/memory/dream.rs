@@ -1,4 +1,5 @@
 use crate::universe::hebbian::HebbianMemory;
+use crate::universe::memory::MemoryCodec;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
 use crate::universe::pulse::{PulseEngine, PulseType};
@@ -136,7 +137,7 @@ impl DreamEngine {
 
     fn merge_phase(
         &self,
-        universe: &DarkUniverse,
+        universe: &mut DarkUniverse,
         hebbian: &mut HebbianMemory,
         memories: &mut Vec<MemoryAtom>,
     ) -> usize {
@@ -202,6 +203,9 @@ impl DreamEngine {
         remove_indices.sort_by(|a, b| b.cmp(a));
         for idx in remove_indices {
             if idx < memories.len() {
+                if let Some(mem) = memories.get(idx) {
+                    MemoryCodec::erase(universe, mem);
+                }
                 memories.remove(idx);
             }
         }

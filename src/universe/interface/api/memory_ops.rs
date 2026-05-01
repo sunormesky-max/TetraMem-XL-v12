@@ -9,17 +9,45 @@ use crate::universe::metrics;
 use super::state::SharedState;
 use super::types::*;
 
+fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
+    for &v in c {
+        if !(-10000..=10000).contains(&v) {
+            return Err(AppError::BadRequest(format!(
+                "coordinate value {} out of range [-10000, 10000]",
+                v
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub async fn encode_memory(
     State(state): State<SharedState>,
     Json(req): Json<EncodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<EncodeResponse>>), AppError> {
+    if req.data.is_empty() || req.data.len() > 28 {
+        return Err(AppError::BadRequest(format!(
+            "data length must be between 1 and 28, got {}",
+            req.data.len()
+        )));
+    }
+    validate_coord_3(&req.anchor)?;
+    for &v in &req.data {
+        if !v.is_finite() {
+            return Err(AppError::BadRequest(
+                "data values must be finite".to_string(),
+            ));
+        }
+    }
     let mut u = state.universe.write().await;
     let mut mems = state.memories.write().await;
 
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
     tracing::info!(anchor = %anchor, dims = req.data.len(), "encoding memory");
-    metrics::API_ENCODE_TOTAL.inc();
+    if let Some(c) = metrics::API_ENCODE_TOTAL.get() {
+        c.inc();
+    }
 
     match MemoryCodec::encode(&mut u, &anchor, &req.data) {
         Ok(atom) => {
@@ -52,10 +80,13 @@ pub async fn decode_memory(
     State(state): State<SharedState>,
     Json(req): Json<DecodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), AppError> {
+    validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
     let mems = state.memories.read().await;
 
-    metrics::API_DECODE_TOTAL.inc();
+    if let Some(c) = metrics::API_DECODE_TOTAL.get() {
+        c.inc();
+    }
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
     for mem in mems.iter() {
@@ -133,16 +164,17 @@ pub async fn memory_trace(
     State(state): State<SharedState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<ApiResponse<Vec<TraceHop>>>, AppError> {
+    validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
+    let crystal = state.crystal.read().await;
     let mems = state.memories.read().await;
-    let c = state.crystal.read().await;
 
     let source = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let max_hops = req.max_hops.unwrap_or(10);
 
     let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
-        &u, &h, &c, &source, max_hops,
+        &u, &h, &crystal, &source, max_hops,
     );
 
     let mut hops: Vec<TraceHop> = Vec::new();

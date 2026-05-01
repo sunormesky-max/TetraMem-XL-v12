@@ -32,10 +32,10 @@ pub async fn phase_consensus(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mut c = state.crystal.write().await;
+    let crystal = state.crystal.read().await;
     let cm = state.cluster.lock().await;
 
-    let report = c.detect_phase_transition(&h, &u);
+    let report = crystal.detect_phase_transition(&h, &u);
 
     if !report.requires_consensus && !req.force {
         return Ok(Json(ApiResponse::ok(serde_json::json!({
@@ -46,10 +46,14 @@ pub async fn phase_consensus(
 
     if !cm.is_initialized() {
         tracing::warn!("phase consensus requested but cluster not initialized, proceeding locally");
-        let crystal_report = c.crystallize(&h, &u);
+        drop(crystal);
+        drop(cm);
         drop(u);
         drop(h);
-        drop(cm);
+        let mut crystal_w = state.crystal.write().await;
+        let u_r = state.universe.read().await;
+        let h_r = state.hebbian.read().await;
+        let crystal_report = crystal_w.crystallize(&h_r, &u_r);
         return Ok(Json(ApiResponse::ok(serde_json::json!({
             "status": "local_consensus",
             "new_crystals": crystal_report.new_crystals,
@@ -72,9 +76,13 @@ pub async fn phase_consensus(
 
     match propose_result {
         Ok(resp) => {
-            let crystal_report = c.crystallize(&h, &u);
+            drop(crystal);
             drop(u);
             drop(h);
+            let mut crystal_w = state.crystal.write().await;
+            let u_r = state.universe.read().await;
+            let h_r = state.hebbian.read().await;
+            let crystal_report = crystal_w.crystallize(&h_r, &u_r);
             Ok(Json(ApiResponse::ok(serde_json::json!({
                 "status": "consensus_committed",
                 "log_index": resp.log_index,
@@ -84,6 +92,7 @@ pub async fn phase_consensus(
             }))))
         }
         Err(e) => {
+            drop(crystal);
             drop(u);
             drop(h);
             tracing::error!("phase consensus rejected: {}", e);
@@ -99,9 +108,14 @@ pub async fn quorum_start(
     State(state): State<SharedState>,
     Json(req): Json<QuorumStartRequest>,
 ) -> Result<Json<ApiResponse<QuorumStatus>>, AppError> {
-    let u = state.universe.read().await;
     let budget = req.required_energy_budget.unwrap_or(100.0);
-    drop(u);
+    if let Some(b) = req.required_energy_budget {
+        if b <= 0.0 || !b.is_finite() {
+            return Err(AppError::BadRequest(
+                "required_energy_budget must be positive and finite".to_string(),
+            ));
+        }
+    }
 
     let mut cm = state.cluster.lock().await;
     let status = cm.start_energy_quorum(budget);
@@ -120,6 +134,11 @@ pub async fn quorum_confirm(
     State(state): State<SharedState>,
     Json(entry): Json<EnergyQuorumEntry>,
 ) -> Result<Json<ApiResponse<QuorumStatus>>, AppError> {
+    if entry.available_energy < 0.0 || !entry.available_energy.is_finite() {
+        return Err(AppError::BadRequest(
+            "available_energy must be non-negative and finite".to_string(),
+        ));
+    }
     let mut cm = state.cluster.lock().await;
     let status = cm.confirm_energy_quorum(entry.clone());
 
@@ -147,15 +166,15 @@ pub async fn quorum_execute(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mut c = state.crystal.write().await;
+    let crystal = state.crystal.read().await;
     let mut cm = state.cluster.lock().await;
 
-    let report = c.detect_phase_transition(&h, &u);
+    let report = crystal.detect_phase_transition(&h, &u);
 
     if !req.force && !report.requires_consensus {
         drop(u);
         drop(h);
-        drop(c);
+        drop(crystal);
         drop(cm);
         return Ok(Json(ApiResponse::ok(serde_json::json!({
             "status": "no_transition_needed",
@@ -172,10 +191,13 @@ pub async fn quorum_execute(
 
     match cm.quorum_propose(proposal).await {
         Ok(resp) => {
-            let crystal_report = c.crystallize(&h, &u);
+            drop(crystal);
             drop(u);
             drop(h);
-            drop(c);
+            let mut crystal_w = state.crystal.write().await;
+            let u_r = state.universe.read().await;
+            let h_r = state.hebbian.read().await;
+            let crystal_report = crystal_w.crystallize(&h_r, &u_r);
             drop(cm);
             tracing::info!(
                 crystals = crystal_report.new_crystals,
@@ -193,7 +215,7 @@ pub async fn quorum_execute(
         Err(e) => {
             drop(u);
             drop(h);
-            drop(c);
+            drop(crystal);
             drop(cm);
             tracing::warn!("quorum execute failed: {}", e);
             Ok(Json(ApiResponse::ok(serde_json::json!({

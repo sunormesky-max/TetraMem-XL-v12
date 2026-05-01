@@ -205,7 +205,12 @@ impl Watchdog {
                     ),
                     level: WatchdogLevel::Emergency,
                 });
-                let _ = universe.expand_energy_pool(injection);
+                if !universe.expand_energy_pool(injection) {
+                    tracing::error!(
+                        "emergency_energy_injection: failed to expand pool by {:.0}",
+                        injection
+                    );
+                }
             } else {
                 actions.push(WatchdogAction {
                     action: "emergency_injection_skipped".to_string(),

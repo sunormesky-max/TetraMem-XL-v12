@@ -1,11 +1,13 @@
 use axum::{
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{DefaultBodyLimit, Extension, Request, State},
     http::{HeaderValue, StatusCode as HttpStatusCode},
     middleware::{self, Next},
     response::Response,
     routing::{get, post},
     Router,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -13,6 +15,7 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::universe::auth::Claims;
 use crate::universe::error::AppError;
 use crate::universe::metrics;
 
@@ -38,20 +41,66 @@ use super::scale::{auto_scale, frontier_expand, get_hebbian_neighbors};
 use super::server::login;
 use super::state::SharedState;
 
+struct RateLimiter {
+    count: AtomicU64,
+    max: u64,
+}
+
+impl RateLimiter {
+    fn new(max: u64) -> Self {
+        Self {
+            count: AtomicU64::new(0),
+            max,
+        }
+    }
+
+    fn check(&self) -> bool {
+        let current = self.count.load(Ordering::Relaxed);
+        current < self.max
+    }
+
+    fn increment(&self) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+async fn rate_limit_middleware(
+    Extension(limiter): Extension<Arc<RateLimiter>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    if !limiter.check() {
+        return Err(AppError::TooManyRequests);
+    }
+    limiter.increment();
+    Ok(next.run(req).await)
+}
+
 async fn metrics_middleware(req: Request, next: Next) -> Response {
-    metrics::API_REQUESTS_TOTAL.inc();
+    if let Some(c) = metrics::API_REQUESTS_TOTAL.get() {
+        c.inc();
+    }
     let start = std::time::Instant::now();
     let response = next.run(req).await;
-    metrics::REQUEST_DURATION.observe(start.elapsed().as_secs_f64());
+    if let Some(h) = metrics::REQUEST_DURATION.get() {
+        h.observe(start.elapsed().as_secs_f64());
+    }
     response
 }
 
 async fn auth_middleware(
     State(state): State<SharedState>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
+        let claims = Claims {
+            sub: "anonymous".to_string(),
+            exp: i64::MAX,
+            iat: 0,
+            role: "admin".to_string(),
+        };
+        req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
     }
 
@@ -63,7 +112,8 @@ async fn auth_middleware(
 
     match auth_header {
         Some(token) => {
-            state.jwt.validate_token(token)?;
+            let claims = state.jwt.validate_token(token)?;
+            req.extensions_mut().insert(claims);
             Ok(next.run(req).await)
         }
         None => Err(AppError::Unauthorized(
@@ -72,15 +122,27 @@ async fn auth_middleware(
     }
 }
 
+async fn admin_middleware(req: Request, next: Next) -> Result<Response, AppError> {
+    let claims = req
+        .extensions()
+        .get::<Claims>()
+        .ok_or_else(|| AppError::Unauthorized("no auth claims found".to_string()))?;
+
+    if claims.role != "admin" {
+        return Err(AppError::Forbidden(
+            "admin role required for this operation".to_string(),
+        ));
+    }
+
+    Ok(next.run(req).await)
+}
+
 async fn raft_auth_middleware(
     State(state): State<SharedState>,
     req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     let secret = &state.config.auth.raft_secret;
-    if secret == "change-raft-secret" {
-        tracing::warn!("raft RPC received with default raft_secret — set auth.raft_secret or TETRAMEM_RAFT_SECRET");
-    }
 
     let provided = req
         .headers()
@@ -88,7 +150,7 @@ async fn raft_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match provided {
-        Some(s) if s == secret => Ok(next.run(req).await),
+        Some(s) if constant_time_eq(s.as_bytes(), secret.as_bytes()) => Ok(next.run(req).await),
         _ => Err(AppError::Unauthorized(
             "invalid or missing raft secret".to_string(),
         )),
@@ -127,54 +189,69 @@ pub fn create_router(state: SharedState) -> Router {
 
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
+    let rpm = state.config.rate_limit.requests_per_minute;
+    let limiter = Arc::new(RateLimiter::new(rpm));
+
     let public_routes = Router::new()
         .route("/health", get(get_health))
         .route("/stats", get(get_stats))
         .route("/metrics", get(get_metrics))
         .route("/openapi.json", get(get_openapi))
-        .route("/login", post(login));
+        .route("/login", post(login))
+        .layer(middleware::from_fn(rate_limit_middleware));
 
     let raft_routes = Router::new()
         .route("/raft/vote", post(raft_vote))
         .route("/raft/append", post(raft_append))
         .route("/raft/snapshot", post(raft_snapshot))
         .route("/raft/transfer", post(raft_transfer))
+        .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             raft_auth_middleware,
         ));
 
-    let protected_routes = Router::new()
+    let user_routes = Router::new()
         .route("/memory/encode", post(encode_memory))
         .route("/memory/decode", post(decode_memory))
         .route("/memory/list", get(list_memories))
         .route("/pulse", post(fire_pulse))
         .route("/dream", post(run_dream))
-        .route("/scale", post(auto_scale))
-        .route("/scale/frontier/:max_new", post(frontier_expand))
         .route("/hebbian/neighbors/:x/:y/:z", get(get_hebbian_neighbors))
-        .route("/regulate", post(regulate))
-        .route("/backup/create", post(create_backup))
-        .route("/backup/list", get(list_backups))
-        .route("/cluster/status", get(cluster_status))
-        .route("/cluster/init", post(cluster_init))
-        .route("/cluster/propose", post(cluster_propose))
-        .route("/cluster/add-node", post(cluster_add_node))
-        .route("/cluster/remove-node", post(cluster_remove_node))
-        .route("/memory/timeline", get(memory_timeline))
-        .route("/memory/trace", post(memory_trace))
-        .route("/phase/detect", get(detect_phase_transition))
-        .route("/phase/consensus", post(phase_consensus))
-        .route("/phase/quorum/start", post(quorum_start))
-        .route("/phase/quorum/confirm", post(quorum_confirm))
-        .route("/phase/quorum/status", get(quorum_status_endpoint))
-        .route("/phase/quorum/execute", post(quorum_execute))
         .route("/dark/query", get(dark_query))
         .route("/dark/flow", post(dark_flow))
         .route("/dark/transfer", post(dark_transfer))
         .route("/dark/materialize", post(dark_materialize))
         .route("/dark/dematerialize", post(dark_dematerialize))
         .route("/dark/pressure", get(dark_dimension_pressure))
+        .route("/memory/timeline", get(memory_timeline))
+        .route("/memory/trace", post(memory_trace))
+        .route("/phase/detect", get(detect_phase_transition))
+        .route("/cluster/status", get(cluster_status))
+        .layer(middleware::from_fn(rate_limit_middleware))
+        .layer(middleware::from_fn(metrics_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    let admin_routes = Router::new()
+        .route("/scale", post(auto_scale))
+        .route("/scale/frontier/:max_new", post(frontier_expand))
+        .route("/regulate", post(regulate))
+        .route("/backup/create", post(create_backup))
+        .route("/backup/list", get(list_backups))
+        .route("/cluster/init", post(cluster_init))
+        .route("/cluster/propose", post(cluster_propose))
+        .route("/cluster/add-node", post(cluster_add_node))
+        .route("/cluster/remove-node", post(cluster_remove_node))
+        .route("/phase/consensus", post(phase_consensus))
+        .route("/phase/quorum/start", post(quorum_start))
+        .route("/phase/quorum/confirm", post(quorum_confirm))
+        .route("/phase/quorum/status", get(quorum_status_endpoint))
+        .route("/phase/quorum/execute", post(quorum_execute))
+        .layer(middleware::from_fn(rate_limit_middleware))
+        .layer(middleware::from_fn(admin_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -184,7 +261,9 @@ pub fn create_router(state: SharedState) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(raft_routes)
-        .merge(protected_routes)
+        .merge(user_routes)
+        .merge(admin_routes)
+        .layer(Extension(limiter))
         .layer(DefaultBodyLimit::max(state.config.server.body_limit_bytes))
         .layer(
             ServiceBuilder::new()
@@ -201,4 +280,15 @@ pub fn create_router(state: SharedState) -> Router {
                 )),
         )
         .with_state(state)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
 }

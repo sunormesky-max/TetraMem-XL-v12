@@ -307,8 +307,30 @@ impl AppConfig {
         if self.auth.enabled && self.auth.jwt_secret == "change-me-in-production" {
             return Err(ConfigError::Parse(
                 "auth.enabled=true with default JWT secret is insecure; \
-                 set TETRAMEM_JWT_SECRET env var or auth.jwt_secret in config"
+                 set TETRAMEM_JWT_SECRET env var"
                     .to_string(),
+            ));
+        }
+        if self.auth.enabled && self.auth.raft_secret == "change-raft-secret" {
+            return Err(ConfigError::Parse(
+                "default raft_secret is insecure when auth is enabled; \
+                 set auth.raft_secret or TETRAMEM_RAFT_SECRET env var"
+                    .to_string(),
+            ));
+        }
+        if self.auth.enabled && !self.auth.users.is_empty() {
+            for user in &self.auth.users {
+                if user.password.is_empty() && user.password_hash.is_empty() {
+                    return Err(ConfigError::Parse(format!(
+                        "auth user '{}' has no password or password_hash set",
+                        user.username
+                    )));
+                }
+            }
+        }
+        if self.auth.enabled && self.auth.users.is_empty() {
+            return Err(ConfigError::Parse(
+                "auth.enabled=true but no users configured; add [[auth.users]] entries".to_string(),
             ));
         }
         if self.auth.enabled && self.auth.jwt_expiry_secs == 0 {

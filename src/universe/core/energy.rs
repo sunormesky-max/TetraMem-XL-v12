@@ -4,6 +4,10 @@ const DIM: usize = 7;
 const PHYSICAL_DIM: usize = 3;
 const DARK_DIM: usize = 4;
 
+pub const EPSILON_STRICT: f64 = 1e-15;
+pub const EPSILON_NORMAL: f64 = 1e-10;
+pub const EPSILON_RELATIVE: f64 = 1e-12;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EnergyError {
     InsufficientEnergy { requested: f64, available: f64 },
@@ -111,7 +115,7 @@ impl EnergyField {
             if d.is_nan() {
                 return Err(EnergyError::NegativeDimension { dim: i, value: d });
             }
-            if d < -1e-10 {
+            if d < -EPSILON_NORMAL {
                 return Err(EnergyError::NegativeDimension { dim: i, value: d });
             }
         }
@@ -193,7 +197,7 @@ impl EnergyField {
         if amount < 0.0 {
             return Err(EnergyError::NegativeAmount);
         }
-        if self.dims[from_dim] < amount - 1e-15 {
+        if self.dims[from_dim] < amount - EPSILON_STRICT {
             return Err(EnergyError::InsufficientEnergy {
                 requested: amount,
                 available: self.dims[from_dim],
@@ -209,7 +213,7 @@ impl EnergyField {
         let per_phys = amount / PHYSICAL_DIM as f64;
         let _per_dark = amount / DARK_DIM as f64;
         for i in 0..PHYSICAL_DIM {
-            if self.dims[i] < per_phys - 1e-15 {
+            if self.dims[i] < per_phys - EPSILON_STRICT {
                 return Err(EnergyError::InsufficientEnergy {
                     requested: per_phys,
                     available: self.dims[i],
@@ -232,7 +236,7 @@ impl EnergyField {
         let per_dark = amount / DARK_DIM as f64;
         let _per_phys = amount / PHYSICAL_DIM as f64;
         for i in PHYSICAL_DIM..DIM {
-            if self.dims[i] < per_dark - 1e-15 {
+            if self.dims[i] < per_dark - EPSILON_STRICT {
                 return Err(EnergyError::InsufficientEnergy {
                     requested: per_dark,
                     available: self.dims[i],
@@ -286,7 +290,7 @@ impl EnergyField {
             return Err(EnergyError::NegativeAmount);
         }
         let total = self.total();
-        if amount > total + 1e-15 {
+        if amount > total + EPSILON_STRICT {
             return Err(EnergyError::InsufficientEnergy {
                 requested: amount,
                 available: total,
@@ -299,7 +303,7 @@ impl EnergyField {
     }
 
     pub fn verify_integrity(&self) -> bool {
-        self.dims.iter().all(|&d| d >= -1e-10)
+        self.dims.iter().all(|&d| d >= -EPSILON_NORMAL)
     }
 }
 
@@ -325,6 +329,7 @@ impl fmt::Display for EnergyField {
 pub struct EnergyPool {
     total: f64,
     allocated: f64,
+    available: f64,
 }
 
 impl EnergyPool {
@@ -335,6 +340,7 @@ impl EnergyPool {
         Ok(Self {
             total: total_budget,
             allocated: 0.0,
+            available: total_budget,
         })
     }
 
@@ -347,7 +353,7 @@ impl EnergyPool {
     }
 
     pub fn available(&self) -> f64 {
-        self.total - self.allocated
+        self.available
     }
 
     pub fn utilization(&self) -> f64 {
@@ -361,13 +367,14 @@ impl EnergyPool {
         if amount < 0.0 {
             return Err(EnergyError::NegativeAmount);
         }
-        if amount > self.available() + 1e-15 {
+        if amount > self.available + EPSILON_STRICT {
             return Err(EnergyError::InsufficientEnergy {
                 requested: amount,
-                available: self.available(),
+                available: self.available,
             });
         }
         self.allocated += amount;
+        self.available -= amount;
         Ok(amount)
     }
 
@@ -375,7 +382,7 @@ impl EnergyPool {
         if amount < 0.0 {
             return Err(EnergyError::NegativeAmount);
         }
-        if amount > self.allocated + 1e-10 {
+        if amount > self.allocated + EPSILON_NORMAL {
             return Err(EnergyError::OverRelease {
                 attempted: amount,
                 allocated: self.allocated,
@@ -383,6 +390,7 @@ impl EnergyPool {
         }
         let actual = amount.min(self.allocated);
         self.allocated -= actual;
+        self.available += actual;
         Ok(actual)
     }
 
@@ -391,16 +399,18 @@ impl EnergyPool {
     }
 
     pub fn verify_conservation(&self) -> bool {
-        (self.allocated + self.available() - self.total).abs() < 1e-10
+        let diff = (self.allocated + self.available - self.total).abs();
+        let scale = self.total.abs().max(1.0);
+        diff < EPSILON_NORMAL || diff / scale < EPSILON_RELATIVE
     }
 
     pub fn verify_conservation_with_tolerance(&self, tolerance: f64) -> bool {
-        let diff = (self.allocated + self.available() - self.total).abs();
+        let diff = (self.allocated + self.available - self.total).abs();
         diff < tolerance
     }
 
     pub fn energy_drift(&self) -> f64 {
-        (self.allocated + self.available() - self.total).abs()
+        (self.allocated + self.available - self.total).abs()
     }
 
     pub fn expand(&mut self, additional: f64) -> Result<f64, EnergyError> {
@@ -408,6 +418,7 @@ impl EnergyPool {
             return Err(EnergyError::NegativeAmount);
         }
         self.total += additional;
+        self.available += additional;
         Ok(additional)
     }
 
@@ -422,6 +433,7 @@ impl EnergyPool {
             });
         }
         self.total += additional;
+        self.available += additional;
         Ok(additional)
     }
 
@@ -429,13 +441,14 @@ impl EnergyPool {
         if amount <= 0.0 {
             return Err(EnergyError::NegativeAmount);
         }
-        if amount > self.available() {
+        if amount > self.available {
             return Err(EnergyError::InsufficientEnergy {
                 requested: amount,
-                available: self.available(),
+                available: self.available,
             });
         }
         self.total -= amount;
+        self.available -= amount;
         Ok(amount)
     }
 }
@@ -447,7 +460,7 @@ impl fmt::Display for EnergyPool {
             "Pool(total={:.2}, used={:.2}, free={:.2}, util={:.1}%)",
             self.total,
             self.allocated,
-            self.available(),
+            self.available,
             self.utilization() * 100.0
         )
     }
