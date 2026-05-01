@@ -4,7 +4,7 @@
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-251-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-270-brightgreen.svg)]()
 
 ## What is TetraMem-XL?
 
@@ -53,7 +53,7 @@ config                       emotion  agent                persist_sqlite backup
 ```bash
 cargo build --release
 
-cargo test                          # 236 unit tests
+cargo test                          # 255 unit tests
 cargo test --test api_integration   # 15 HTTP integration tests
 cargo test --test full_suite        # integration suite
 cargo test --test stress_test       # extreme stress tests
@@ -162,11 +162,11 @@ assert!(universe.verify_conservation());
 | Energy Conservation | ~5% loss per cascade | Resource pool invariant (enforced) | ∞ |
 | Dimensions | 3D + time | 7D dark universe | 2.3x |
 | Code Size | 22,123 lines | ~9,000 lines | 2.5x less |
-| Tests | ~90 | 251 (236 unit + 15 integration) | 2.8x |
+| Tests | ~90 | 270 (255 unit + 15 integration) | 3x |
 
 ## Test Coverage
 
-- **236 unit tests** — per-module correctness across all 8 layers
+- **255 unit tests** — per-module correctness across all 8 layers
 - **15 HTTP integration tests** — full endpoint coverage via axum test harness
 - **3 stress/scale test suites** — 10K+ nodes, million ops, extreme conditions
 
@@ -180,6 +180,23 @@ assert!(universe.verify_conservation());
 | S11 | 50K chaotic operations | 0 corruption |
 | S12 | 20K longevity rounds | 0 degradation |
 
+## Security Hardening
+
+12 rounds of security audit and hardening completed:
+
+- **Authentication**: JWT (HS256 strict, iss/aud/nbf/jti UUID v4, 24h expiry), Argon2id passwords, timing-safe dummy hash
+- **Authorization**: 4-tier RBAC (public → raft → user → admin), Claims with private fields + accessors
+- **Rate Limiting**: SeqCst atomic counter, per-IP login rate limit (10 attempts/5min, 10K entry cap)
+- **Security Headers**: CSP, X-Frame-Options DENY, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Cache-Control
+- **CORS**: Specific methods (GET/POST/OPTIONS) + specific headers, no `Any` for methods/headers
+- **Constant-time**: `subtle` crate for Raft secret comparison
+- **Input Validation**: Coordinate bounds, data magnitude limits, path traversal protection
+- **Integrity**: HMAC-SHA256 for Raft log entries, SHA-256 for backup snapshots
+- **Persistence**: SQLite synchronous=FULL, file permissions 0600, atomic writes with temp file cleanup
+- **Concurrency**: Fine-grained RwLock per resource (no global write lock), O(1) memory lookup via HashMap index
+- **Docker**: Non-root user, no-new-privileges, cap_drop ALL, read-only filesystem, resource limits
+- **CI**: GitHub Actions SHA-pinned, permissions: contents:read, --locked on all cargo commands
+
 ## Dependencies
 
 - [axum](https://crates.io/crates/axum) 0.7 — HTTP framework
@@ -189,6 +206,7 @@ assert!(universe.verify_conservation());
 - [openraft](https://crates.io/crates/openraft) 0.10 — Raft consensus
 - [tower-http](https://crates.io/crates/tower-http) 0.6 — Middleware
 - [jsonwebtoken](https://crates.io/crates/jsonwebtoken) 9 — JWT auth
+- [subtle](https://crates.io/crates/subtle) 2 — Constant-time comparisons
 - [prometheus](https://crates.io/crates/prometheus) 0.13 — Metrics
 
 ## License
