@@ -84,22 +84,17 @@ impl LogStoreInner {
             .unwrap_or(0)
     }
 
-    fn persist_entry(&self, index: u64, entry: &EntryOf<TypeName>) {
+    fn persist_entry(&self, index: u64, entry: &EntryOf<TypeName>) -> Result<(), String> {
         if let Some(ref db) = self.db {
-            let data = match serde_json::to_string(entry) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::error!("failed to serialize raft log entry {}: {}", index, e);
-                    return;
-                }
-            };
-            if let Err(e) = db.execute(
+            let data = serde_json::to_string(entry)
+                .map_err(|e| format!("serialize raft log entry {}: {}", index, e))?;
+            db.execute(
                 "INSERT OR REPLACE INTO raft_log (idx, data) VALUES (?1, ?2)",
                 rusqlite::params![index as i64, &data],
-            ) {
-                tracing::error!("failed to persist raft log entry {}: {}", index, e);
-            }
+            )
+            .map_err(|e| format!("persist raft log entry {}: {}", index, e))?;
         }
+        Ok(())
     }
 
     fn persist_vote(&self) {
@@ -340,7 +335,9 @@ impl RaftLogStorage<TypeName> for LogStore {
         {
             let mut inner = self.lock().map_err(lock_failed)?;
             for entry in entries {
-                inner.persist_entry(entry.log_id().index, &entry);
+                inner.persist_entry(entry.log_id().index, &entry).map_err(|e| {
+                    io::Error::other(e)
+                })?;
                 inner.log.insert(entry.log_id().index, entry);
             }
         }

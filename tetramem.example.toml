@@ -1,0 +1,35 @@
+# TetraMem-XL v12.0 Configuration Template
+# Copy this file to tetramem.toml and customize before deploying!
+# Generate a password hash: cargo test password_hashing_and_verify
+
+[server]
+addr = "127.0.0.1:3456"
+timeout_secs = 30
+body_limit_bytes = 10485760
+
+[universe]
+total_energy = 10000000.0
+manifestation_threshold = 0.5
+
+[auth]
+enabled = true
+raft_secret = "CHANGE-ME-TO-A-UNIQUE-RANDOM-SECRET"
+jwt_expiry_secs = 86400
+
+[[auth.users]]
+username = "admin"
+password_hash = "REPLACE_WITH_YOUR_OWN_ARGON2ID_HASH"
+role = "admin"
+
+[logging]
+level = "info"
+json_format = true
+
+[backup]
+dir = "./backups"
+interval_secs = 300
+max_generations = 10
+
+[rate_limit]
+requests_per_minute = 1000
+burst = 50

@@ -299,7 +299,7 @@ impl EnergyField {
         if total <= 0.0 {
             return Ok(EnergyField::zero());
         }
-        self.split_ratio(amount / total)
+        self.split_ratio((amount.min(total)) / total)
     }
 
     pub fn verify_integrity(&self) -> bool {
@@ -374,7 +374,7 @@ impl EnergyPool {
             });
         }
         self.allocated += amount;
-        self.available -= amount;
+        self.available = (self.available - amount).max(0.0);
         Ok(amount)
     }
 

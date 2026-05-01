@@ -74,7 +74,8 @@ impl PersistSqlite {
                 v3_even INTEGER NOT NULL,
                 data_dim INTEGER NOT NULL,
                 physical_base REAL NOT NULL,
-                created_at INTEGER NOT NULL DEFAULT 0
+                created_at INTEGER NOT NULL DEFAULT 0,
+                importance REAL NOT NULL DEFAULT 0.5
             );
             CREATE TABLE IF NOT EXISTS crystal_channels (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,15 +149,15 @@ impl PersistSqlite {
             ).map_err(|e| SqliteError::Insert(e.to_string()))?;
         }
 
-        for ((a, b), weight) in hebbian.strongest_edges(usize::MAX) {
+        for ((a, b), weight, traversal) in hebbian.edges_with_traversal() {
             let ab = a.basis();
             let bb = b.basis();
             let w = weight;
             tx.execute(
-                "INSERT INTO hebbian_edges (a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,1)",
+                "INSERT INTO hebbian_edges (a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
                 params![ab[0], ab[1], ab[2], ab[3], ab[4], ab[5], ab[6], a.is_even() as i32,
                          bb[0], bb[1], bb[2], bb[3], bb[4], bb[5], bb[6], b.is_even() as i32,
-                         w],
+                         w, traversal as i32],
             ).map_err(|e| SqliteError::Insert(e.to_string()))?;
         }
 
@@ -168,13 +169,14 @@ impl PersistSqlite {
                 rows.push((b, v.is_even()));
             }
             tx.execute(
-                "INSERT INTO memories (v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)",
+                "INSERT INTO memories (v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at,importance) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36)",
                 params![
                     rows[0].0[0], rows[0].0[1], rows[0].0[2], rows[0].0[3], rows[0].0[4], rows[0].0[5], rows[0].0[6], rows[0].1 as i32,
                     rows[1].0[0], rows[1].0[1], rows[1].0[2], rows[1].0[3], rows[1].0[4], rows[1].0[5], rows[1].0[6], rows[1].1 as i32,
                     rows[2].0[0], rows[2].0[1], rows[2].0[2], rows[2].0[3], rows[2].0[4], rows[2].0[5], rows[2].0[6], rows[2].1 as i32,
                     rows[3].0[0], rows[3].0[1], rows[3].0[2], rows[3].0[3], rows[3].0[4], rows[3].0[5], rows[3].0[6], rows[3].1 as i32,
                     m.data_dim(), m.physical_base_f64(), m.created_at() as i64,
+                    m.importance(),
                 ],
             ).map_err(|e| SqliteError::Insert(e.to_string()))?;
         }
@@ -334,7 +336,7 @@ impl PersistSqlite {
         let mut mems = Vec::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at FROM memories"
+                "SELECT v00,v01,v02,v03,v04,v05,v06,v0_even,v10,v11,v12,v13,v14,v15,v16,v1_even,v20,v21,v22,v23,v24,v25,v26,v2_even,v30,v31,v32,v33,v34,v35,v36,v3_even,data_dim,physical_base,created_at,importance FROM memories"
             ).map_err(|e| SqliteError::Query(e.to_string()))?;
 
             let rows = stmt
@@ -382,6 +384,7 @@ impl PersistSqlite {
                     let dim: i32 = row.get(32)?;
                     let pb: f64 = row.get(33)?;
                     let created_at: i64 = row.get(34)?;
+                    let importance: f64 = row.get(35)?;
                     Ok((
                         v0,
                         v0e,
@@ -394,12 +397,13 @@ impl PersistSqlite {
                         dim as usize,
                         pb,
                         created_at as u64,
+                        importance,
                     ))
                 })
                 .map_err(|e| SqliteError::Query(e.to_string()))?;
 
             for row in rows {
-                let (v0, v0e, v1, v1e, v2, v2e, v3, v3e, dim, pb, created_at) =
+                let (v0, v0e, v1, v1e, v2, v2e, v3, v3e, dim, pb, created_at, importance) =
                     row.map_err(|e| SqliteError::Query(e.to_string()))?;
                 let make = |b: [i32; 7], e: i32| -> Coord7D {
                     if e != 0 {
@@ -409,7 +413,7 @@ impl PersistSqlite {
                     }
                 };
                 let verts = [make(v0, v0e), make(v1, v1e), make(v2, v2e), make(v3, v3e)];
-                mems.push(MemoryAtom::from_parts_with_time(verts, dim, pb, created_at));
+                mems.push(MemoryAtom::from_parts_with_importance(verts, dim, pb, created_at, importance));
             }
         }
 

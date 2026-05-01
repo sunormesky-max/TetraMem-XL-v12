@@ -141,7 +141,10 @@ impl UserStore {
                 let hash = if !c.password_hash.is_empty() {
                     c.password_hash.clone()
                 } else if !c.password.is_empty() {
-                    hash_password(&c.password).unwrap_or_default()
+                    hash_password(&c.password).unwrap_or_else(|e| {
+                        tracing::error!("failed to hash password for user '{}': {}", c.username, e);
+                        String::new()
+                    })
                 } else {
                     String::new()
                 };
@@ -156,10 +159,18 @@ impl UserStore {
     }
 
     pub fn verify(&self, username: &str, password: &str) -> Option<&str> {
-        self.users
-            .iter()
-            .find(|u| u.username == username && verify_password(password, &u.password_hash))
-            .map(|u| u.role.as_str())
+        let user = self.users.iter().find(|u| u.username == username);
+        let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAA$IrIHnE+KcLW7CRfv02DDMj/53fjTmUqsDVOHeibmAGs";
+        let hash = user
+            .map(|u| u.password_hash.as_str())
+            .unwrap_or(dummy_hash);
+        let valid = verify_password(password, hash);
+        if let Some(u) = user {
+            if valid {
+                return Some(u.role.as_str());
+            }
+        }
+        None
     }
 
     pub fn has_users(&self) -> bool {

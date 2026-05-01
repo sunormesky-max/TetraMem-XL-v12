@@ -109,6 +109,7 @@ pub async fn dark_flow(
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
     };
+    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     let result = match req.direction.as_str() {
@@ -175,6 +176,7 @@ pub async fn dark_transfer(
     let from = parity_fn(req.from);
     let to = parity_fn(req.to);
 
+    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.transfer_energy(&from, &to, req.amount) {
@@ -236,6 +238,7 @@ pub async fn dark_materialize(
         _ => Coord7D::new_even(req.coord),
     };
 
+    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.materialize_biased(coord, req.energy, req.physical_ratio) {
@@ -280,6 +283,7 @@ pub async fn dark_dematerialize(
         _ => Coord7D::new_even(req.coord),
     };
 
+    let _write_guard = state.write_guard.lock().await;
     let mut u = state.universe.write().await;
 
     match u.dematerialize(&coord) {

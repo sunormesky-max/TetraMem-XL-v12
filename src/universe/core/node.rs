@@ -196,10 +196,12 @@ impl DarkUniverse {
             let field = node.energy;
             if let Err(e) = self.pool.release_field(&field) {
                 tracing::error!(
-                    "dematerialize: release_field failed for {:?}: {:?}",
+                    "dematerialize: release_field failed for {:?}: {:?}, re-inserting node",
                     coord,
                     e
                 );
+                self.nodes.insert(*coord, DarkNode::new(*coord, field));
+                return None;
             }
             self.protected.remove(coord);
             return Some(field);

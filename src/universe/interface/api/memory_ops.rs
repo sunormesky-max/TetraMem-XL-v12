@@ -25,6 +25,7 @@ pub async fn encode_memory(
     State(state): State<SharedState>,
     Json(req): Json<EncodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<EncodeResponse>>), AppError> {
+    let _write_guard = state.write_guard.lock().await;
     if req.data.is_empty() || req.data.len() > 28 {
         return Err(AppError::BadRequest(format!(
             "data length must be between 1 and 28, got {}",
@@ -171,7 +172,7 @@ pub async fn memory_trace(
     let mems = state.memories.read().await;
 
     let source = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
-    let max_hops = req.max_hops.unwrap_or(10);
+    let max_hops = req.max_hops.unwrap_or(10).min(100);
 
     let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
         &u, &h, &crystal, &source, max_hops,

@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
+
 use axum::http::StatusCode;
-use axum::{extract::State, Json};
+use axum::{extract::ConnectInfo, extract::State, Json};
 
 use crate::universe::auth::{LoginRequest, LoginResponse};
 use crate::universe::error::AppError;
@@ -8,10 +12,49 @@ use super::router::create_router;
 use super::state::SharedState;
 use super::types::ApiResponse;
 
+struct LoginAttempt {
+    count: u32,
+    first_attempt: Instant,
+}
+
+static LOGIN_RATE_LIMIT: std::sync::OnceLock<Mutex<HashMap<String, LoginAttempt>>> =
+    std::sync::OnceLock::new();
+
+const MAX_LOGIN_ATTEMPTS: u32 = 10;
+const LOGIN_WINDOW_SECS: u64 = 300;
+
+fn check_login_rate(ip_key: &str) -> Result<(), AppError> {
+    let map = LOGIN_RATE_LIMIT
+        .get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = map.lock().unwrap();
+    let now = Instant::now();
+    if let Some(attempt) = map.get_mut(ip_key) {
+        if attempt.first_attempt.elapsed().as_secs() > LOGIN_WINDOW_SECS {
+            attempt.count = 0;
+            attempt.first_attempt = now;
+        }
+        if attempt.count >= MAX_LOGIN_ATTEMPTS {
+            return Err(AppError::TooManyRequests);
+        }
+        attempt.count += 1;
+    } else {
+        map.insert(ip_key.to_string(), LoginAttempt {
+            count: 1,
+            first_attempt: now,
+        });
+    }
+    Ok(())
+}
+
 pub async fn login(
+    addr: Option<ConnectInfo<std::net::SocketAddr>>,
     State(state): State<SharedState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<LoginResponse>>), AppError> {
+    if let Some(ConnectInfo(addr)) = addr {
+        check_login_rate(&addr.ip().to_string())?;
+    }
+
     if req.username.is_empty() || req.password.is_empty() {
         return Err(AppError::BadRequest(
             "username and password required".to_string(),
@@ -55,9 +98,12 @@ pub async fn start_server(
     let app = create_router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("API server listening on http://{}", addr);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     if state.config.backup.auto_persist {
         let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);

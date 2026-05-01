@@ -111,7 +111,7 @@ fn default_server() -> ServerConfig {
 }
 
 fn default_cors_origins() -> Vec<String> {
-    vec!["*".to_string()]
+    vec!["http://localhost:5173".to_string()]
 }
 
 fn default_universe() -> UniverseConfig {
@@ -319,10 +319,18 @@ impl AppConfig {
             ));
         }
         if self.auth.enabled && !self.auth.users.is_empty() {
+            let default_hash = "$argon2id$v=19$m=19456,t=2,p=1$l7+kFgPk+WRQHfRzEvZgGA$IrIHnE+KcLW7CRfv02DDMj/53fjTmUqsDVOHeibmAGs";
             for user in &self.auth.users {
                 if user.password.is_empty() && user.password_hash.is_empty() {
                     return Err(ConfigError::Parse(format!(
                         "auth user '{}' has no password or password_hash set",
+                        user.username
+                    )));
+                }
+                if user.password_hash == default_hash {
+                    return Err(ConfigError::Parse(format!(
+                        "auth user '{}' uses the default/example password hash; \
+                         generate a unique hash with: cargo test password_hashing_and_verify",
                         user.username
                     )));
                 }

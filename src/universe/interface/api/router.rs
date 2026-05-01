@@ -44,23 +44,30 @@ use super::state::SharedState;
 struct RateLimiter {
     count: AtomicU64,
     max: u64,
+    window_secs: u64,
+    last_reset: std::sync::Mutex<std::time::Instant>,
 }
 
 impl RateLimiter {
-    fn new(max: u64) -> Self {
+    fn new(max: u64, window_secs: u64) -> Self {
         Self {
             count: AtomicU64::new(0),
             max,
+            window_secs,
+            last_reset: std::sync::Mutex::new(std::time::Instant::now()),
         }
     }
 
-    fn check(&self) -> bool {
-        let current = self.count.load(Ordering::Relaxed);
+    fn check_and_increment(&self) -> bool {
+        {
+            let mut last = self.last_reset.lock().unwrap();
+            if last.elapsed() >= std::time::Duration::from_secs(self.window_secs) {
+                self.count.store(0, Ordering::Relaxed);
+                *last = std::time::Instant::now();
+            }
+        }
+        let current = self.count.fetch_add(1, Ordering::Relaxed);
         current < self.max
-    }
-
-    fn increment(&self) {
-        self.count.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -69,10 +76,9 @@ async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    if !limiter.check() {
+    if !limiter.check_and_increment() {
         return Err(AppError::TooManyRequests);
     }
-    limiter.increment();
     Ok(next.run(req).await)
 }
 
@@ -94,6 +100,7 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
+        tracing::warn!("auth is disabled — all requests granted admin privileges; enable auth for production");
         let claims = Claims {
             sub: "anonymous".to_string(),
             exp: i64::MAX,
@@ -171,9 +178,11 @@ fn build_cors_layer(origins: &[String]) -> CorsLayer {
         .collect();
 
     if parsed.is_empty() {
-        tracing::warn!("no valid CORS origins parsed, allowing all");
+        tracing::warn!("no valid CORS origins parsed, using localhost only");
         return CorsLayer::new()
-            .allow_origin(Any)
+            .allow_origin(AllowOrigin::list([
+                "http://localhost:5173".parse::<HeaderValue>().unwrap(),
+            ]))
             .allow_methods(Any)
             .allow_headers(Any);
     }
@@ -190,7 +199,7 @@ pub fn create_router(state: SharedState) -> Router {
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
     let rpm = state.config.rate_limit.requests_per_minute;
-    let limiter = Arc::new(RateLimiter::new(rpm));
+    let limiter = Arc::new(RateLimiter::new(rpm, 60));
 
     let public_routes = Router::new()
         .route("/health", get(get_health))
@@ -283,11 +292,11 @@ pub fn create_router(state: SharedState) -> Router {
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut result: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
+    let len = std::cmp::max(a.len(), b.len());
+    let mut result: u8 = (a.len() ^ b.len()) as u8;
+    for i in 0..len {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
         result |= x ^ y;
     }
     result == 0

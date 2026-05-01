@@ -155,7 +155,8 @@ impl DreamEngine {
             return 0;
         }
 
-        let mut merged_pairs: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut participated: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut remove_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut merged_count = 0;
 
         for result in &analogies {
@@ -169,11 +170,11 @@ impl DreamEngine {
             });
 
             if let (Some(si), Some(ti)) = (source_idx, target_idx) {
-                if merged_pairs.contains(&si) || merged_pairs.contains(&ti) {
+                if participated.contains(&si) || participated.contains(&ti) {
                     continue;
                 }
-                merged_pairs.insert(si);
-                merged_pairs.insert(ti);
+                participated.insert(si);
+                participated.insert(ti);
 
                 let keep_idx = si.min(ti);
                 let remove_idx = si.max(ti);
@@ -195,11 +196,12 @@ impl DreamEngine {
                     }
                 }
 
+                remove_set.insert(remove_idx);
                 merged_count += 1;
             }
         }
 
-        let mut remove_indices: Vec<usize> = merged_pairs.into_iter().collect();
+        let mut remove_indices: Vec<usize> = remove_set.into_iter().collect();
         remove_indices.sort_by(|a, b| b.cmp(a));
         for idx in remove_indices {
             if idx < memories.len() {

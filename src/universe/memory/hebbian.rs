@@ -75,7 +75,7 @@ impl HebbianMemory {
     }
 
     pub fn record_path(&mut self, path: &[Coord7D], strength: f64) {
-        if path.len() < 2 {
+        if path.len() < 2 || !strength.is_finite() || strength < 0.0 {
             return;
         }
 
