@@ -142,12 +142,14 @@ async fn shutdown_signal() {
     #[cfg(unix)]
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut sig) => sig.recv().await,
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
             Err(e) => {
                 tracing::error!("signal handler error: {}", e);
-                std::future::pending::<()>().await
+                std::future::pending::<()>().await;
             }
-        };
+        }
     };
 
     #[cfg(not(unix))]
