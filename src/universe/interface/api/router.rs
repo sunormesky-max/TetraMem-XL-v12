@@ -39,6 +39,9 @@ use super::phase::{
     detect_phase_transition, phase_consensus, quorum_confirm, quorum_execute, quorum_start,
     quorum_status_endpoint,
 };
+use super::physics_ops::{
+    physics_configure, physics_distance, physics_profile, physics_project, physics_status,
+};
 use super::raft_rpc::{raft_append, raft_snapshot, raft_transfer, raft_vote};
 use super::scale::{auto_scale, frontier_expand, get_hebbian_neighbors};
 use super::server::login;
@@ -266,6 +269,10 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/dark/materialize", post(dark_materialize))
         .route("/dark/dematerialize", post(dark_dematerialize))
         .route("/dark/pressure", get(dark_dimension_pressure))
+        .route("/physics/status", get(physics_status))
+        .route("/physics/profile", get(physics_profile))
+        .route("/physics/distance", post(physics_distance))
+        .route("/physics/project", post(physics_project))
         .route("/memory/timeline", get(memory_timeline))
         .route("/memory/trace", post(memory_trace))
         .route("/phase/detect", get(detect_phase_transition))
@@ -292,6 +299,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/phase/quorum/confirm", post(quorum_confirm))
         .route("/phase/quorum/status", get(quorum_status_endpoint))
         .route("/phase/quorum/execute", post(quorum_execute))
+        .route("/physics/configure", post(physics_configure))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(admin_middleware))
         .layer(middleware::from_fn(metrics_middleware))

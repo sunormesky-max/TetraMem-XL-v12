@@ -2,12 +2,14 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
+use crate::universe::core::physics::UniversePhysics;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::lattice::Lattice;
 use crate::universe::node::DarkUniverse;
 use std::collections::{HashSet, VecDeque};
 
 const NOISE_FLOOR: f64 = 0.01;
+const DIM: usize = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PulseType {
@@ -126,7 +128,19 @@ impl PulseEngine {
         hebbian: &mut HebbianMemory,
     ) -> PulseResult {
         let pulse = NeuralPulse::new(*source, pulse_type);
-        self.run_pulse(pulse, universe, hebbian)
+        self.run_pulse(pulse, universe, hebbian, None)
+    }
+
+    pub fn propagate_with_physics(
+        &self,
+        source: &Coord7D,
+        pulse_type: PulseType,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        physics: &UniversePhysics,
+    ) -> PulseResult {
+        let pulse = NeuralPulse::new(*source, pulse_type);
+        self.run_pulse(pulse, universe, hebbian, Some(physics))
     }
 
     fn run_pulse(
@@ -134,6 +148,7 @@ impl PulseEngine {
         initial: NeuralPulse,
         universe: &DarkUniverse,
         hebbian: &mut HebbianMemory,
+        physics: Option<&UniversePhysics>,
     ) -> PulseResult {
         let mut visited = HashSet::new();
         visited.insert(initial.current());
@@ -170,7 +185,10 @@ impl PulseEngine {
                 paths_recorded += 1;
             }
 
-            let candidates = self.biased_neighbors(&current, &pulse, universe, hebbian, &visited);
+            let candidates = match physics {
+                Some(p) => self.biased_neighbors_physics(&current, &pulse, universe, hebbian, &visited, p),
+                None => self.biased_neighbors(&current, &pulse, universe, hebbian, &visited),
+            };
 
             let fanout = pulse.pulse_type.fanout().min(candidates.len());
             if fanout == 0 {
@@ -243,6 +261,73 @@ impl PulseEngine {
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates
+    }
+
+    fn biased_neighbors_physics(
+        &self,
+        coord: &Coord7D,
+        pulse: &NeuralPulse,
+        universe: &DarkUniverse,
+        hebbian: &HebbianMemory,
+        visited: &HashSet<Coord7D>,
+        physics: &UniversePhysics,
+    ) -> Vec<(Coord7D, f64)> {
+        let decays = physics.profile.propagation_decays();
+        let coord_f = coord.as_f64();
+        let bias_w = pulse.pulse_type.hebbian_bias_weight();
+
+        let mut candidates = Vec::new();
+
+        for n in Lattice::face_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let n_f = n.as_f64();
+            let modulation = self.dimension_modulation(&coord_f, &n_f, &decays);
+            let decay = self.face_decay * modulation;
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            let exists = universe.get_node(&n).is_some();
+            let quality = if exists { 1.2 } else { 0.8 };
+            candidates.push((n, decay * bias * quality));
+        }
+
+        for n in Lattice::bcc_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let n_f = n.as_f64();
+            let modulation = self.dimension_modulation(&coord_f, &n_f, &decays);
+            let decay = self.bcc_decay * modulation;
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            candidates.push((n, decay * bias));
+        }
+
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates
+    }
+
+    fn dimension_modulation(
+        &self,
+        from: &[f64; DIM],
+        to: &[f64; DIM],
+        decays: &[f64; DIM],
+    ) -> f64 {
+        let mut weighted = 0.0;
+        let mut count = 0usize;
+        for d in 0..DIM {
+            let diff = (to[d] - from[d]).abs();
+            if diff > 0.0 {
+                weighted += decays[d];
+                count += 1;
+            }
+        }
+        if count > 0 {
+            weighted / count as f64
+        } else {
+            1.0
+        }
     }
 }
 
@@ -412,6 +497,118 @@ mod tests {
         assert!(
             after_reinforce > after_decay,
             "reinforcement should increase weight"
+        );
+    }
+
+    #[test]
+    fn physics_propagate_exploratory() {
+        let u = make_grid_universe();
+        let mut h = HebbianMemory::new();
+        let engine = PulseEngine::new();
+        let physics = UniversePhysics::rich();
+
+        let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
+        let result = engine.propagate_with_physics(
+            &source,
+            PulseType::Exploratory,
+            &u,
+            &mut h,
+            &physics,
+        );
+
+        assert!(result.visited_nodes > 1, "physics pulse should visit nodes");
+        assert!(result.total_activation > 0.0);
+    }
+
+    #[test]
+    fn physics_propagate_reinforcing() {
+        let u = make_grid_universe();
+        let mut h = HebbianMemory::new();
+        let engine = PulseEngine::new();
+        let physics = UniversePhysics::rich();
+
+        let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
+        let result = engine.propagate_with_physics(
+            &source,
+            PulseType::Reinforcing,
+            &u,
+            &mut h,
+            &physics,
+        );
+
+        assert!(result.paths_recorded > 0, "physics reinforcing should record paths");
+    }
+
+    #[test]
+    fn physics_propagate_cascade() {
+        let u = make_grid_universe();
+        let mut h = HebbianMemory::new();
+        let engine = PulseEngine::new();
+        let physics = UniversePhysics::rich();
+
+        let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
+        let result = engine.propagate_with_physics(
+            &source,
+            PulseType::Cascade,
+            &u,
+            &mut h,
+            &physics,
+        );
+
+        assert!(result.visited_nodes > 2, "physics cascade should visit many nodes");
+    }
+
+    #[test]
+    fn physics_vs_flat_different_activation() {
+        let u = make_grid_universe();
+        let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
+
+        let mut h1 = HebbianMemory::new();
+        let mut h2 = HebbianMemory::new();
+        let engine = PulseEngine::new();
+
+        let flat_result = engine.propagate(&source, PulseType::Exploratory, &u, &mut h1);
+        let rich_result = engine.propagate_with_physics(
+            &source,
+            PulseType::Exploratory,
+            &u,
+            &mut h2,
+            &UniversePhysics::rich(),
+        );
+
+        assert!(
+            (flat_result.total_activation - rich_result.total_activation).abs() > 0.001,
+            "rich physics should produce different activation than flat: flat={}, rich={}",
+            flat_result.total_activation,
+            rich_result.total_activation,
+        );
+    }
+
+    #[test]
+    fn flat_physics_similar_to_no_physics() {
+        let u = make_grid_universe();
+        let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
+
+        let mut h1 = HebbianMemory::new();
+        let mut h2 = HebbianMemory::new();
+        let engine = PulseEngine::new();
+
+        let no_phys = engine.propagate(&source, PulseType::Exploratory, &u, &mut h1);
+        let flat_phys = engine.propagate_with_physics(
+            &source,
+            PulseType::Exploratory,
+            &u,
+            &mut h2,
+            &UniversePhysics::flat(),
+        );
+
+        let ratio = no_phys.total_activation / flat_phys.total_activation.max(1e-15);
+        assert!(
+            (ratio - 1.0).abs() < 0.3,
+            "flat physics should produce similar activation: no_phys={}, flat={}, ratio={}",
+            no_phys.total_activation,
+            flat_phys.total_activation,
+            ratio,
         );
     }
 }

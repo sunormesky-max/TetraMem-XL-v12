@@ -8,6 +8,7 @@ pub mod dark_dimension;
 pub mod health;
 pub mod memory_ops;
 pub mod phase;
+pub mod physics_ops;
 pub mod raft_rpc;
 pub mod router;
 pub mod scale;

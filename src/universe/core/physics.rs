@@ -497,6 +497,14 @@ impl ProjectionMatrix {
         result
     }
 
+    pub fn get(&self, i: usize, j: usize) -> f64 {
+        if i < PHYSICAL_DIM && j < DIM {
+            self.m[i][j]
+        } else {
+            0.0
+        }
+    }
+
     pub fn project_energy(&self, energy: &[f64; DIM]) -> [f64; PHYSICAL_DIM] {
         let mut result = [0.0; PHYSICAL_DIM];
         for i in 0..PHYSICAL_DIM {
