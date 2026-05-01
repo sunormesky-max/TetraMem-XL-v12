@@ -12,7 +12,12 @@ RUN mkdir -p src benches tests && \
     cargo build --locked --release && rm -rf src benches tests
 
 COPY src/ src/
-RUN touch src/main.rs && cargo build --locked --release
+RUN mkdir -p benches tests && \
+    echo "" > benches/benchmarks.rs && \
+    echo "" > tests/full_suite.rs && \
+    echo "" > tests/scale_bench.rs && \
+    echo "" > tests/stress_test.rs && \
+    touch src/main.rs && cargo build --locked --release
 
 FROM debian:bookworm-slim
 
