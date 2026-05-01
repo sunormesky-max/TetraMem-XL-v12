@@ -82,6 +82,10 @@ pub use memory::{
     ClusteringEngine, ClusteringReport, DarkGravityField, ResonanceTunnel, SemanticAnchorPlacer,
     TopologyBridge, TunnelEdge,
 };
+pub use memory::{
+    AtomKey, Concept, EmbeddingIndex, KnnResult, KnowledgeGraph, QueryFilter, QueryHit, Relation,
+    RelationType, SemanticConfig, SemanticEmbedding, SemanticEngine, SemanticQuery, SemanticReport,
+};
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
 pub use node::{DarkNode, DarkUniverse};
 pub use observer::{

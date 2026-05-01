@@ -52,6 +52,10 @@ pub struct MemoryAtom {
     physical_base: f64,
     created_at: u64,
     importance: f64,
+    tags: Vec<String>,
+    category: Option<String>,
+    description: Option<String>,
+    source: Option<String>,
 }
 
 impl MemoryAtom {
@@ -79,6 +83,49 @@ impl MemoryAtom {
         self.importance = importance.clamp(0.0, 1.0);
     }
 
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    pub fn add_tag(&mut self, tag: impl Into<String>) {
+        let tag = tag.into();
+        if !self.tags.contains(&tag) {
+            self.tags.push(tag);
+        }
+    }
+
+    pub fn remove_tag(&mut self, tag: &str) {
+        self.tags.retain(|t| t != tag);
+    }
+
+    pub fn category(&self) -> Option<&str> {
+        self.category.as_deref()
+    }
+
+    pub fn set_category(&mut self, category: impl Into<String>) {
+        self.category = Some(category.into());
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub fn set_description(&mut self, desc: impl Into<String>) {
+        self.description = Some(desc.into());
+    }
+
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+
+    pub fn set_source(&mut self, source: impl Into<String>) {
+        self.source = Some(source.into());
+    }
+
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|t| t == tag)
+    }
+
     pub fn from_parts(vertices: [Coord7D; 4], data_dim: usize, physical_base: f64) -> Self {
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -90,6 +137,10 @@ impl MemoryAtom {
             physical_base,
             created_at,
             importance: 0.5,
+            tags: Vec::new(),
+            category: None,
+            description: None,
+            source: None,
         }
     }
 
@@ -105,6 +156,10 @@ impl MemoryAtom {
             physical_base,
             created_at,
             importance: 0.5,
+            tags: Vec::new(),
+            category: None,
+            description: None,
+            source: None,
         }
     }
 
@@ -121,6 +176,10 @@ impl MemoryAtom {
             physical_base,
             created_at,
             importance: importance.clamp(0.0, 1.0),
+            tags: Vec::new(),
+            category: None,
+            description: None,
+            source: None,
         }
     }
 
@@ -155,10 +214,16 @@ impl MemoryAtom {
 
 impl fmt::Display for MemoryAtom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cat = self.category.as_deref().unwrap_or("-");
         write!(
             f,
-            "Mem[{} dims={}, imp={:.2}, anchor={}]",
-            self.data_dim, self.data_dim, self.importance, self.vertices[0]
+            "Mem[{} dims={}, imp={:.2}, cat={}, tags={}, anchor={}]",
+            self.data_dim,
+            self.data_dim,
+            self.importance,
+            cat,
+            self.tags.len(),
+            self.vertices[0]
         )
     }
 }
@@ -254,6 +319,10 @@ impl MemoryCodec {
             physical_base,
             created_at,
             importance: 0.5,
+            tags: Vec::new(),
+            category: None,
+            description: None,
+            source: None,
         };
 
         universe.protect(&atom.vertices);

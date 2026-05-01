@@ -9,7 +9,7 @@ use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
 use serde::{Deserialize, Serialize};
 
-const CURRENT_SCHEMA_VERSION: u32 = 2;
+const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UniverseSnapshot {
@@ -54,6 +54,14 @@ pub struct MemorySnapshot {
     pub created_at: u64,
     #[serde(default = "default_importance")]
     pub importance: f64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 fn default_importance() -> f64 {
@@ -173,6 +181,10 @@ impl PersistEngine {
                     physical_base: m.physical_base_f64(),
                     created_at: m.created_at(),
                     importance: m.importance(),
+                    tags: m.tags().to_vec(),
+                    category: m.category().map(String::from),
+                    description: m.description().map(String::from),
+                    source: m.source().map(String::from),
                 }
             })
             .collect();
@@ -422,13 +434,26 @@ impl PersistEngine {
                         Coord7D::new_odd(ms.vertices[i])
                     };
                 }
-                Some(MemoryAtom::from_parts_with_importance(
+                let mut atom = MemoryAtom::from_parts_with_importance(
                     verts,
                     ms.data_dim,
                     ms.physical_base,
                     ms.created_at,
                     ms.importance,
-                ))
+                );
+                for tag in &ms.tags {
+                    atom.add_tag(tag);
+                }
+                if let Some(ref cat) = ms.category {
+                    atom.set_category(cat);
+                }
+                if let Some(ref desc) = ms.description {
+                    atom.set_description(desc);
+                }
+                if let Some(ref src) = ms.source {
+                    atom.set_source(src);
+                }
+                Some(atom)
             })
             .collect();
 

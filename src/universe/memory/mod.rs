@@ -7,6 +7,7 @@ pub mod hebbian;
 #[allow(clippy::module_inception)]
 pub mod memory;
 pub mod pulse;
+pub mod semantic;
 
 pub use clustering::{
     dark_coords_from_data, semantic_distance, BridgeEdge, BridgeType, ClusteringConfig,
@@ -14,3 +15,7 @@ pub use clustering::{
     TopologyBridge, TunnelEdge,
 };
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
+pub use semantic::{
+    AtomKey, Concept, EmbeddingIndex, KnnResult, KnowledgeGraph, QueryFilter, QueryHit, Relation,
+    RelationType, SemanticConfig, SemanticEmbedding, SemanticEngine, SemanticQuery, SemanticReport,
+};
