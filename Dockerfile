@@ -10,21 +10,20 @@ RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r tetramem && useradd -r -g tetramem -d /app tetramem
 
 COPY --from=builder /app/target/release/tetramem-v12 /usr/local/bin/tetramem-v12
 
 RUN mkdir -p /app/backups /app/data && chown -R tetramem:tetramem /app
-COPY tetramem.toml /app/tetramem.toml
 
 USER tetramem
 WORKDIR /app
 
 EXPOSE 3456
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:3456/health || exit 1
+    CMD /usr/local/bin/tetramem-v12 health --addr http://localhost:3456 || exit 1
 
 ENTRYPOINT ["tetramem-v12"]
 CMD ["serve"]

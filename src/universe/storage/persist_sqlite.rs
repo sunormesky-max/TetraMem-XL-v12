@@ -110,7 +110,7 @@ impl PersistSqlite {
 
         let conn = Connection::open(path).map_err(|e| SqliteError::Open(e.to_string()))?;
 
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
             .map_err(|e| SqliteError::Open(e.to_string()))?;
 
         Self::init_schema(&conn)?;

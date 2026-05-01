@@ -232,7 +232,12 @@ impl TetraMemTools {
                     Some(a) if a.len() == 3 => {
                         let coords: Result<Vec<i32>, _> = a
                             .iter()
-                            .map(|v| v.as_i64().map(|n| n as i32).ok_or(()))
+                            .map(|v| {
+                                v.as_i64()
+                                    .filter(|&n| n >= i32::MIN as i64 && n <= i32::MAX as i64)
+                                    .map(|n| n as i32)
+                                    .ok_or(())
+                            })
                             .collect();
                         match coords {
                             Ok(c) => Coord7D::new_even([c[0], c[1], c[2], 0, 0, 0, 0]),
@@ -533,7 +538,12 @@ fn parse_3d_coord(args: &Value, key: &str) -> Result<Coord7D, String> {
         Some(a) if a.len() == 3 => {
             let coords: Result<Vec<i32>, _> = a
                 .iter()
-                .map(|v| v.as_i64().map(|n| n as i32).ok_or(()))
+                .map(|v| {
+                    v.as_i64()
+                        .filter(|&n| n >= i32::MIN as i64 && n <= i32::MAX as i64)
+                        .map(|n| n as i32)
+                        .ok_or(())
+                })
                 .collect();
             match coords {
                 Ok(c) => Ok(Coord7D::new_even([c[0], c[1], c[2], 0, 0, 0, 0])),

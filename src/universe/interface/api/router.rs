@@ -82,6 +82,20 @@ async fn rate_limit_middleware(
     Ok(next.run(req).await)
 }
 
+async fn security_headers_middleware(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert("x-content-type-options", "nosniff".parse().unwrap());
+    headers.insert("x-frame-options", "DENY".parse().unwrap());
+    headers.insert("x-xss-protection", "0".parse().unwrap());
+    headers.insert("referrer-policy", "strict-origin-when-cross-origin".parse().unwrap());
+    headers.insert("content-security-policy", "default-src 'none'; frame-ancestors 'none'".parse().unwrap());
+    headers.insert("permissions-policy", "camera=(), microphone=(), geolocation=()".parse().unwrap());
+    headers.insert("cache-control", "no-store".parse().unwrap());
+    headers.insert("pragma", "no-cache".parse().unwrap());
+    response
+}
+
 async fn metrics_middleware(req: Request, next: Next) -> Response {
     if let Some(c) = metrics::API_REQUESTS_TOTAL.get() {
         c.inc();
@@ -100,12 +114,20 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
-        tracing::warn!("auth is disabled — all requests granted admin privileges; enable auth for production");
+        tracing::warn!("⚠ AUTH IS DISABLED — all requests granted read-only user role");
+        tracing::warn!("⚠ Set TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 to restore admin access (NOT for production)");
+        let role = if std::env::var("TETRAMEM_ALLOW_NO_AUTH_ADMIN").as_deref() == Ok("1") {
+            tracing::warn!("⚠ TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 detected — granting admin (development only)");
+            "admin"
+        } else {
+            "user"
+        };
         let claims = Claims {
             sub: "anonymous".to_string(),
             exp: i64::MAX,
             iat: 0,
-            role: "admin".to_string(),
+            role: role.to_string(),
+            jti: "anonymous".to_string(),
         };
         req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
@@ -166,6 +188,7 @@ async fn raft_auth_middleware(
 
 fn build_cors_layer(origins: &[String]) -> CorsLayer {
     if origins.len() == 1 && (origins[0] == "*" || origins[0] == "any") {
+        tracing::warn!("CORS allows all origins — only use in development");
         return CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
@@ -178,7 +201,7 @@ fn build_cors_layer(origins: &[String]) -> CorsLayer {
         .collect();
 
     if parsed.is_empty() {
-        tracing::warn!("no valid CORS origins parsed, using localhost only");
+        tracing::warn!("no valid CORS origins parsed, denying all cross-origin requests");
         return CorsLayer::new()
             .allow_origin(AllowOrigin::list([
                 "http://localhost:5173".parse::<HeaderValue>().unwrap(),
@@ -273,6 +296,7 @@ pub fn create_router(state: SharedState) -> Router {
         .merge(user_routes)
         .merge(admin_routes)
         .layer(Extension(limiter))
+        .layer(middleware::from_fn(security_headers_middleware))
         .layer(DefaultBodyLimit::max(state.config.server.body_limit_bytes))
         .layer(
             ServiceBuilder::new()

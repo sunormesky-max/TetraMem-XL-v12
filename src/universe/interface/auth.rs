@@ -13,6 +13,7 @@ pub struct Claims {
     pub exp: i64,
     pub iat: i64,
     pub role: String,
+    pub jti: String,
 }
 
 #[derive(Debug, Clone)]
@@ -36,9 +37,14 @@ impl JwtConfig {
             exp: (now + Duration::seconds(self.expiry_secs as i64)).timestamp(),
             iat: now.timestamp(),
             role: role.to_string(),
+            jti: format!("{}-{}", subject, now.timestamp_nanos_opt().unwrap_or(0)),
+        };
+        let header = Header {
+            kid: Some("tetramem-v12".to_string()),
+            ..Default::default()
         };
         encode(
-            &Header::default(),
+            &header,
             &claims,
             &EncodingKey::from_secret(self.secret.as_bytes()),
         )
@@ -46,10 +52,13 @@ impl JwtConfig {
     }
 
     pub fn validate_token(&self, token: &str) -> Result<Claims, AppError> {
+        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.set_required_spec_claims(&["exp", "iat", "sub", "jti"]);
+        validation.leeway = 60;
         let data = decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.secret.as_bytes()),
-            &Validation::default(),
+            &validation,
         )
         .map_err(|e| AppError::Unauthorized(format!("invalid token: {}", e)))?;
         Ok(data.claims)

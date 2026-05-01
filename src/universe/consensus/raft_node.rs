@@ -60,6 +60,11 @@ impl fmt::Display for Response {
     }
 }
 
+// NOTE: std::sync::Mutex is intentional here — openraft's RaftLogStorage/RaftStateMachine
+// traits call async methods with &mut self, and the Arc<Mutex<>> wrapper is held briefly.
+// tokio::Mutex would add unnecessary overhead since lock hold times are always short
+// (in-memory BTreeMap + optional SQLite write). The lock_failed handler ensures
+// poison is treated as an I/O error rather than a panic.
 pub type LogStore = Arc<Mutex<LogStoreInner>>;
 pub type StateMachineStore = Arc<Mutex<StateMachineInner>>;
 
@@ -204,7 +209,11 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
                     inner.log.insert(idx as u64, entry);
                 }
                 Err(e) => {
-                    tracing::warn!("skipping corrupt raft log entry at {}: {}", idx, e);
+                    tracing::error!("corrupt raft log entry at index {}: {} — aborting load to prevent data inconsistency", idx, e);
+                    return Err(io::Error::other(format!(
+                        "corrupt raft log entry at index {}: {}. Remove or repair the raft log database before restarting.",
+                        idx, e
+                    )));
                 }
             }
         }

@@ -26,6 +26,7 @@ pub struct BackupMetadata {
     pub conservation_ok: bool,
     pub bytes: usize,
     pub generation: u32,
+    pub integrity_hash: String,
 }
 
 impl std::fmt::Display for BackupMetadata {
@@ -38,7 +39,7 @@ impl std::fmt::Display for BackupMetadata {
         };
         write!(
             f,
-            "Backup#{} gen{} [{}] nodes:{} mems:{} edges:{} crystals:{} E:{:.0} cons:{} {}bytes",
+            "Backup#{} gen{} [{}] nodes:{} mems:{} edges:{} crystals:{} E:{:.0} cons:{} {}bytes hash:{}",
             self.id,
             self.generation,
             trigger,
@@ -48,7 +49,8 @@ impl std::fmt::Display for BackupMetadata {
             self.crystal_channels,
             self.total_energy,
             if self.conservation_ok { "OK" } else { "FAIL" },
-            self.bytes
+            self.bytes,
+            &self.integrity_hash[..8]
         )
     }
 }
@@ -168,9 +170,14 @@ impl BackupScheduler {
         }
 
         let (snapshot, _) = PersistEngine::serialize(universe, hebbian, memories, crystal)?;
-        let json_bytes = serde_json::to_string(&snapshot)
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let json_str = serde_json::to_string(&snapshot).unwrap_or_default();
+        let json_bytes = json_str.len();
+
+        let integrity_hash = {
+            let mut hasher = crate::universe::safety::integrity::IntegrityHasher::new();
+            hasher.update(json_str.as_bytes());
+            hasher.finalize()
+        };
 
         let stats = universe.stats();
         let metadata = BackupMetadata {
@@ -188,6 +195,7 @@ impl BackupScheduler {
             conservation_ok: universe.verify_conservation(),
             bytes: json_bytes,
             generation: self.current_generation,
+            integrity_hash,
         };
 
         self.next_id += 1;

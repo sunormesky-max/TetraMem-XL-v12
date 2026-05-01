@@ -19,7 +19,7 @@ jwt_expiry_secs = 86400
 
 [[auth.users]]
 username = "admin"
-password_hash = "$argon2id$v=19$m=19456,t=2,p=1$l7+kFgPk+WRQHfRzEvZgGA$IrIHnE+KcLW7CRfv02DDMj/53fjTmUqsDVOHeibmAGs"
+password = "changeme"
 role = "admin"
 
 [logging]

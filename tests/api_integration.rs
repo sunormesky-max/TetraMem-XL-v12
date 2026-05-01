@@ -17,7 +17,10 @@ use tetramem_v12::universe::metrics;
 use tetramem_v12::universe::node::DarkUniverse;
 
 fn build_state() -> Arc<AppState> {
+    std::env::set_var("TETRAMEM_ALLOW_NO_AUTH_ADMIN", "1");
     metrics::init_metrics();
+    let mut config = AppConfig::default();
+    config.auth.enabled = false;
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(10_000_000.0)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
@@ -26,7 +29,7 @@ fn build_state() -> Arc<AppState> {
         write_guard: tokio::sync::Mutex::new(()),
         backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
-        config: AppConfig::default(),
+        config,
         jwt: JwtConfig::new("test-secret".to_string(), 3600),
         users: UserStore::new(
             &[UserConfig {

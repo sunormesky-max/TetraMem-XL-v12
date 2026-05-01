@@ -2,7 +2,10 @@ target/
 .git/
 .github/
 *.md
-*.toml
-!Cargo.toml
-!tetramem.toml
+backups/
+data/
 panel/
+tests/
+benches/
+tetramem.toml
+*.toml.bak

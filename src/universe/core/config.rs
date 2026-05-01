@@ -52,7 +52,7 @@ pub struct UniverseConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
-    #[serde(default)]
+    #[serde(default = "default_auth_enabled")]
     pub enabled: bool,
     #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
@@ -125,7 +125,7 @@ fn default_universe() -> UniverseConfig {
 
 fn default_auth() -> AuthConfig {
     AuthConfig {
-        enabled: false,
+        enabled: default_auth_enabled(),
         jwt_secret: default_jwt_secret(),
         jwt_expiry_secs: default_jwt_expiry_secs(),
         users: Vec::new(),
@@ -162,6 +162,9 @@ fn default_rate_limit() -> RateLimitConfig {
 
 fn default_addr() -> String {
     "127.0.0.1:3456".to_string()
+}
+fn default_auth_enabled() -> bool {
+    true
 }
 fn default_timeout_secs() -> u64 {
     30
@@ -239,6 +242,8 @@ impl AppConfig {
         if !path.exists() {
             tracing::info!("config file not found, using defaults: {}", path.display());
             let mut config = Self::default();
+            config.auth.enabled = false;
+            tracing::warn!("no config file found — auth disabled for development; create a config file with [[auth.users]] for production");
             config.resolve_env_overrides();
             config.validate()?;
             return Ok(config);
@@ -330,7 +335,14 @@ impl AppConfig {
                 if user.password_hash == default_hash {
                     return Err(ConfigError::Parse(format!(
                         "auth user '{}' uses the default/example password hash; \
-                         generate a unique hash with: cargo test password_hashing_and_verify",
+                          generate a unique hash with: cargo test password_hashing_and_verify",
+                        user.username
+                    )));
+                }
+                if user.password == "changeme" {
+                    return Err(ConfigError::Parse(format!(
+                        "auth user '{}' uses the default password 'changeme'; \
+                          change it before deploying to production",
                         user.username
                     )));
                 }
@@ -405,7 +417,7 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.server.addr, "127.0.0.1:3456");
         assert_eq!(config.universe.total_energy, 10_000_000.0);
-        assert!(!config.auth.enabled);
+        assert!(config.auth.enabled);
     }
 
     #[test]
@@ -421,6 +433,13 @@ mod tests {
     fn load_nonexistent_returns_default() {
         let config = AppConfig::load(Path::new("/nonexistent/config.toml")).unwrap();
         assert_eq!(config.server.addr, "127.0.0.1:3456");
+    }
+
+    #[test]
+    fn default_with_no_users_disables_auth() {
+        let mut config = AppConfig::default();
+        config.auth.enabled = false;
+        assert!(config.validate().is_ok());
     }
 
     #[test]

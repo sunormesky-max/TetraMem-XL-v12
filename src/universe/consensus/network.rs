@@ -49,6 +49,8 @@ impl HttpRaftNetwork {
     }
 
     pub fn with_secret(timeout: Duration, raft_secret: String) -> Self {
+        tracing::info!("Raft network initialized with shared-secret authentication");
+        tracing::warn!("Raft RPC uses HTTP — for production, deploy behind a TLS-terminating proxy or VPN");
         Self {
             timeout,
             raft_secret,
@@ -73,6 +75,14 @@ fn streaming_unreachable(e: impl std::fmt::Display) -> openraft::error::Streamin
     openraft::error::StreamingError::Unreachable(openraft::error::Unreachable::new(
         &io::Error::new(io::ErrorKind::NotConnected, e.to_string()),
     ))
+}
+
+fn raft_url(addr: &str, path: &str) -> String {
+    if addr.starts_with("http://") || addr.starts_with("https://") {
+        format!("{}/raft/{}", addr, path)
+    } else {
+        format!("http://{}/raft/{}", addr, path)
+    }
 }
 
 impl RaftNetworkFactory<TypeName> for HttpRaftNetwork {
@@ -102,7 +112,7 @@ impl NetVote<TypeName> for HttpRaftConn {
         rpc: VoteRequest<TypeName>,
         _option: RPCOption,
     ) -> Result<VoteResponse<TypeName>, openraft::error::RPCError<TypeName>> {
-        let url = format!("http://{}/raft/vote", self.addr);
+        let url = raft_url(&self.addr, "vote");
         let resp = self
             .client
             .post(&url)
@@ -153,7 +163,7 @@ impl NetStreamAppend<TypeName> for HttpRaftConn {
                 };
                 let prev = req.prev_log_id;
                 let last = req.entries.last().map(|e| e.log_id()).or(prev);
-                let url = format!("http://{}/raft/append", addr);
+                let url = raft_url(&addr, "append");
                 let result = match client
                     .post(&url)
                     .header("x-raft-secret", &raft_secret)
@@ -208,7 +218,7 @@ impl NetSnapshot<TypeName> for HttpRaftConn {
         _cancel: impl Future<Output = openraft::error::ReplicationClosed> + OptionalSend + 'static,
         _option: RPCOption,
     ) -> Result<SnapshotResponse<TypeName>, openraft::error::StreamingError<TypeName>> {
-        let url = format!("http://{}/raft/snapshot", self.addr);
+        let url = raft_url(&self.addr, "snapshot");
         let body = SnapshotTransport::from_parts(vote, snapshot);
         let resp = self
             .client
@@ -232,7 +242,7 @@ impl NetTransferLeader<TypeName> for HttpRaftConn {
         req: TransferLeaderRequest<TypeName>,
         _option: RPCOption,
     ) -> Result<(), openraft::error::RPCError<TypeName>> {
-        let url = format!("http://{}/raft/transfer", self.addr);
+        let url = raft_url(&self.addr, "transfer");
         self.client
             .post(&url)
             .header("x-raft-secret", &self.raft_secret)

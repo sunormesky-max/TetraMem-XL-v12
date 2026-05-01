@@ -5,16 +5,30 @@ services:
     build: .
     container_name: tetramem-v12
     ports:
-      - "3456:3456"
+      - "127.0.0.1:3456:3456"
     volumes:
       - ./tetramem.toml:/app/tetramem.toml:ro
       - tetramem-data:/app/data
       - tetramem-backups:/app/backups
     environment:
       - RUST_LOG=tetramem_v12=info
+      - TETRAMEM_JWT_SECRET=${TETRAMEM_JWT_SECRET:?Set TETRAMEM_JWT_SECRET}
+      - TETRAMEM_RAFT_SECRET=${TETRAMEM_RAFT_SECRET:?Set TETRAMEM_RAFT_SECRET}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3456/health"]
+      test: ["CMD", "/usr/local/bin/tetramem-v12", "health", "--addr", "http://localhost:3456"]
       interval: 30s
       timeout: 10s
       retries: 3
