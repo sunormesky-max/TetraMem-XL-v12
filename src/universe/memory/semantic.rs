@@ -1541,7 +1541,7 @@ mod tests {
 
         for i in 0..5 {
             let data: Vec<f64> = (0..7).map(|d| (i * 7 + d) as f64 * 0.5).collect();
-            let mut atom = make_atom_at(&mut u, i as i32, &data);
+            let mut atom = make_atom_at(&mut u, i, &data);
             atom.add_tag(format!("cluster_{}", i % 2));
             atom.set_category(if i % 2 == 0 { "even" } else { "odd" });
             engine.index_memory(&atom, &data);
