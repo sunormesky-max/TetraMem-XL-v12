@@ -16,6 +16,7 @@ pub use core::coord;
 pub use core::energy;
 pub use core::lattice;
 pub use core::node;
+pub use core::physics;
 
 pub use memory::dream;
 pub use memory::hebbian;

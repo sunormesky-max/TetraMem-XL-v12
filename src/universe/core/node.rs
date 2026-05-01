@@ -3,6 +3,7 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::energy::{EnergyError, EnergyField, EnergyPool, EPSILON_NORMAL, EPSILON_RELATIVE};
+use crate::universe::core::physics::{CouplingMatrix, UniversePhysics};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,6 +70,7 @@ pub struct DarkUniverse {
     nodes: HashMap<Coord7D, DarkNode>,
     protected: HashSet<Coord7D>,
     manifestation_threshold: f64,
+    physics: Option<UniversePhysics>,
 }
 
 impl DarkUniverse {
@@ -84,6 +86,20 @@ impl DarkUniverse {
             nodes: HashMap::new(),
             protected: HashSet::new(),
             manifestation_threshold: manifestation_threshold.clamp(0.0, 1.0),
+            physics: None,
+        }
+    }
+
+    pub fn new_with_physics(total_energy: f64, physics: UniversePhysics) -> Self {
+        let pool = EnergyPool::new(total_energy)
+            .unwrap_or_else(|_| EnergyPool::new(1.0).expect("EnergyPool::new(1.0) must succeed"));
+        let threshold = physics.phase.threshold;
+        Self {
+            pool,
+            nodes: HashMap::new(),
+            protected: HashSet::new(),
+            manifestation_threshold: threshold.clamp(0.0, 1.0),
+            physics: Some(physics),
         }
     }
 
@@ -93,6 +109,23 @@ impl DarkUniverse {
 
     pub fn set_manifestation_threshold(&mut self, threshold: f64) {
         self.manifestation_threshold = threshold.clamp(0.0, 1.0);
+    }
+
+    pub fn physics(&self) -> Option<&UniversePhysics> {
+        self.physics.as_ref()
+    }
+
+    pub fn set_physics(&mut self, physics: UniversePhysics) {
+        self.manifestation_threshold = physics.phase.threshold.clamp(0.0, 1.0);
+        self.physics = Some(physics);
+    }
+
+    fn is_manifested_internal(&self, ratio: f64) -> bool {
+        if let Some(ref p) = self.physics {
+            p.is_manifested(ratio)
+        } else {
+            ratio >= self.manifestation_threshold
+        }
     }
 
     pub fn protect(&mut self, coords: &[Coord7D]) {
@@ -130,7 +163,7 @@ impl DarkUniverse {
     pub fn manifested_node_count(&self) -> usize {
         self.nodes
             .values()
-            .filter(|n| n.is_manifested_with(self.manifestation_threshold))
+            .filter(|n| self.is_manifested_internal(n.manifestation_ratio()))
             .count()
     }
 
@@ -294,7 +327,7 @@ impl DarkUniverse {
     pub fn get_manifested_nodes(&self) -> Vec<&DarkNode> {
         self.nodes
             .values()
-            .filter(|n| n.is_manifested_with(self.manifestation_threshold))
+            .filter(|n| self.is_manifested_internal(n.manifestation_ratio()))
             .collect()
     }
 
@@ -312,6 +345,57 @@ impl DarkUniverse {
 
     pub fn coords_iter(&self) -> impl Iterator<Item = Coord7D> + '_ {
         self.nodes.keys().copied()
+    }
+
+    pub fn coupled_flow(
+        &mut self,
+        coord: &Coord7D,
+        from_dim: usize,
+        amount: f64,
+    ) -> Result<f64, EnergyError> {
+        let node = self
+            .nodes
+            .get_mut(coord)
+            .ok_or(EnergyError::InsufficientEnergy {
+                requested: amount,
+                available: 0.0,
+            })?;
+        let default_coupling = CouplingMatrix::new();
+        let coupling = self
+            .physics
+            .as_ref()
+            .map(|p| &p.coupling)
+            .unwrap_or(&default_coupling);
+        let available = node.energy.dim(from_dim);
+        if available < amount - crate::universe::energy::EPSILON_STRICT {
+            return Err(EnergyError::InsufficientEnergy {
+                requested: amount,
+                available,
+            });
+        }
+        let actual = amount.min(available);
+        let mut dims = *node.energy.dims();
+        let net = coupling.coupled_flow(&mut dims, from_dim, actual);
+        node.energy = EnergyField::from_dims(dims)
+            .map_err(|_| EnergyError::NegativeDimension { dim: from_dim, value: 0.0 })?;
+        Ok(net)
+    }
+
+    pub fn weighted_distance_sq(&self, a: &Coord7D, b: &Coord7D) -> f64 {
+        if let Some(ref p) = self.physics {
+            p.weighted_distance_sq(&a.as_f64(), &b.as_f64())
+        } else {
+            a.distance_sq(b)
+        }
+    }
+
+    pub fn project_to_physical(&self, coord: &Coord7D) -> [f64; 3] {
+        if let Some(ref p) = self.physics {
+            p.project_to_physical(&coord.as_f64())
+        } else {
+            let v = coord.as_f64();
+            [v[0], v[1], v[2]]
+        }
     }
 
     pub fn verify_conservation(&self) -> bool {
@@ -364,7 +448,7 @@ impl DarkUniverse {
                 total_physical_energy += node.energy.physical();
                 total_dark_energy += node.energy.dark();
 
-                if node.is_manifested_with(self.manifestation_threshold) {
+                if self.is_manifested_internal(node.manifestation_ratio()) {
                     manifested += 1;
                 } else {
                     dark += 1;
