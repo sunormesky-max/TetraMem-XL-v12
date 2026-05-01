@@ -44,15 +44,17 @@ use super::state::SharedState;
 struct RateLimiter {
     count: AtomicU64,
     max: u64,
+    burst: u64,
     window_secs: u64,
     last_reset: std::sync::Mutex<std::time::Instant>,
 }
 
 impl RateLimiter {
-    fn new(max: u64, window_secs: u64) -> Self {
+    fn new(max: u64, burst: u64, window_secs: u64) -> Self {
         Self {
             count: AtomicU64::new(0),
             max,
+            burst,
             window_secs,
             last_reset: std::sync::Mutex::new(std::time::Instant::now()),
         }
@@ -67,7 +69,7 @@ impl RateLimiter {
             }
         }
         let current = self.count.fetch_add(1, Ordering::Relaxed);
-        current < self.max
+        current < self.max + self.burst
     }
 }
 
@@ -128,6 +130,8 @@ async fn auth_middleware(
             iat: 0,
             role: role.to_string(),
             jti: "anonymous".to_string(),
+            iss: "tetramem-v12".to_string(),
+            aud: "tetramem-api".to_string(),
         };
         req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
@@ -222,13 +226,11 @@ pub fn create_router(state: SharedState) -> Router {
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
     let rpm = state.config.rate_limit.requests_per_minute;
-    let limiter = Arc::new(RateLimiter::new(rpm, 60));
+    let burst = state.config.rate_limit.burst;
+    let limiter = Arc::new(RateLimiter::new(rpm, burst, 60));
 
     let public_routes = Router::new()
         .route("/health", get(get_health))
-        .route("/stats", get(get_stats))
-        .route("/metrics", get(get_metrics))
-        .route("/openapi.json", get(get_openapi))
         .route("/login", post(login))
         .layer(middleware::from_fn(rate_limit_middleware));
 
@@ -244,6 +246,9 @@ pub fn create_router(state: SharedState) -> Router {
         ));
 
     let user_routes = Router::new()
+        .route("/stats", get(get_stats))
+        .route("/metrics", get(get_metrics))
+        .route("/openapi.json", get(get_openapi))
         .route("/memory/encode", post(encode_memory))
         .route("/memory/decode", post(decode_memory))
         .route("/memory/list", get(list_memories))

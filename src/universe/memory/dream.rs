@@ -119,6 +119,10 @@ impl DreamEngine {
             0
         };
 
+        if !universe.verify_conservation() {
+            tracing::error!("ENERGY CONSERVATION VIOLATED after dream merge — this is a critical bug");
+        }
+
         let edges_after = hebbian.edge_count();
         let weight_after = hebbian.total_weight();
 

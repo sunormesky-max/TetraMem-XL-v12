@@ -220,6 +220,13 @@ impl BackupScheduler {
     fn rotate(&mut self) -> usize {
         let before = self.backups.len();
 
+        let max_bytes = (self.config.rotate_on_high_memory_mb * 1_048_576.0) as usize;
+        if max_bytes > 0 {
+            while self.total_backup_bytes() > max_bytes && self.backups.len() > 1 {
+                self.backups.remove(0);
+            }
+        }
+
         while self.backups.len() > self.config.max_total_backups {
             self.backups.remove(0);
         }

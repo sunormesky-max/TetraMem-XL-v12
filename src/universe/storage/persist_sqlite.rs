@@ -110,6 +110,13 @@ impl PersistSqlite {
 
         let conn = Connection::open(path).map_err(|e| SqliteError::Open(e.to_string()))?;
 
+        #[cfg(unix)]
+        {
+            if let Err(e) = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600)) {
+                tracing::warn!("failed to set restrictive permissions on {}: {}", path.display(), e);
+            }
+        }
+
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
             .map_err(|e| SqliteError::Open(e.to_string()))?;
 

@@ -8,6 +8,14 @@ use std::path::Path;
 
 pub struct PersistFile;
 
+fn validate_path(path: &Path) -> Result<(), FilePersistError> {
+    let path_str = path.to_string_lossy();
+    if path_str.contains("..") {
+        return Err(FilePersistError::Io(format!("path traversal detected: {}", path.display())));
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum FilePersistError {
     Io(String),
@@ -55,6 +63,7 @@ impl PersistFile {
         memories: &[MemoryAtom],
         crystal: &CrystalEngine,
     ) -> Result<PersistInfo, FilePersistError> {
+        validate_path(path)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| FilePersistError::Io(e.to_string()))?;
         }
@@ -82,6 +91,7 @@ impl PersistFile {
         path: &Path,
     ) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), FilePersistError>
     {
+        validate_path(path)?;
         if !path.exists() {
             return Err(FilePersistError::Io(format!(
                 "persist file not found: {}",

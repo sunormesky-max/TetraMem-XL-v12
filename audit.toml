@@ -12,7 +12,7 @@ default = "deny"
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+wildcards = "deny"
 
 [sources]
 unknown-registry = "warn"

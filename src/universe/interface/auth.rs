@@ -14,6 +14,8 @@ pub struct Claims {
     pub iat: i64,
     pub role: String,
     pub jti: String,
+    pub iss: String,
+    pub aud: String,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +40,8 @@ impl JwtConfig {
             iat: now.timestamp(),
             role: role.to_string(),
             jti: format!("{}-{}", subject, now.timestamp_nanos_opt().unwrap_or(0)),
+            iss: "tetramem-v12".to_string(),
+            aud: "tetramem-api".to_string(),
         };
         let header = Header {
             kid: Some("tetramem-v12".to_string()),
@@ -53,8 +57,10 @@ impl JwtConfig {
 
     pub fn validate_token(&self, token: &str) -> Result<Claims, AppError> {
         let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.set_required_spec_claims(&["exp", "iat", "sub", "jti"]);
+        validation.set_required_spec_claims(&["exp", "iat", "sub", "jti", "iss", "aud"]);
         validation.leeway = 60;
+        validation.set_issuer(&["tetramem-v12"]);
+        validation.set_audience(&["tetramem-api"]);
         let data = decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.secret.as_bytes()),

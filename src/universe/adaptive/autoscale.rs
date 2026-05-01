@@ -14,6 +14,12 @@ pub struct ScaleReport {
     pub reason: ScaleReason,
 }
 
+#[derive(Debug, Clone)]
+pub enum ScaleError {
+    InsufficientEnergy { needed: f64, available: f64 },
+    NoRoomToExpand,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScaleReason {
     HighUtilization,
@@ -225,12 +231,11 @@ impl AutoScaler {
         }
     }
 
-    #[allow(clippy::result_unit_err)]
     pub fn scale_to_fit_memory(
         &self,
         universe: &mut DarkUniverse,
         data: &[f64],
-    ) -> Result<ScaleReport, ()> {
+    ) -> Result<ScaleReport, ScaleError> {
         let physical_base = 50.0;
         let data_offset = 50.0;
         let estimated_energy = data.iter().map(|v| (v + data_offset).max(0.0)).sum::<f64>()
@@ -300,13 +305,12 @@ impl AutoScaler {
         Ok(report)
     }
 
-    #[allow(clippy::result_unit_err)]
     pub fn scale_near_anchor(
         &self,
         universe: &mut DarkUniverse,
         _anchor: &Coord7D,
         data: &[f64],
-    ) -> Result<ScaleReport, ()> {
+    ) -> Result<ScaleReport, ScaleError> {
         let physical_base = 50.0;
         let data_offset = 50.0;
         let encode_energy = data.iter().map(|v| (v + data_offset).max(0.0)).sum::<f64>()
