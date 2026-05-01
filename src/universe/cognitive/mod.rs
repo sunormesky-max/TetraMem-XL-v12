@@ -4,6 +4,7 @@
 pub mod agent;
 pub mod crystal;
 pub mod emotion;
+pub mod functional_emotion;
 pub mod perception;
 pub mod reasoning;
 pub mod topology;

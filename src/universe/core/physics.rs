@@ -159,6 +159,19 @@ impl DimensionProfile {
         profile
     }
 
+    pub fn from_emotion_weights(weights: [f64; DIM], base: &DimensionProfile) -> Self {
+        let mut profile = base.clone();
+        for i in 0..DIM {
+            let base_dp = base.dims[i];
+            profile.dims[i] = DimensionPhysics {
+                metric_weight: base_dp.metric_weight * weights[i],
+                propagation_decay: base_dp.propagation_decay * (1.0 / weights[i]).min(2.0),
+                coupling_strength: base_dp.coupling_strength,
+            };
+        }
+        profile
+    }
+
     pub fn weighted_distance_sq(&self, a: &[f64; DIM], b: &[f64; DIM]) -> f64 {
         let mut sum = 0.0;
         for i in 0..DIM {

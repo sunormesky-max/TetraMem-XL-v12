@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
+use crate::universe::cognitive::functional_emotion::EmotionSource;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::node::DarkUniverse;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 const CRYSTAL_THRESHOLD: f64 = 1.8;
 const SUPER_CRYSTAL_THRESHOLD: f64 = 4.0;
 const SUPER_CRYSTAL_BOOST: f64 = 2.5;
+const EMOTION_CLUSTER_BOOST: f64 = 1.4;
+const EMOTION_CRYSTAL_THRESHOLD_REDUCTION: f64 = 0.4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CrystalChannel {
@@ -114,14 +117,54 @@ impl CrystalEngine {
         hebbian: &HebbianMemory,
         universe: &DarkUniverse,
     ) -> CrystalReport {
+        self.crystallize_internal(hebbian, universe, None)
+    }
+
+    pub fn crystallize_emotion(
+        &mut self,
+        hebbian: &HebbianMemory,
+        universe: &DarkUniverse,
+        emotion_source: EmotionSource,
+    ) -> CrystalReport {
+        self.crystallize_internal(hebbian, universe, Some(emotion_source))
+    }
+
+    fn crystallize_internal(
+        &mut self,
+        hebbian: &HebbianMemory,
+        universe: &DarkUniverse,
+        emotion_filter: Option<EmotionSource>,
+    ) -> CrystalReport {
+        let effective_threshold = match emotion_filter {
+            Some(_) => (self.threshold - EMOTION_CRYSTAL_THRESHOLD_REDUCTION).max(0.5),
+            None => self.threshold,
+        };
+
         let strong = hebbian.strongest_edges(100);
         let mut new_crystals = 0usize;
         let mut new_super = 0usize;
         let mut energy_locked = 0.0f64;
 
         for ((a, b), weight) in &strong {
-            if *weight < self.threshold {
-                break;
+            let edge_emotion = hebbian.get_edge_emotion(a, b);
+            let is_emotion_match = match (emotion_filter, edge_emotion) {
+                (Some(_), Some(e)) => emotion_filter == Some(e),
+                _ => false,
+            };
+
+            let threshold_for_edge = if is_emotion_match {
+                effective_threshold
+            } else if emotion_filter.is_some() {
+                self.threshold
+            } else {
+                effective_threshold
+            };
+
+            if *weight < threshold_for_edge {
+                if emotion_filter.is_none() {
+                    break;
+                }
+                continue;
             }
 
             let key = if a <= b { (*a, *b) } else { (*b, *a) };
@@ -134,10 +177,15 @@ impl CrystalEngine {
             }
 
             let is_super = *weight >= self.super_threshold;
-            let strength = if is_super {
+            let base_strength = if is_super {
                 weight * self.super_boost
             } else {
                 *weight
+            };
+            let strength = if is_emotion_match {
+                base_strength * EMOTION_CLUSTER_BOOST
+            } else {
+                base_strength
             };
 
             self.channels.insert(
@@ -400,5 +448,30 @@ mod tests {
         let report = engine.crystallize(&h, &u);
         let s = format!("{}", report);
         assert!(s.contains("Crystal["));
+    }
+
+    #[test]
+    fn crystallize_emotion_boosts_tagged_edges() {
+        let mut u = DarkUniverse::new(100_000.0);
+        let mut h = HebbianMemory::new();
+
+        let a = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        u.materialize_biased(a, 50.0, 0.6).unwrap();
+        u.materialize_biased(b, 50.0, 0.6).unwrap();
+
+        for _ in 0..50 {
+            h.record_path_emotion(&[a, b], 2.0, EmotionSource::Functional);
+        }
+
+        let weight = h.get_bias(&a, &b);
+        assert!(weight > 1.8, "edge weight should exceed threshold, got {}", weight);
+
+        let emotion = h.get_edge_emotion(&a, &b);
+        assert_eq!(emotion, Some(EmotionSource::Functional), "edge should have emotion tag");
+
+        let mut engine = CrystalEngine::new();
+        let report = engine.crystallize_emotion(&h, &u, EmotionSource::Functional);
+        assert!(report.total_crystals > 0, "emotion-tagged edges should crystallize, report={:?}", report);
     }
 }

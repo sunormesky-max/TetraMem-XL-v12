@@ -3,6 +3,7 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::core::physics::UniversePhysics;
+use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::lattice::Lattice;
 use crate::universe::node::DarkUniverse;
@@ -68,6 +69,7 @@ struct NeuralPulse {
     pulse_type: PulseType,
     path: Vec<Coord7D>,
     cascade_depth: usize,
+    hebbian_bias_override: Option<f64>,
 }
 
 impl NeuralPulse {
@@ -79,7 +81,28 @@ impl NeuralPulse {
             pulse_type,
             path: vec![source],
             cascade_depth: 0,
+            hebbian_bias_override: None,
         }
+    }
+
+    fn new_with_params(source: Coord7D, pulse_type: PulseType, strength: f64, max_hops: usize) -> Self {
+        Self {
+            strength,
+            hops: 0,
+            max_hops,
+            pulse_type,
+            path: vec![source],
+            cascade_depth: 0,
+            hebbian_bias_override: None,
+        }
+    }
+
+    fn set_hebbian_bias_override(&mut self, bias: f64) {
+        self.hebbian_bias_override = Some(bias);
+    }
+
+    fn effective_hebbian_bias(&self) -> f64 {
+        self.hebbian_bias_override.unwrap_or_else(|| self.pulse_type.hebbian_bias_weight())
     }
 
     fn is_alive(&self) -> bool {
@@ -103,6 +126,88 @@ pub struct PulseEngine {
     pub face_decay: f64,
     pub bcc_decay: f64,
     pub cascade_energy_factor: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmotionPulseConfig {
+    pub base_face_decay: f64,
+    pub base_bcc_decay: f64,
+    pub base_fanout_exploratory: usize,
+    pub base_fanout_cascade: usize,
+    pub base_strength_exploratory: f64,
+    pub base_strength_reinforcing: f64,
+    pub base_max_hops: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmotionDecayParams {
+    pub face_decay: f64,
+    pub bcc_decay: f64,
+}
+
+impl Default for EmotionPulseConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EmotionPulseConfig {
+    pub fn new() -> Self {
+        Self {
+            base_face_decay: 0.72,
+            base_bcc_decay: 0.36,
+            base_fanout_exploratory: 2,
+            base_fanout_cascade: 3,
+            base_strength_exploratory: 0.15,
+            base_strength_reinforcing: 0.35,
+            base_max_hops: 12,
+        }
+    }
+
+    pub fn modulated_face_decay(&self, pad: &PadVector) -> f64 {
+        let valence_factor = 1.0 + 0.15 * pad.pleasure;
+        let arousal_factor = 1.0 - 0.1 * pad.arousal;
+        (self.base_face_decay * valence_factor * arousal_factor).clamp(0.1, 0.95)
+    }
+
+    pub fn modulated_bcc_decay(&self, pad: &PadVector) -> f64 {
+        let valence_factor = 1.0 + 0.15 * pad.pleasure;
+        let arousal_factor = 1.0 - 0.1 * pad.arousal;
+        (self.base_bcc_decay * valence_factor * arousal_factor).clamp(0.05, 0.8)
+    }
+
+    pub fn modulated_fanout(&self, pulse_type: PulseType, pad: &PadVector) -> usize {
+        let base = match pulse_type {
+            PulseType::Exploratory => self.base_fanout_exploratory,
+            PulseType::Reinforcing => 1,
+            PulseType::Cascade => self.base_fanout_cascade,
+        };
+        let arousal_bonus = (pad.arousal * 2.0).round() as isize;
+        let adjusted = base as isize + arousal_bonus;
+        adjusted.max(1) as usize
+    }
+
+    pub fn modulated_strength(&self, pulse_type: PulseType, pad: &PadVector) -> f64 {
+        let base = match pulse_type {
+            PulseType::Exploratory => self.base_strength_exploratory,
+            PulseType::Reinforcing => self.base_strength_reinforcing,
+            PulseType::Cascade => 0.45,
+        };
+        let arousal_factor = 1.0 + 0.3 * pad.arousal;
+        let valence_factor = 1.0 + 0.1 * pad.pleasure;
+        (base * arousal_factor * valence_factor).clamp(0.01, 1.0)
+    }
+
+    pub fn modulated_max_hops(&self, pad: &PadVector) -> usize {
+        let arousal_bonus = (pad.arousal * 4.0).round() as isize;
+        (self.base_max_hops as isize + arousal_bonus).max(4) as usize
+    }
+
+    pub fn modulated_hebbian_bias(&self, pulse_type: PulseType, pad: &PadVector) -> f64 {
+        let base = pulse_type.hebbian_bias_weight();
+        let dominance_factor = 1.0 + 0.3 * pad.dominance;
+        (base * dominance_factor).max(0.1)
+    }
 }
 
 impl Default for PulseEngine {
@@ -141,6 +246,33 @@ impl PulseEngine {
     ) -> PulseResult {
         let pulse = NeuralPulse::new(*source, pulse_type);
         self.run_pulse(pulse, universe, hebbian, Some(physics))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn propagate_with_emotion(
+        &self,
+        source: &Coord7D,
+        pulse_type: PulseType,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        physics: Option<&UniversePhysics>,
+        emotion_config: &EmotionPulseConfig,
+        pad: &PadVector,
+    ) -> PulseResult {
+        let strength = emotion_config.modulated_strength(pulse_type, pad);
+        let max_hops = emotion_config.modulated_max_hops(pad);
+        let mut pulse = NeuralPulse::new_with_params(*source, pulse_type, strength, max_hops);
+        pulse.set_hebbian_bias_override(emotion_config.modulated_hebbian_bias(pulse_type, pad));
+
+        let face_decay = emotion_config.modulated_face_decay(pad);
+        let bcc_decay = emotion_config.modulated_bcc_decay(pad);
+        let fanout_override = emotion_config.modulated_fanout(pulse_type, pad);
+
+        self.run_pulse_emotion(
+            pulse, universe, hebbian, physics,
+            &EmotionDecayParams { face_decay, bcc_decay },
+            fanout_override,
+        )
     }
 
     fn run_pulse(
@@ -228,6 +360,94 @@ impl PulseEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn run_pulse_emotion(
+        &self,
+        initial: NeuralPulse,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        physics: Option<&UniversePhysics>,
+        decay: &EmotionDecayParams,
+        fanout_override: usize,
+    ) -> PulseResult {
+        let mut visited = HashSet::new();
+        visited.insert(initial.current());
+
+        let mut queue = VecDeque::new();
+        queue.push_back(initial);
+
+        let mut visited_count = 0;
+        let mut total_activation = 0.0;
+        let mut paths_recorded = 0;
+        let mut final_strength = 0.0;
+
+        while let Some(pulse) = queue.pop_front() {
+            if !pulse.is_alive() {
+                continue;
+            }
+
+            let current = pulse.current();
+            visited_count += 1;
+            total_activation += pulse.strength;
+            final_strength = pulse.strength;
+
+            if pulse.pulse_type == PulseType::Reinforcing && pulse.path.len() >= 3 {
+                let path_len = pulse.path.len();
+                let start = path_len.saturating_sub(4);
+                hebbian.record_path(&pulse.path[start..], pulse.strength * 0.6);
+                paths_recorded += 1;
+            }
+
+            if pulse.pulse_type == PulseType::Cascade && pulse.path.len() >= 2 {
+                let path_len = pulse.path.len();
+                let start = path_len.saturating_sub(3);
+                hebbian.record_path(&pulse.path[start..], pulse.strength * 0.8);
+                paths_recorded += 1;
+            }
+
+            let candidates = match physics {
+                Some(p) => self.biased_neighbors_emotion(&current, &pulse, universe, hebbian, &visited, p, decay),
+                None => self.biased_neighbors_emotion_nophysics(&current, &pulse, universe, hebbian, &visited, decay),
+            };
+
+            let fanout = fanout_override.min(candidates.len());
+            if fanout == 0 {
+                continue;
+            }
+
+            let child_strength = if pulse.pulse_type == PulseType::Cascade {
+                pulse.strength * self.cascade_energy_factor / fanout as f64
+            } else {
+                pulse.strength
+            };
+
+            for (neighbor, decay) in candidates.iter().take(fanout) {
+                if visited.contains(neighbor) {
+                    continue;
+                }
+
+                let mut child = pulse.clone();
+                child.hops += 1;
+                child.strength = child_strength * decay;
+                child.path.push(*neighbor);
+
+                if pulse.pulse_type == PulseType::Cascade {
+                    child.cascade_depth += 1;
+                }
+
+                visited.insert(*neighbor);
+                queue.push_back(child);
+            }
+        }
+
+        PulseResult {
+            visited_nodes: visited_count,
+            total_activation,
+            paths_recorded,
+            final_strength,
+        }
+    }
+
     fn biased_neighbors(
         &self,
         coord: &Coord7D,
@@ -257,6 +477,89 @@ impl PulseEngine {
             let hebb_w = hebbian.get_bias(coord, &n);
             let bias = 1.0 + hebb_w * bias_w;
             candidates.push((n, self.bcc_decay * bias));
+        }
+
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates
+    }
+
+    fn biased_neighbors_emotion_nophysics(
+        &self,
+        coord: &Coord7D,
+        pulse: &NeuralPulse,
+        universe: &DarkUniverse,
+        hebbian: &HebbianMemory,
+        visited: &HashSet<Coord7D>,
+        decay: &EmotionDecayParams,
+    ) -> Vec<(Coord7D, f64)> {
+        let bias_w = pulse.effective_hebbian_bias();
+        let mut candidates = Vec::new();
+
+        for n in Lattice::face_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            let exists = universe.get_node(&n).is_some();
+            let quality = if exists { 1.2 } else { 0.8 };
+            candidates.push((n, decay.face_decay * bias * quality));
+        }
+
+        for n in Lattice::bcc_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            candidates.push((n, decay.bcc_decay * bias));
+        }
+
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn biased_neighbors_emotion(
+        &self,
+        coord: &Coord7D,
+        pulse: &NeuralPulse,
+        universe: &DarkUniverse,
+        hebbian: &HebbianMemory,
+        visited: &HashSet<Coord7D>,
+        physics: &UniversePhysics,
+        decay: &EmotionDecayParams,
+    ) -> Vec<(Coord7D, f64)> {
+        let decays = physics.profile.propagation_decays();
+        let coord_f = coord.as_f64();
+        let bias_w = pulse.effective_hebbian_bias();
+
+        let mut candidates = Vec::new();
+
+        for n in Lattice::face_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let n_f = n.as_f64();
+            let modulation = self.dimension_modulation(&coord_f, &n_f, &decays);
+            let d = decay.face_decay * modulation;
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            let exists = universe.get_node(&n).is_some();
+            let quality = if exists { 1.2 } else { 0.8 };
+            candidates.push((n, d * bias * quality));
+        }
+
+        for n in Lattice::bcc_neighbor_coords(coord) {
+            if visited.contains(&n) {
+                continue;
+            }
+            let n_f = n.as_f64();
+            let modulation = self.dimension_modulation(&coord_f, &n_f, &decays);
+            let d = decay.bcc_decay * modulation;
+            let hebb_w = hebbian.get_bias(coord, &n);
+            let bias = 1.0 + hebb_w * bias_w;
+            candidates.push((n, d * bias));
         }
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

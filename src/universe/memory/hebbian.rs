@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
+use crate::universe::cognitive::functional_emotion::EmotionSource;
 use std::collections::HashMap;
 
 const DEFAULT_MAX_PATHS: usize = 4000;
@@ -16,6 +17,8 @@ const MAX_EDGE_WEIGHT: f64 = 10.0;
 pub struct HebbianEdge {
     weight: f64,
     traversal_count: usize,
+    emotion_tag: Option<EmotionSource>,
+    emotion_weight: f64,
 }
 
 impl HebbianEdge {
@@ -23,6 +26,17 @@ impl HebbianEdge {
         Self {
             weight,
             traversal_count: 1,
+            emotion_tag: None,
+            emotion_weight: 0.0,
+        }
+    }
+
+    pub fn with_emotion(weight: f64, source: EmotionSource) -> Self {
+        Self {
+            weight,
+            traversal_count: 1,
+            emotion_tag: Some(source),
+            emotion_weight: weight,
         }
     }
 
@@ -32,6 +46,14 @@ impl HebbianEdge {
 
     pub fn traversal_count(&self) -> usize {
         self.traversal_count
+    }
+
+    pub fn emotion_tag(&self) -> Option<EmotionSource> {
+        self.emotion_tag
+    }
+
+    pub fn emotion_weight(&self) -> f64 {
+        self.emotion_weight
     }
 }
 
@@ -78,6 +100,14 @@ impl HebbianMemory {
     }
 
     pub fn record_path(&mut self, path: &[Coord7D], strength: f64) {
+        self.record_path_internal(path, strength, None);
+    }
+
+    pub fn record_path_emotion(&mut self, path: &[Coord7D], strength: f64, source: EmotionSource) {
+        self.record_path_internal(path, strength, Some(source));
+    }
+
+    fn record_path_internal(&mut self, path: &[Coord7D], strength: f64, emotion: Option<EmotionSource>) {
         if path.len() < 2 || !strength.is_finite() || strength < 0.0 {
             return;
         }
@@ -91,11 +121,20 @@ impl HebbianMemory {
                 edge.weight = (edge.weight + edge_strength).min(MAX_EDGE_WEIGHT);
                 edge.traversal_count += 1;
 
+                if let Some(src) = emotion {
+                    edge.emotion_tag = Some(src);
+                    edge.emotion_weight += edge_strength;
+                }
+
                 if edge.traversal_count == GOLDEN_THRESHOLD {
                     edge.weight = (edge.weight * GOLDEN_MULTIPLIER).min(MAX_EDGE_WEIGHT);
                 }
             } else {
-                self.edges.insert(key, HebbianEdge::new(edge_strength));
+                let edge = match emotion {
+                    Some(src) => HebbianEdge::with_emotion(edge_strength, src),
+                    None => HebbianEdge::new(edge_strength),
+                };
+                self.edges.insert(key, edge);
             }
         }
 
@@ -158,6 +197,19 @@ impl HebbianMemory {
             .iter()
             .map(|(k, e)| (*k, e.weight, e.traversal_count))
             .collect()
+    }
+
+    pub fn edges_by_emotion(&self, source: EmotionSource) -> Vec<((Coord7D, Coord7D), f64)> {
+        self.edges
+            .iter()
+            .filter(|(_, e)| e.emotion_tag == Some(source))
+            .map(|(k, e)| (*k, e.emotion_weight))
+            .collect()
+    }
+
+    pub fn get_edge_emotion(&self, a: &Coord7D, b: &Coord7D) -> Option<EmotionSource> {
+        let key = canonical_edge(a, b);
+        self.edges.get(&key).and_then(|e| e.emotion_tag)
     }
 }
 
@@ -287,5 +339,35 @@ mod tests {
         let bc = h.get_bias(&b, &c);
         assert!(ab > 1.0, "reinforced path should be strong");
         assert!(bc > 1.0);
+    }
+
+    #[test]
+    fn record_path_emotion_tags_edges() {
+        let mut h = HebbianMemory::new();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+
+        h.record_path_emotion(&[a, b], 1.0, EmotionSource::Functional);
+
+        let edges = h.edges_by_emotion(EmotionSource::Functional);
+        assert_eq!(edges.len(), 1);
+        assert!(edges[0].1 > 0.0);
+    }
+
+    #[test]
+    fn emotion_paths_separate_from_plain() {
+        let mut h = HebbianMemory::new();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([2, 0, 0, 0, 0, 0, 0]);
+
+        h.record_path(&[a, b], 1.0);
+        h.record_path_emotion(&[b, c], 1.0, EmotionSource::Perceived);
+
+        let perceived = h.edges_by_emotion(EmotionSource::Perceived);
+        let functional = h.edges_by_emotion(EmotionSource::Functional);
+        assert_eq!(perceived.len(), 1);
+        assert_eq!(functional.len(), 0);
+        assert_eq!(h.edge_count(), 2);
     }
 }

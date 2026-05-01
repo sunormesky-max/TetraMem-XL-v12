@@ -2,11 +2,13 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::core::physics::UniversePhysics;
+use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
+use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryCodec;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
-use crate::universe::pulse::{PulseEngine, PulseType};
+use crate::universe::pulse::{EmotionPulseConfig, PulseEngine, PulseType};
 use crate::universe::reasoning::ReasoningEngine;
 
 #[derive(Debug, Clone)]
@@ -412,6 +414,138 @@ impl DreamEngine {
 
         consolidated
     }
+
+    pub fn dream_with_emotion(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        pad: &PadVector,
+        emotion_source: EmotionSource,
+    ) -> DreamReport {
+        let emotion = FunctionalEmotion::from_pad(*pad, emotion_source);
+        let emotion_weight = if emotion.is_positive() { 1.2 } else { 0.8 };
+        let replay_rounds = if emotion.is_high_arousal() {
+            self.config.replay_rounds + 2
+        } else {
+            self.config.replay_rounds
+        };
+
+        let edges_before = hebbian.edge_count();
+        let weight_before = hebbian.total_weight();
+
+        let replayed = self.replay_phase_emotion(universe, hebbian, &emotion, replay_rounds);
+        let weakened = self.weaken_phase(hebbian);
+        let consolidated = self.consolidate_phase_emotion(
+            universe, hebbian, memories, &emotion, emotion_weight, emotion_source,
+        );
+
+        let edges_after = hebbian.edge_count();
+        let weight_after = hebbian.total_weight();
+
+        DreamReport {
+            phase: DreamPhase::Consolidate,
+            paths_replayed: replayed,
+            paths_weakened: weakened,
+            memories_consolidated: consolidated,
+            memories_merged: 0,
+            hebbian_edges_before: edges_before,
+            hebbian_edges_after: edges_after,
+            weight_before,
+            weight_after,
+        }
+    }
+
+    fn replay_phase_emotion(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        emotion: &FunctionalEmotion,
+        replay_rounds: usize,
+    ) -> usize {
+        let engine = PulseEngine::new();
+        let strong = hebbian.strongest_edges(20);
+        let mut replayed = 0;
+
+        for ((a, b), w) in &strong {
+            if *w < self.config.min_replay_strength {
+                continue;
+            }
+
+            for _ in 0..replay_rounds {
+                let r = engine.propagate_with_emotion(
+                    a,
+                    self.config.replay_pulse_type,
+                    universe,
+                    hebbian,
+                    None,
+                    &EmotionPulseConfig::default(),
+                    &emotion.pad,
+                );
+                replayed += r.paths_recorded;
+
+                let r2 = engine.propagate_with_emotion(
+                    b,
+                    self.config.replay_pulse_type,
+                    universe,
+                    hebbian,
+                    None,
+                    &EmotionPulseConfig::default(),
+                    &emotion.pad,
+                );
+                replayed += r2.paths_recorded;
+            }
+        }
+
+        replayed
+    }
+
+    fn consolidate_phase_emotion(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        emotion: &FunctionalEmotion,
+        emotion_weight: f64,
+        emotion_source: EmotionSource,
+    ) -> usize {
+        if memories.len() < 2 {
+            return 0;
+        }
+
+        let threshold = self.config.consolidation_hebbian_threshold / emotion_weight;
+        let mut consolidated = 0;
+        for i in 0..memories.len() {
+            for j in (i + 1)..memories.len() {
+                let ai = memories[i].anchor();
+                let aj = memories[j].anchor();
+                let bias = hebbian.get_bias(ai, aj);
+                if bias >= threshold {
+                    let path = vec![*ai, *aj];
+                    hebbian.record_path_emotion(&path, bias * emotion_weight, emotion_source);
+                    consolidated += 1;
+                }
+            }
+        }
+
+        let engine = PulseEngine::new();
+        for mem in memories {
+            let anchor = mem.anchor();
+            if universe.get_node(anchor).is_some() {
+                engine.propagate_with_emotion(
+                    anchor,
+                    PulseType::Reinforcing,
+                    universe,
+                    hebbian,
+                    None,
+                    &EmotionPulseConfig::default(),
+                    &emotion.pad,
+                );
+            }
+        }
+
+        consolidated
+    }
 }
 
 impl std::fmt::Display for DreamReport {
@@ -573,5 +707,20 @@ mod tests {
             u.verify_conservation(),
             "physics dream must preserve conservation"
         );
+    }
+
+    #[test]
+    fn dream_with_emotion_works() {
+        let (u, mut h, mems) = setup_dream_system();
+        let dream = DreamEngine::new();
+        let pad = PadVector::new(0.5, 0.5, 0.0);
+        let report = dream.dream_with_emotion(
+            &u, &mut h, &mems, &pad, EmotionSource::Functional,
+        );
+        assert!(
+            u.verify_conservation(),
+            "emotion dream must preserve conservation"
+        );
+        let _ = report.paths_replayed;
     }
 }
