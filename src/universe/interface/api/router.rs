@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use axum::{
     extract::{DefaultBodyLimit, Extension, Request, State},
     http::{HeaderValue, StatusCode as HttpStatusCode},
@@ -124,15 +127,7 @@ async fn auth_middleware(
         } else {
             "user"
         };
-        let claims = Claims {
-            sub: "anonymous".to_string(),
-            exp: i64::MAX,
-            iat: 0,
-            role: role.to_string(),
-            jti: "anonymous".to_string(),
-            iss: "tetramem-v12".to_string(),
-            aud: "tetramem-api".to_string(),
-        };
+        let claims = Claims::anonymous(role);
         req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
     }
@@ -161,7 +156,7 @@ async fn admin_middleware(req: Request, next: Next) -> Result<Response, AppError
         .get::<Claims>()
         .ok_or_else(|| AppError::Unauthorized("no auth claims found".to_string()))?;
 
-    if claims.role != "admin" {
+    if claims.role() != "admin" {
         return Err(AppError::Forbidden(
             "admin role required for this operation".to_string(),
         ));

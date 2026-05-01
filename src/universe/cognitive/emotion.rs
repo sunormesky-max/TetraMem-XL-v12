@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::node::DarkUniverse;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -171,7 +174,7 @@ impl EmotionMapper {
         let mut dim_totals = [0.0f64; 7];
         let mut count = 0usize;
 
-        for coord in universe.coords() {
+        for coord in universe.coords_iter() {
             if let Some(node) = universe.get_node(&coord) {
                 for (d, &v) in node.energy().dims().iter().enumerate() {
                     dim_totals[d] += v;

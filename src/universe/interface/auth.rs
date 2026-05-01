@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::error::AppError;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -9,13 +12,31 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,
-    pub exp: i64,
-    pub iat: i64,
-    pub role: String,
-    pub jti: String,
-    pub iss: String,
-    pub aud: String,
+    sub: String,
+    exp: i64,
+    iat: i64,
+    role: String,
+    jti: String,
+    iss: String,
+    aud: String,
+}
+
+impl Claims {
+    pub fn sub(&self) -> &str { &self.sub }
+    pub fn role(&self) -> &str { &self.role }
+    pub fn jti(&self) -> &str { &self.jti }
+
+    pub fn anonymous(role: &str) -> Self {
+        Self {
+            sub: "anonymous".to_string(),
+            exp: i64::MAX,
+            iat: 0,
+            role: role.to_string(),
+            jti: "anonymous".to_string(),
+            iss: "tetramem-v12".to_string(),
+            aud: "tetramem-api".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,8 +239,8 @@ mod tests {
         let config = test_config();
         let token = config.create_token("user1", "admin").unwrap();
         let claims = config.validate_token(&token).unwrap();
-        assert_eq!(claims.sub, "user1");
-        assert_eq!(claims.role, "admin");
+        assert_eq!(claims.sub(), "user1");
+        assert_eq!(claims.role(), "admin");
     }
 
     #[test]

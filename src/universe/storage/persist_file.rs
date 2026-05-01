@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
@@ -75,7 +78,11 @@ impl PersistFile {
         let tmp_path = path.with_extension("json.tmp");
         fs::write(&tmp_path, &json).map_err(|e| FilePersistError::Io(e.to_string()))?;
 
-        fs::rename(&tmp_path, path).map_err(|e| FilePersistError::Io(e.to_string()))?;
+        let rename_result = fs::rename(&tmp_path, path);
+        if rename_result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        rename_result.map_err(|e| FilePersistError::Io(e.to_string()))?;
 
         let stats = universe.stats();
         Ok(PersistInfo {

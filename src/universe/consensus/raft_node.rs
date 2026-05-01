@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Debug;
@@ -72,6 +75,14 @@ fn lock_failed<T>(e: std::sync::PoisonError<T>) -> io::Error {
     io::Error::other(format!("lock poisoned: {}", e))
 }
 
+fn compute_hmac(data: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(data.as_bytes());
+    hasher.update(b"tetramem-raft-log-v1");
+    format!("{:x}", hasher.finalize())
+}
+
 #[derive(Debug, Default)]
 pub struct LogStoreInner {
     last_purged: Option<LogIdOf<TypeName>>,
@@ -93,9 +104,10 @@ impl LogStoreInner {
         if let Some(ref db) = self.db {
             let data = serde_json::to_string(entry)
                 .map_err(|e| format!("serialize raft log entry {}: {}", index, e))?;
+            let hash = compute_hmac(&data);
             db.execute(
-                "INSERT OR REPLACE INTO raft_log (idx, data) VALUES (?1, ?2)",
-                rusqlite::params![index as i64, &data],
+                "INSERT OR REPLACE INTO raft_log (idx, data, hmac) VALUES (?1, ?2, ?3)",
+                rusqlite::params![index as i64, &data, &hash],
             )
             .map_err(|e| format!("persist raft log entry {}: {}", index, e))?;
         }
@@ -179,7 +191,8 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS raft_log (
             idx INTEGER PRIMARY KEY,
-            data TEXT NOT NULL
+            data TEXT NOT NULL,
+            hmac TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS raft_meta (
             key TEXT PRIMARY KEY,
@@ -192,18 +205,29 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
 
     {
         let mut stmt = conn
-            .prepare("SELECT idx, data FROM raft_log ORDER BY idx")
+            .prepare("SELECT idx, data, hmac FROM raft_log ORDER BY idx")
             .map_err(|e| io::Error::other(format!("raft log load: {}", e)))?;
         let rows = stmt
             .query_map([], |row| {
                 let idx: i64 = row.get(0)?;
                 let data: String = row.get(1)?;
-                Ok((idx, data))
+                let hmac: String = row.get(2).unwrap_or_default();
+                Ok((idx, data, hmac))
             })
             .map_err(|e| io::Error::other(format!("raft log query: {}", e)))?;
 
         for row in rows {
-            let (idx, data) = row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
+            let (idx, data, hmac) = row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
+            if !hmac.is_empty() {
+                let expected = compute_hmac(&data);
+                if hmac != expected {
+                    tracing::error!("HMAC mismatch on raft log entry {} — data may be tampered", idx);
+                    return Err(io::Error::other(format!(
+                        "HMAC integrity check failed for raft log entry {}. Data may have been tampered with.",
+                        idx
+                    )));
+                }
+            }
             match serde_json::from_str::<EntryOf<TypeName>>(&data) {
                 Ok(entry) => {
                     inner.log.insert(idx as u64, entry);

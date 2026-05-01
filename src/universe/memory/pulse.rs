@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::lattice::Lattice;
@@ -82,7 +85,7 @@ impl NeuralPulse {
     }
 
     fn current(&self) -> Coord7D {
-        *self.path.last().unwrap()
+        *self.path.last().expect("NeuralPulse path must never be empty")
     }
 }
 

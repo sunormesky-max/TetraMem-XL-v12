@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
@@ -172,7 +175,7 @@ impl PersistEngine {
         let mut node_dim_hash: u64 = 0;
         for ns in &nodes {
             for &d in &ns.dims {
-                let s = format!("{:.12}", d);
+                let s = format!("{:+.17e}", d);
                 node_dim_hash = node_dim_hash.wrapping_mul(31).wrapping_add(
                     s.bytes()
                         .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)),
@@ -247,7 +250,7 @@ impl PersistEngine {
         let mut node_dim_hash: u64 = 0;
         for ns in &snapshot.nodes {
             for &d in &ns.dims {
-                let s = format!("{:.12}", d);
+                let s = format!("{:+.17e}", d);
                 node_dim_hash = node_dim_hash.wrapping_mul(31).wrapping_add(
                     s.bytes()
                         .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)),

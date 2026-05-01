@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
@@ -150,7 +153,7 @@ impl UniverseObserver {
     fn compute_frontier(universe: &DarkUniverse) -> usize {
         use crate::universe::lattice::Lattice;
         let mut frontier = std::collections::HashSet::new();
-        for coord in universe.coords() {
+        for coord in universe.coords_iter() {
             for n in Lattice::face_neighbor_coords(&coord) {
                 if !universe.contains(&n) {
                     frontier.insert(n);

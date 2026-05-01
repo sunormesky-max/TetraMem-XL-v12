@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
@@ -142,7 +145,7 @@ impl PersistSqlite {
         )
         .map_err(|e| SqliteError::Insert(e.to_string()))?;
 
-        for c in universe.coords() {
+        for c in universe.coords_iter() {
             let node = match universe.get_node(&c) {
                 Some(n) => n,
                 None => continue,

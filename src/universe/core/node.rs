@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 sunormesky-max (Liu Qihang)
+// TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::coord::Coord7D;
 use crate::universe::energy::{EnergyError, EnergyField, EnergyPool, EPSILON_NORMAL, EPSILON_RELATIVE};
 use std::collections::{HashMap, HashSet};
@@ -74,7 +77,8 @@ impl DarkUniverse {
     }
 
     pub fn new_with_threshold(total_energy: f64, manifestation_threshold: f64) -> Self {
-        let pool = EnergyPool::new(total_energy).unwrap_or_else(|_| EnergyPool::new(1.0).unwrap());
+        let pool = EnergyPool::new(total_energy)
+            .unwrap_or_else(|_| EnergyPool::new(1.0).expect("EnergyPool::new(1.0) must succeed"));
         Self {
             pool,
             nodes: HashMap::new(),
@@ -304,6 +308,10 @@ impl DarkUniverse {
 
     pub fn coords(&self) -> Vec<Coord7D> {
         self.nodes.keys().copied().collect()
+    }
+
+    pub fn coords_iter(&self) -> impl Iterator<Item = Coord7D> + '_ {
+        self.nodes.keys().copied()
     }
 
     pub fn verify_conservation(&self) -> bool {
