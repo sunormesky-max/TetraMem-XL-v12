@@ -31,6 +31,7 @@ use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
     dark_transfer,
 };
+use super::emotion_ops::{emotion_crystallize, emotion_dream, emotion_pulse, emotion_status};
 use super::health::{get_health, get_metrics, get_openapi, get_stats};
 use super::memory_ops::{
     decode_memory, encode_memory, list_memories, memory_timeline, memory_trace,
@@ -277,6 +278,9 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/memory/trace", post(memory_trace))
         .route("/phase/detect", get(detect_phase_transition))
         .route("/cluster/status", get(cluster_status))
+        .route("/emotion/pulse", post(emotion_pulse))
+        .route("/emotion/dream", post(emotion_dream))
+        .route("/emotion/status", get(emotion_status))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
@@ -300,6 +304,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/phase/quorum/status", get(quorum_status_endpoint))
         .route("/phase/quorum/execute", post(quorum_execute))
         .route("/physics/configure", post(physics_configure))
+        .route("/emotion/crystallize", post(emotion_crystallize))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(admin_middleware))
         .layer(middleware::from_fn(metrics_middleware))

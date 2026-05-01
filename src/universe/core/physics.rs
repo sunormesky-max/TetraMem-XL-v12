@@ -162,10 +162,11 @@ impl DimensionProfile {
     pub fn from_emotion_weights(weights: [f64; DIM], base: &DimensionProfile) -> Self {
         let mut profile = base.clone();
         for i in 0..DIM {
+            let w = weights[i].max(0.1);
             let base_dp = base.dims[i];
             profile.dims[i] = DimensionPhysics {
-                metric_weight: base_dp.metric_weight * weights[i],
-                propagation_decay: base_dp.propagation_decay * (1.0 / weights[i]).min(2.0),
+                metric_weight: base_dp.metric_weight * w,
+                propagation_decay: base_dp.propagation_decay * (1.0 / w).min(2.0),
                 coupling_strength: base_dp.coupling_strength,
             };
         }
@@ -588,6 +589,19 @@ impl UniversePhysics {
             coupling,
             phase: PhaseTransitionConfig::default(),
             projection: ProjectionMatrix::orthogonal(),
+        }
+    }
+
+    pub fn steered_by_emotion(base: &UniversePhysics, weights: [f64; DIM]) -> Self {
+        let profile = DimensionProfile::from_emotion_weights(weights, &base.profile);
+        let metric = MetricTensor::from_profile_with_coupling(&profile);
+        let coupling = CouplingMatrix::from_profile(&profile);
+        Self {
+            profile,
+            metric,
+            coupling,
+            phase: base.phase,
+            projection: base.projection.clone(),
         }
     }
 

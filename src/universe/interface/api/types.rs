@@ -103,7 +103,7 @@ pub struct PulseRequest {
     pub pulse_type: String,
 }
 
-fn default_pulse_type() -> String {
+pub fn default_pulse_type() -> String {
     "exploratory".to_string()
 }
 

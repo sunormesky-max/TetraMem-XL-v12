@@ -5,6 +5,7 @@ pub mod backup_ops;
 pub mod cluster_ops;
 pub mod cognitive;
 pub mod dark_dimension;
+pub mod emotion_ops;
 pub mod health;
 pub mod memory_ops;
 pub mod phase;

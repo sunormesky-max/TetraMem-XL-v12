@@ -6,10 +6,15 @@ use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
+use crate::universe::cognitive::functional_emotion::EmotionSource;
 use serde::{Deserialize, Serialize};
+
+const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UniverseSnapshot {
+    #[serde(default)]
+    pub schema_version: u32,
     pub total_energy: f64,
     pub conservation_checksum: u64,
     pub nodes: Vec<NodeSnapshot>,
@@ -33,6 +38,10 @@ pub struct EdgeSnapshot {
     pub b_even: bool,
     pub weight: f64,
     pub traversal_count: usize,
+    #[serde(default)]
+    pub emotion_tag: Option<String>,
+    #[serde(default)]
+    pub emotion_weight: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -127,15 +136,17 @@ impl PersistEngine {
             .collect();
 
         let edges: Vec<EdgeSnapshot> = hebbian
-            .edges_with_traversal()
+            .edges_full()
             .iter()
-            .map(|((a, b), weight, count)| EdgeSnapshot {
-                a: a.basis(),
-                a_even: a.is_even(),
-                b: b.basis(),
-                b_even: b.is_even(),
-                weight: *weight,
-                traversal_count: *count,
+            .map(|e| EdgeSnapshot {
+                a: e.key.0.basis(),
+                a_even: e.key.0.is_even(),
+                b: e.key.1.basis(),
+                b_even: e.key.1.is_even(),
+                weight: e.weight,
+                traversal_count: e.traversal_count,
+                emotion_tag: e.emotion_tag.map(|s| format!("{:?}", s)),
+                emotion_weight: e.emotion_weight,
             })
             .collect();
 
@@ -223,6 +234,7 @@ impl PersistEngine {
             ^ chan_hash;
 
         let snapshot = UniverseSnapshot {
+            schema_version: CURRENT_SCHEMA_VERSION,
             total_energy: stats.total_energy,
             conservation_checksum,
             nodes,
@@ -341,9 +353,12 @@ impl PersistEngine {
             } else {
                 Coord7D::new_odd(es.b)
             };
-            for _ in 0..es.traversal_count.max(1) {
-                hebbian.record_path(&[a, b], es.weight);
-            }
+            let emotion_tag = es.emotion_tag.as_deref().and_then(|s| match s {
+                "Perceived" => Some(EmotionSource::Perceived),
+                "Functional" => Some(EmotionSource::Functional),
+                _ => None,
+            });
+            hebbian.restore_edge(a, b, es.weight, es.traversal_count, emotion_tag, es.emotion_weight);
         }
 
         let memories: Vec<MemoryAtom> = snapshot

@@ -223,13 +223,34 @@ impl CognitiveAgent for EmotionAgent {
 
     fn execute_readonly(&self, ctx: &AgentContext) -> AgentReport {
         let start = Instant::now();
-        let reading = crate::universe::emotion::EmotionMapper::read(ctx.universe);
+        let legacy_reading = crate::universe::emotion::EmotionMapper::read(ctx.universe);
+
+        let pad = crate::universe::emotion::PadVector::new(
+            legacy_reading.pad.pleasure,
+            legacy_reading.pad.arousal,
+            legacy_reading.pad.dominance,
+        );
+        let functional = crate::universe::functional_emotion::FunctionalEmotion::from_pad(
+            pad,
+            crate::universe::functional_emotion::EmotionSource::Perceived,
+        );
+
+        let func_count = ctx.hebbian.edges_by_emotion(
+            crate::universe::functional_emotion::EmotionSource::Functional,
+        ).len();
+        let perc_count = ctx.hebbian.edges_by_emotion(
+            crate::universe::functional_emotion::EmotionSource::Perceived,
+        ).len();
 
         AgentReport {
             agent: self.kind(),
             success: true,
             duration_ms: start.elapsed().as_secs_f64() * 1000.0,
-            details: format!("{}", reading),
+            details: format!(
+                "{} cluster={} valence={:?} arousal={:?} edges[func={} perc={}]",
+                legacy_reading, functional.cluster.name(), functional.valence,
+                functional.arousal, func_count, perc_count,
+            ),
         }
     }
 }

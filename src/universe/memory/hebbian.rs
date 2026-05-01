@@ -65,6 +65,14 @@ fn canonical_edge(a: &Coord7D, b: &Coord7D) -> (Coord7D, Coord7D) {
     }
 }
 
+pub struct HebbianEdgeFull {
+    pub key: (Coord7D, Coord7D),
+    pub weight: f64,
+    pub traversal_count: usize,
+    pub emotion_tag: Option<EmotionSource>,
+    pub emotion_weight: f64,
+}
+
 #[derive(Clone)]
 pub struct HebbianMemory {
     edges: HashMap<(Coord7D, Coord7D), HebbianEdge>,
@@ -197,6 +205,38 @@ impl HebbianMemory {
             .iter()
             .map(|(k, e)| (*k, e.weight, e.traversal_count))
             .collect()
+    }
+
+    pub fn edges_full(&self) -> Vec<HebbianEdgeFull> {
+        self.edges
+            .iter()
+            .map(|(k, e)| HebbianEdgeFull {
+                key: *k,
+                weight: e.weight,
+                traversal_count: e.traversal_count,
+                emotion_tag: e.emotion_tag,
+                emotion_weight: e.emotion_weight,
+            })
+            .collect()
+    }
+
+    pub fn restore_edge(
+        &mut self,
+        a: Coord7D,
+        b: Coord7D,
+        weight: f64,
+        traversal_count: usize,
+        emotion_tag: Option<EmotionSource>,
+        emotion_weight: f64,
+    ) {
+        let key = canonical_edge(&a, &b);
+        let mut edge = match emotion_tag {
+            Some(src) => HebbianEdge::with_emotion(weight, src),
+            None => HebbianEdge::new(weight),
+        };
+        edge.traversal_count = traversal_count;
+        edge.emotion_weight = emotion_weight;
+        self.edges.insert(key, edge);
     }
 
     pub fn edges_by_emotion(&self, source: EmotionSource) -> Vec<((Coord7D, Coord7D), f64)> {

@@ -25,6 +25,7 @@ pub use memory::pulse;
 pub use cognitive::agent;
 pub use cognitive::crystal;
 pub use cognitive::emotion;
+pub use cognitive::functional_emotion;
 pub use cognitive::perception;
 pub use cognitive::reasoning;
 pub use cognitive::topology;
@@ -68,6 +69,9 @@ pub use dream::{DreamConfig, DreamEngine, DreamPhase, DreamReport};
 pub use emotion::{
     EmotionMapper, EmotionReading, EmotionalQuadrant, PadVector, PulseStrategySuggestion,
 };
+pub use functional_emotion::{
+    ArousalLevel, EmotionCluster, EmotionSource, FunctionalEmotion, Valence,
+};
 pub use energy::{EnergyField, EnergyPool};
 pub use error::AppError;
 pub use events::{EventBus, EventBusSender, UniverseEvent};
@@ -81,7 +85,7 @@ pub use observer::{
 };
 pub use perception::{PerceptionBudget, PerceptionReport};
 pub use persist::PersistEngine;
-pub use pulse::{PulseEngine, PulseResult, PulseType};
+pub use pulse::{EmotionDecayParams, EmotionPulseConfig, PulseEngine, PulseResult, PulseType};
 pub use raft_node::{
     new_log_store, new_log_store_with_persistence, new_state_machine, LogStore, LogStoreInner,
     NodeId, Request, Response, StateMachineInner, StateMachineStore, TypeName,
