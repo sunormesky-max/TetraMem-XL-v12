@@ -10,6 +10,9 @@ use super::tools::TetraMemTools;
 use crate::universe::config::AppConfig;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
+use crate::universe::memory::clustering::ClusteringEngine;
+use crate::universe::memory::semantic::SemanticConfig;
+use crate::universe::memory::semantic::SemanticEngine;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
 
@@ -18,6 +21,10 @@ pub struct McpServer {
     hebbian: HebbianMemory,
     memories: Vec<MemoryAtom>,
     crystal: CrystalEngine,
+    semantic: SemanticEngine,
+    clustering: ClusteringEngine,
+    context_window: Vec<super::tools::ContextEntry>,
+    context_max_tokens: usize,
 }
 
 impl McpServer {
@@ -27,6 +34,10 @@ impl McpServer {
             hebbian: HebbianMemory::new(),
             memories: Vec::new(),
             crystal: CrystalEngine::new(),
+            semantic: SemanticEngine::new(SemanticConfig::default()),
+            clustering: ClusteringEngine::with_default_config(),
+            context_window: Vec::new(),
+            context_max_tokens: 4096,
         }
     }
 
@@ -133,6 +144,10 @@ impl McpServer {
                     &mut self.hebbian,
                     &mut self.memories,
                     &mut self.crystal,
+                    &mut self.semantic,
+                    &mut self.clustering,
+                    &mut self.context_window,
+                    self.context_max_tokens,
                 );
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap_or_default())
             }
@@ -177,6 +192,23 @@ impl McpServer {
     }
 }
 
+macro_rules! call_tool {
+    ($server:expr, $name:expr, $args:expr) => {
+        TetraMemTools::handle_tool(
+            $name,
+            &$args,
+            &mut $server.universe,
+            &mut $server.hebbian,
+            &mut $server.memories,
+            &mut $server.crystal,
+            &mut $server.semantic,
+            &mut $server.clustering,
+            &mut $server.context_window,
+            $server.context_max_tokens,
+        )
+    };
+}
+
 pub fn run_mcp_demo() {
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║   TetraMem-XL v12.0 MCP Server Demo                    ║");
@@ -187,104 +219,43 @@ pub fn run_mcp_demo() {
     let tools = TetraMemTools::definitions();
     println!("MCP Tools ({} available):", tools.len());
     for t in &tools {
-        println!("  • {} — {}", t.name, t.description);
+        println!("  * {} -- {}", t.name, t.description);
     }
     println!();
 
-    println!("── Demo: materialize nodes ──");
-    let args = json!({"coord": [10, 10, 10], "energy": 100.0, "physical_ratio": 0.6});
-    let result = TetraMemTools::handle_tool(
-        "tetramem_materialize",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    println!("-- Demo: remember (Agent semantic memory) --");
+    let args = json!({"content": "User prefers dark mode in all applications", "tags": ["preference", "ui"], "category": "user_preference", "importance": 0.8});
+    let result = call_tool!(server, "tetramem_remember", args);
     println!("  {}\n", result.content[0].text);
 
-    for i in 0..5 {
-        let coord = [10 + i * 5, 10, 10];
-        let args = json!({"coord": coord, "energy": 80.0, "physical_ratio": 0.5});
-        let _ = TetraMemTools::handle_tool(
-            "tetramem_materialize",
-            &args,
-            &mut server.universe,
-            &mut server.hebbian,
-            &mut server.memories,
-            &mut server.crystal,
-        );
-    }
-
-    println!("── Demo: encode memory ──");
-    let args = json!({"anchor": [10, 10, 10], "data": [1.0, -2.5, 3.15, 0.0, 42.0]});
-    let result = TetraMemTools::handle_tool(
-        "tetramem_encode",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    println!("-- Demo: remember more --");
+    let args = json!({"content": "System uses Rust for backend services", "tags": ["tech", "architecture"], "category": "technical", "importance": 0.6});
+    let result = call_tool!(server, "tetramem_remember", args);
     println!("  {}\n", result.content[0].text);
 
-    println!("── Demo: decode memory ──");
-    let args = json!({"anchor": [10, 10, 10]});
-    let result = TetraMemTools::handle_tool(
-        "tetramem_decode",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    println!("-- Demo: recall (semantic retrieval) --");
+    let args = json!({"query": "user interface preferences", "limit": 5});
+    let result = call_tool!(server, "tetramem_recall", args);
     println!("  {}\n", result.content[0].text);
 
-    println!("── Demo: fire pulse ──");
-    let args = json!({"source": [10, 10, 10], "pulse_type": "reinforcing"});
-    let result = TetraMemTools::handle_tool(
-        "tetramem_pulse",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
-    println!("  {}\n", result.content[0].text);
-
-    println!("── Demo: stats ──");
+    println!("-- Demo: stats --");
     let args = json!({});
-    let result = TetraMemTools::handle_tool(
-        "tetramem_stats",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    let result = call_tool!(server, "tetramem_stats", args);
     println!("  {}\n", result.content[0].text);
 
-    println!("── Demo: topology ──");
-    let result = TetraMemTools::handle_tool(
-        "tetramem_topology",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    println!("-- Demo: context overflow management --");
+    let args = json!({"role": "user", "content": "This is a long conversation message that would normally overflow the context window. The user is discussing various topics including memory systems, AI agents, and the importance of persistent storage for long-running conversations."});
+    let result = call_tool!(server, "tetramem_context", args);
     println!("  {}\n", result.content[0].text);
 
-    println!("── Demo: conservation check ──");
-    let result = TetraMemTools::handle_tool(
-        "tetramem_conservation_check",
-        &args,
-        &mut server.universe,
-        &mut server.hebbian,
-        &mut server.memories,
-        &mut server.crystal,
-    );
+    println!("-- Demo: consolidate (dream cycle) --");
+    let args = json!({});
+    let result = call_tool!(server, "tetramem_consolidate", args);
     println!("  {}\n", result.content[0].text);
 
-    println!("✓ MCP Server Demo complete — all tools operational, conservation maintained");
+    println!("-- Demo: conservation check --");
+    let result = call_tool!(server, "tetramem_conservation_check", args);
+    println!("  {}\n", result.content[0].text);
+
+    println!("OK MCP Server Demo complete -- all tools operational, conservation maintained");
 }

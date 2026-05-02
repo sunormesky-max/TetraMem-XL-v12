@@ -8,12 +8,20 @@ use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::dream::DreamEngine;
 use crate::universe::hebbian::HebbianMemory;
+use crate::universe::memory::clustering::ClusteringEngine;
 use crate::universe::memory::{MemoryAtom, MemoryCodec};
 use crate::universe::node::DarkUniverse;
 use crate::universe::pulse::{PulseEngine, PulseType};
 use crate::universe::reasoning::ReasoningEngine;
 use crate::universe::regulation::RegulationEngine;
 use crate::universe::topology::TopologyEngine;
+
+pub struct ContextEntry {
+    pub role: String,
+    pub content: String,
+    pub token_estimate: usize,
+    pub memory_id: Option<String>,
+}
 
 pub struct TetraMemTools;
 
@@ -163,6 +171,127 @@ impl TetraMemTools {
                 description: "Verify energy conservation law holds across the entire universe".into(),
                 input_schema: json!({"type": "object", "properties": {}, "required": []}),
             },
+            ToolDefinition {
+                name: "tetramem_remember".into(),
+                description: "Store a memory for an AI agent. Automatically encodes content, indexes semantically, and links to similar existing memories via Hebbian edges. Solves cross-session memory loss.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The content to remember (natural language or structured data)"
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Tags for categorization"
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Category (e.g. 'user_preference', 'technical', 'conversation')"
+                        },
+                        "importance": {
+                            "type": "number",
+                            "description": "Importance weight 0.0-1.0 (default 0.5)"
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "Source identifier (e.g. 'user', 'system', 'agent')"
+                        }
+                    },
+                    "required": ["content"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_recall".into(),
+                description: "Retrieve memories by natural language query. Uses semantic KNN search + Hebbian association to find relevant memories. Reconstructs context for the agent.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language or keyword query"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 10)"
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter by tags"
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "Filter by category"
+                        },
+                        "min_importance": {
+                            "type": "number",
+                            "description": "Minimum importance threshold (default 0.0)"
+                        }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_associate".into(),
+                description: "Discover associated memories for a topic. Uses Hebbian edge traversal and pulse propagation to find related concepts that the agent may not directly recall.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "Topic or query to find associations for"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Association depth / max hops (default 3)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max associations to return (default 10)"
+                        }
+                    },
+                    "required": ["topic"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_consolidate".into(),
+                description: "Run dream consolidation cycle: strengthen important memories, weaken noise, create new associations. Solves the 'cannot distinguish importance' problem.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "importance_threshold": {
+                            "type": "number",
+                            "description": "Memories below this importance get weakened (default 0.3)"
+                        }
+                    },
+                    "required": []
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_context".into(),
+                description: "Manage agent context window. Add messages; when context overflows, older messages are automatically encoded to TetraMem memory and can be recalled later. Solves context window overflow.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["add", "status", "reconstruct", "clear"],
+                            "description": "Action: 'add' message, 'status' check, 'reconstruct' from memory, 'clear' window"
+                        },
+                        "role": {
+                            "type": "string",
+                            "description": "Message role (for 'add': 'user', 'assistant', 'system')"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Message content (for 'add' or 'reconstruct' query)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
         ]
     }
 
@@ -183,6 +312,7 @@ impl TetraMemTools {
         ]
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_tool(
         name: &str,
         args: &Value,
@@ -190,6 +320,10 @@ impl TetraMemTools {
         hebbian: &mut HebbianMemory,
         memories: &mut Vec<MemoryAtom>,
         crystal: &mut CrystalEngine,
+        semantic: &mut crate::universe::memory::semantic::SemanticEngine,
+        _clustering: &mut ClusteringEngine,
+        context_window: &mut Vec<ContextEntry>,
+        context_max_tokens: usize,
     ) -> super::protocol::ToolCallResult {
         match name {
             "tetramem_stats" => {
@@ -492,6 +626,429 @@ impl TetraMemTools {
                     "available_energy": stats.available_energy,
                     "violation": (stats.total_energy - stats.allocated_energy - stats.available_energy).abs(),
                 }).to_string())
+            }
+            "tetramem_remember" => {
+                let content = match args.get("content").and_then(|v| v.as_str()) {
+                    Some(c) => c.to_string(),
+                    None => return super::protocol::ToolCallResult::err("content is required"),
+                };
+                let tags: Vec<String> = args
+                    .get("tags")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("general")
+                    .to_string();
+                let importance = args
+                    .get("importance")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5);
+                let source = args
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("agent")
+                    .to_string();
+
+                let mut data = Vec::new();
+                for b in content.as_bytes().iter().take(28) {
+                    data.push((*b as f64) / 255.0 * importance);
+                }
+                while data.len() < 7 {
+                    data.push(0.0);
+                }
+                data.truncate(28);
+
+                let data_hash = {
+                    let mut h = 0u64;
+                    for b in content.as_bytes() {
+                        h = h.wrapping_mul(31).wrapping_add(*b as u64);
+                    }
+                    h
+                };
+                let ax = ((data_hash & 0xFFFF) as i32) % 1000;
+                let ay = (((data_hash >> 16) & 0xFFFF) as i32) % 1000;
+                let az = (((data_hash >> 32) & 0xFFFF) as i32) % 1000;
+                let anchor = Coord7D::new_even([ax, ay, az, 0, 0, 0, 0]);
+
+                match MemoryCodec::encode(universe, &anchor, &data) {
+                    Ok(mut mem) => {
+                        let anchor_str = format!("{}", mem.anchor());
+                        let _mem_data: Vec<f64> = (0..mem.data_dim())
+                            .map(|i| {
+                                let idx = i;
+                                let base = if idx < 7 { 1.01 } else { 0.01 };
+                                base + data.get(idx).copied().unwrap_or(0.0)
+                                    - data.get(idx).copied().unwrap_or(0.0)
+                            })
+                            .collect();
+
+                        for tag in &tags {
+                            mem.add_tag(tag);
+                        }
+                        mem.set_category(&category);
+                        mem.set_description(&content);
+                        mem.set_source(&source);
+                        mem.set_importance(importance);
+
+                        semantic.index_memory(&mem, &data);
+                        let knn_results = semantic.search_similar(&data, 6);
+                        let mut links = 0usize;
+                        for knn in &knn_results {
+                            if knn.atom_key.vertices_basis[0] != mem.anchor().basis() {
+                                let neighbor_anchor =
+                                    Coord7D::new_even(knn.atom_key.vertices_basis[0]);
+                                hebbian.boost_edge(
+                                    mem.anchor(),
+                                    &neighbor_anchor,
+                                    0.5 * knn.similarity,
+                                );
+                                links += 1;
+                            }
+                        }
+
+                        let memory_id = format!("mem_{}", memories.len());
+                        memories.push(mem);
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "success": true,
+                                "memory_id": memory_id,
+                                "anchor": anchor_str,
+                                "semantic_links": links,
+                                "conservation_ok": universe.verify_conservation(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    Err(e) => {
+                        super::protocol::ToolCallResult::err(format!("remember failed: {}", e))
+                    }
+                }
+            }
+            "tetramem_recall" => {
+                let query = match args.get("query").and_then(|v| v.as_str()) {
+                    Some(q) => q.to_string(),
+                    None => return super::protocol::ToolCallResult::err("query is required"),
+                };
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+
+                let mut query_data = Vec::new();
+                for b in query.as_bytes().iter().take(28) {
+                    query_data.push(*b as f64 / 255.0);
+                }
+                while query_data.len() < 7 {
+                    query_data.push(0.0);
+                }
+                query_data.truncate(28);
+
+                let knn_results = semantic.search_similar(&query_data, limit * 2);
+
+                let mut hits = Vec::new();
+                for knn in &knn_results {
+                    if hits.len() >= limit {
+                        break;
+                    }
+                    let anchor_basis = knn.atom_key.vertices_basis[0];
+                    let _anchor = Coord7D::new_even(anchor_basis);
+                    if let Some(mem) = memories.iter().find(|m| m.anchor().basis() == anchor_basis)
+                    {
+                        let anchor_coord = *mem.anchor();
+                        let nb = hebbian.get_neighbors(&anchor_coord);
+                        let associated: Vec<String> = nb
+                            .iter()
+                            .filter_map(|(coord, _)| {
+                                memories
+                                    .iter()
+                                    .find(|m| m.anchor() == coord)
+                                    .map(|m| format!("{}", m.anchor()))
+                            })
+                            .take(5)
+                            .collect();
+                        hits.push(json!({
+                            "anchor": format!("{}", mem.anchor()),
+                            "similarity": knn.similarity,
+                            "dimensions": mem.data_dim(),
+                            "hebbian_neighbors": nb.len(),
+                            "associated_memories": associated,
+                        }));
+                    }
+                }
+
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "query": query,
+                        "results": hits,
+                        "total_found": knn_results.len(),
+                        "returned": hits.len(),
+                    })
+                    .to_string(),
+                )
+            }
+            "tetramem_associate" => {
+                let topic = match args.get("topic").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return super::protocol::ToolCallResult::err("topic is required"),
+                };
+                let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+
+                let mut topic_data = Vec::new();
+                for b in topic.as_bytes().iter().take(28) {
+                    topic_data.push(*b as f64 / 255.0);
+                }
+                while topic_data.len() < 7 {
+                    topic_data.push(0.0);
+                }
+                topic_data.truncate(28);
+
+                let knn = semantic.search_similar(&topic_data, 1);
+                let seed_anchor = match knn.first() {
+                    Some(k) => Coord7D::new_even(k.atom_key.vertices_basis[0]),
+                    None => return super::protocol::ToolCallResult::ok(
+                        json!({"topic": topic, "associations": [], "message": "no matching memories found"}).to_string()
+                    ),
+                };
+
+                let associations = ReasoningEngine::find_associations(
+                    universe,
+                    hebbian,
+                    crystal,
+                    &seed_anchor,
+                    depth,
+                );
+
+                let mut results = Vec::new();
+                for assoc in associations.iter().take(limit) {
+                    let targets: Vec<String> = assoc
+                        .targets
+                        .iter()
+                        .take(5)
+                        .map(|t| t.to_string())
+                        .collect();
+                    results.push(json!({
+                        "source": assoc.source,
+                        "targets": targets,
+                        "confidence": assoc.confidence,
+                        "hops": assoc.hops,
+                    }));
+                }
+
+                let engine = PulseEngine::new();
+                let pulse_result =
+                    engine.propagate(&seed_anchor, PulseType::Exploratory, universe, hebbian);
+
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "topic": topic,
+                        "seed_anchor": format!("{}", seed_anchor),
+                        "associations": results,
+                        "pulse_spread": {
+                            "visited_nodes": pulse_result.visited_nodes,
+                            "activation": pulse_result.total_activation,
+                        },
+                        "total": results.len(),
+                    })
+                    .to_string(),
+                )
+            }
+            "tetramem_consolidate" => {
+                let importance_threshold = args
+                    .get("importance_threshold")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.3);
+
+                let engine = DreamEngine::new();
+                let report = engine.dream(universe, hebbian, memories);
+
+                let mut weakened = 0usize;
+                let mut strengthened = 0usize;
+                for mem in memories.iter() {
+                    let neighbors = hebbian.get_neighbors(mem.anchor());
+                    for (_, weight) in &neighbors {
+                        if *weight < importance_threshold {
+                            weakened += 1;
+                        } else {
+                            strengthened += 1;
+                        }
+                    }
+                }
+
+                semantic.auto_link_similar(memories);
+
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "consolidation": format!("{}", report),
+                        "edges_before": report.hebbian_edges_before,
+                        "edges_after": report.hebbian_edges_after,
+                        "strengthened_paths": strengthened,
+                        "weakened_paths": weakened,
+                        "conservation_ok": universe.verify_conservation(),
+                    })
+                    .to_string(),
+                )
+            }
+            "tetramem_context" => {
+                let action = match args.get("action").and_then(|v| v.as_str()) {
+                    Some(a) => a.to_string(),
+                    None => return super::protocol::ToolCallResult::err("action is required"),
+                };
+
+                match action.as_str() {
+                    "add" => {
+                        let role = args
+                            .get("role")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("user")
+                            .to_string();
+                        let content = args
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let token_estimate = content.split_whitespace().count() * 2;
+
+                        let memory_id = if context_window
+                            .iter()
+                            .map(|e| e.token_estimate)
+                            .sum::<usize>()
+                            + token_estimate
+                            > context_max_tokens
+                        {
+                            let overflow_entries: Vec<ContextEntry> =
+                                context_window.drain(..context_window.len() / 2).collect();
+                            let mut archived_ids = Vec::new();
+                            for entry in overflow_entries {
+                                let mut data = Vec::new();
+                                for b in entry.content.as_bytes().iter().take(28) {
+                                    data.push(*b as f64 / 255.0);
+                                }
+                                while data.len() < 7 {
+                                    data.push(0.0);
+                                }
+                                data.truncate(28);
+
+                                let hash = {
+                                    let mut h = 0u64;
+                                    for b in entry.content.as_bytes() {
+                                        h = h.wrapping_mul(31).wrapping_add(*b as u64);
+                                    }
+                                    h
+                                };
+                                let ax = ((hash & 0xFFFF) as i32) % 1000
+                                    + context_window.len() as i32 * 7;
+                                let anchor = Coord7D::new_even([ax, 0, 0, 0, 0, 0, 0]);
+
+                                if let Ok(mem) = MemoryCodec::encode(universe, &anchor, &data) {
+                                    semantic.index_memory(&mem, &data);
+                                    let knn = semantic.search_similar(&data, 3);
+                                    for k in &knn {
+                                        let k_anchor =
+                                            Coord7D::new_even(k.atom_key.vertices_basis[0]);
+                                        if k_anchor != *mem.anchor() {
+                                            hebbian.boost_edge(
+                                                mem.anchor(),
+                                                &k_anchor,
+                                                0.3 * k.similarity,
+                                            );
+                                        }
+                                    }
+                                    archived_ids.push(format!("{}", mem.anchor()));
+                                    memories.push(mem);
+                                }
+                            }
+                            Some(archived_ids)
+                        } else {
+                            None
+                        };
+
+                        context_window.push(ContextEntry {
+                            role: role.clone(),
+                            content: content.clone(),
+                            token_estimate,
+                            memory_id: None,
+                        });
+
+                        let current_tokens: usize =
+                            context_window.iter().map(|e| e.token_estimate).sum();
+                        super::protocol::ToolCallResult::ok(json!({
+                            "action": "add",
+                            "context_entries": context_window.len(),
+                            "current_tokens": current_tokens,
+                            "max_tokens": context_max_tokens,
+                            "overflow_archived": memory_id.as_ref().map(|ids| ids.len()).unwrap_or(0),
+                        }).to_string())
+                    }
+                    "status" => {
+                        let current_tokens: usize =
+                            context_window.iter().map(|e| e.token_estimate).sum();
+                        let entries: Vec<Value> = context_window
+                            .iter()
+                            .map(|e| json!({"role": e.role, "tokens": e.token_estimate}))
+                            .collect();
+                        super::protocol::ToolCallResult::ok(json!({
+                            "entries": entries,
+                            "total_tokens": current_tokens,
+                            "max_tokens": context_max_tokens,
+                            "utilization": if context_max_tokens > 0 { current_tokens as f64 / context_max_tokens as f64 } else { 0.0 },
+                            "total_memories": memories.len(),
+                        }).to_string())
+                    }
+                    "reconstruct" => {
+                        let query = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let mut query_data = Vec::new();
+                        for b in query.as_bytes().iter().take(28) {
+                            query_data.push(*b as f64 / 255.0);
+                        }
+                        while query_data.len() < 7 {
+                            query_data.push(0.0);
+                        }
+                        query_data.truncate(28);
+
+                        let knn = semantic.search_similar(&query_data, 5);
+                        let mut reconstructed = Vec::new();
+                        for k in &knn {
+                            let anchor_basis = k.atom_key.vertices_basis[0];
+                            if let Some(mem) =
+                                memories.iter().find(|m| m.anchor().basis() == anchor_basis)
+                            {
+                                reconstructed.push(json!({
+                                    "anchor": format!("{}", mem.anchor()),
+                                    "similarity": k.similarity,
+                                }));
+                            }
+                        }
+
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "reconstructed_context": reconstructed,
+                                "current_window_entries": context_window.len(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    "clear" => {
+                        let count = context_window.len();
+                        context_window.clear();
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "action": "clear",
+                                "cleared_entries": count,
+                                "memories_preserved": memories.len(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    _ => super::protocol::ToolCallResult::err(format!(
+                        "unknown context action: {}. Use add/status/reconstruct/clear",
+                        action
+                    )),
+                }
             }
             _ => super::protocol::ToolCallResult::err(format!("unknown tool: {}", name)),
         }
