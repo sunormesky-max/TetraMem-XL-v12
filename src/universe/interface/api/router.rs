@@ -39,7 +39,8 @@ use super::dark_dimension::{
 use super::emotion_ops::{emotion_crystallize, emotion_dream, emotion_pulse, emotion_status};
 use super::health::{get_health, get_metrics, get_openapi, get_stats};
 use super::memory_ops::{
-    decode_memory, encode_memory, list_memories, memory_timeline, memory_trace,
+    annotate_memory, decode_memory, encode_memory, list_memories, memory_timeline, memory_trace,
+    semantic_relations, semantic_search, semantic_text_query,
 };
 use super::phase::{
     detect_phase_transition, phase_consensus, quorum_confirm, quorum_execute, quorum_start,
@@ -301,6 +302,10 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/physics/project", post(physics_project))
         .route("/memory/timeline", get(memory_timeline))
         .route("/memory/trace", post(memory_trace))
+        .route("/memory/annotate", post(annotate_memory))
+        .route("/semantic/search", post(semantic_search))
+        .route("/semantic/query", post(semantic_text_query))
+        .route("/semantic/relations", post(semantic_relations))
         .route("/phase/detect", get(detect_phase_transition))
         .route("/cluster/status", get(cluster_status))
         .route("/emotion/pulse", post(emotion_pulse))

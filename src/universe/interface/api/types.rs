@@ -52,6 +52,16 @@ pub struct StatsResponse {
 pub struct EncodeRequest {
     pub anchor: [i32; 3],
     pub data: Vec<f64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default = "default_importance")]
+    pub importance: f64,
 }
 
 #[derive(Serialize)]
@@ -60,6 +70,88 @@ pub struct EncodeResponse {
     pub data_dim: usize,
     pub manifested: bool,
     pub created_at: u64,
+}
+
+#[derive(Deserialize)]
+pub struct AnnotateRequest {
+    pub anchor: [i32; 3],
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default = "default_importance")]
+    pub importance: f64,
+}
+
+#[derive(Serialize)]
+pub struct AnnotateResponse {
+    pub anchor: String,
+    pub tags: Vec<String>,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub source: Option<String>,
+    pub importance: f64,
+}
+
+#[derive(Deserialize)]
+pub struct SemanticSearchRequest {
+    pub data: Vec<f64>,
+    #[serde(default = "default_k")]
+    pub k: usize,
+}
+
+#[derive(Serialize)]
+pub struct SemanticSearchResponse {
+    pub results: Vec<SemanticHit>,
+}
+
+#[derive(Serialize)]
+pub struct SemanticHit {
+    pub anchor: String,
+    pub similarity: f64,
+    pub distance: f64,
+    pub tags: Vec<String>,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub importance: f64,
+}
+
+#[derive(Deserialize)]
+pub struct SemanticTextQueryRequest {
+    pub text: String,
+    #[serde(default = "default_k")]
+    pub k: usize,
+}
+
+#[derive(Deserialize)]
+pub struct SemanticRelationRequest {
+    pub anchor: [i32; 3],
+}
+
+#[derive(Serialize)]
+pub struct SemanticRelationResponse {
+    pub anchor: String,
+    pub relations: Vec<RelationInfo>,
+}
+
+#[derive(Serialize)]
+pub struct RelationInfo {
+    pub from_anchor: String,
+    pub to_anchor: String,
+    pub relation_type: String,
+    pub weight: f64,
+}
+
+fn default_k() -> usize {
+    10
+}
+
+fn default_importance() -> f64 {
+    0.5
 }
 
 #[derive(Deserialize)]

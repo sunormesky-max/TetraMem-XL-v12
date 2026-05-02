@@ -73,20 +73,41 @@ pub async fn encode_memory(
     }
 
     match MemoryCodec::encode(&mut u, &anchor, &req.data) {
-        Ok(atom) => {
+        Ok(mut atom) => {
+            for tag in &req.tags {
+                atom.add_tag(tag);
+            }
+            if let Some(ref cat) = req.category {
+                atom.set_category(cat);
+            }
+            if let Some(ref desc) = req.description {
+                atom.set_description(desc);
+            }
+            if let Some(ref src) = req.source {
+                atom.set_source(src);
+            }
+            atom.set_importance(req.importance);
+
             let manifested = atom.is_manifested(&u);
             let anchor_str = format!("{}", atom.anchor());
             let created_at = atom.created_at();
             let data_dim = req.data.len();
             let anchor_3 = req.anchor;
+            let importance = atom.importance();
             tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
+
+            {
+                let mut sem = state.semantic.write().await;
+                sem.index_memory(&atom, &req.data);
+            }
+
             let i = mems.len();
             mems.push(atom);
             idx.insert(anchor_str.clone(), i);
             state.event_sender.publish(UniverseEvent::MemoryEncoded {
                 anchor: anchor_3,
                 data_dim,
-                importance: 0.5,
+                importance,
             });
             Ok((
                 StatusCode::OK,
@@ -246,4 +267,221 @@ pub async fn memory_trace(
     }
 
     Ok(Json(ApiResponse::ok(hops)))
+}
+
+pub async fn annotate_memory(
+    State(state): State<SharedState>,
+    Json(req): Json<AnnotateRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<AnnotateResponse>>), AppError> {
+    validate_coord_3(&req.anchor)?;
+    let mut mems = state.memories.write().await;
+    let idx = state.memory_index.read().await;
+    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor_str = format!("{}", &anchor);
+
+    if let Some(&i) = idx.get(&anchor_str) {
+        if let Some(mem) = mems.get_mut(i) {
+            for tag in &req.tags {
+                mem.add_tag(tag);
+            }
+            if let Some(ref cat) = req.category {
+                mem.set_category(cat);
+            }
+            if let Some(ref desc) = req.description {
+                mem.set_description(desc);
+            }
+            if let Some(ref src) = req.source {
+                mem.set_source(src);
+            }
+            mem.set_importance(req.importance);
+
+            let resp = AnnotateResponse {
+                anchor: anchor_str,
+                tags: mem.tags().to_vec(),
+                category: mem.category().map(String::from),
+                description: mem.description().map(String::from),
+                source: mem.source().map(String::from),
+                importance: mem.importance(),
+            };
+            Ok((StatusCode::OK, Json(ApiResponse::ok(resp))))
+        } else {
+            Ok((
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse::err("memory index out of bounds")),
+            ))
+        }
+    } else {
+        Ok((
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::err("memory not found")),
+        ))
+    }
+}
+
+pub async fn semantic_search(
+    State(state): State<SharedState>,
+    Json(req): Json<SemanticSearchRequest>,
+) -> Json<ApiResponse<SemanticSearchResponse>> {
+    let sem = state.semantic.read().await;
+    let mems = state.memories.read().await;
+    let k = req.k.clamp(1, 100);
+
+    let results = sem.search_similar(&req.data, k);
+    let hits: Vec<SemanticHit> = results
+        .into_iter()
+        .filter_map(|r| {
+            let mem = mems.iter().find(|m| {
+                let mk = crate::universe::memory::AtomKey::from_atom(m);
+                mk == r.atom_key
+            })?;
+            let anchor_str = format!("{}", mem.anchor());
+            Some(SemanticHit {
+                anchor: anchor_str,
+                similarity: r.similarity,
+                distance: r.distance,
+                tags: mem.tags().to_vec(),
+                category: mem.category().map(String::from),
+                description: mem.description().map(String::from),
+                importance: mem.importance(),
+            })
+        })
+        .collect();
+
+    Json(ApiResponse::ok(SemanticSearchResponse { results: hits }))
+}
+
+pub async fn semantic_text_query(
+    State(state): State<SharedState>,
+    Json(req): Json<SemanticTextQueryRequest>,
+) -> Json<ApiResponse<SemanticSearchResponse>> {
+    let mems = state.memories.read().await;
+    let idx = state.memory_index.read().await;
+    let k = req.k.clamp(1, 100);
+
+    let text_lower = req.text.to_lowercase();
+    let mut hits = Vec::new();
+
+    for (key_str, &i) in idx.iter() {
+        if let Some(mem) = mems.get(i) {
+            let desc = mem.description().unwrap_or("").to_lowercase();
+            let cat = mem.category().unwrap_or("").to_lowercase();
+            let tags_str = mem.tags().join(" ").to_lowercase();
+            let combined = format!("{} {} {}", desc, cat, tags_str);
+
+            if combined.contains(&text_lower) {
+                if hits.len() >= k {
+                    break;
+                }
+                hits.push(SemanticHit {
+                    anchor: key_str.clone(),
+                    similarity: 1.0,
+                    distance: 0.0,
+                    tags: mem.tags().to_vec(),
+                    category: mem.category().map(String::from),
+                    description: mem.description().map(String::from),
+                    importance: mem.importance(),
+                });
+            }
+        }
+    }
+
+    if hits.len() < k {
+        let words: Vec<&str> = text_lower
+            .split_whitespace()
+            .filter(|w| w.len() > 2)
+            .collect();
+        if !words.is_empty() {
+            for (key_str, &i) in idx.iter() {
+                if hits.len() >= k {
+                    break;
+                }
+                if hits.iter().any(|h| h.anchor == *key_str) {
+                    continue;
+                }
+                if let Some(mem) = mems.get(i) {
+                    let desc = mem.description().unwrap_or("").to_lowercase();
+                    let cat = mem.category().unwrap_or("").to_lowercase();
+                    let tags_str = mem.tags().join(" ").to_lowercase();
+                    let combined = format!("{} {} {}", desc, cat, tags_str);
+
+                    let match_count = words.iter().filter(|w| combined.contains(*w)).count();
+                    if match_count > 0 {
+                        let similarity = match_count as f64 / words.len() as f64;
+                        hits.push(SemanticHit {
+                            anchor: key_str.clone(),
+                            similarity,
+                            distance: 1.0 - similarity,
+                            tags: mem.tags().to_vec(),
+                            category: mem.category().map(String::from),
+                            description: mem.description().map(String::from),
+                            importance: mem.importance(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    hits.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    Json(ApiResponse::ok(SemanticSearchResponse {
+        results: hits.into_iter().take(k).collect(),
+    }))
+}
+
+pub async fn semantic_relations(
+    State(state): State<SharedState>,
+    Json(req): Json<SemanticRelationRequest>,
+) -> Result<Json<ApiResponse<SemanticRelationResponse>>, AppError> {
+    validate_coord_3(&req.anchor)?;
+    let sem = state.semantic.read().await;
+    let mems = state.memories.read().await;
+    let idx = state.memory_index.read().await;
+    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor_str = format!("{}", &anchor);
+
+    if let Some(&i) = idx.get(&anchor_str) {
+        if let Some(mem) = mems.get(i) {
+            let relations = sem.find_relations(mem);
+            let rel_infos: Vec<RelationInfo> = relations
+                .iter()
+                .map(|r| {
+                    let from_str = mems
+                        .iter()
+                        .find(|m| {
+                            let mk = crate::universe::memory::AtomKey::from_atom(m);
+                            mk == r.from
+                        })
+                        .map(|m| format!("{}", m.anchor()))
+                        .unwrap_or_else(|| "?".to_string());
+                    let to_str = mems
+                        .iter()
+                        .find(|m| {
+                            let mk = crate::universe::memory::AtomKey::from_atom(m);
+                            mk == r.to
+                        })
+                        .map(|m| format!("{}", m.anchor()))
+                        .unwrap_or_else(|| "?".to_string());
+                    RelationInfo {
+                        from_anchor: from_str,
+                        to_anchor: to_str,
+                        relation_type: format!("{:?}", r.rel_type),
+                        weight: r.weight,
+                    }
+                })
+                .collect();
+            return Ok(Json(ApiResponse::ok(SemanticRelationResponse {
+                anchor: anchor_str,
+                relations: rel_infos,
+            })));
+        }
+    }
+    Ok(Json(ApiResponse::ok(SemanticRelationResponse {
+        anchor: anchor_str,
+        relations: vec![],
+    })))
 }
