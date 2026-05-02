@@ -10,7 +10,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     data = JSON.parse(text)
   } catch {
-    throw new Error(`Server returned non-JSON: ${text.slice(0, 200)}`)
+    throw new Error(`Server returned non-JSON (${res.status}): ${text.slice(0, 200)}`)
+  }
+  if (!res.ok) {
+    throw new Error(data?.error || `HTTP ${res.status}`)
   }
   if (!data.success && data.error) {
     throw new Error(data.error)
@@ -71,9 +74,19 @@ export interface DecodeResult {
   }
 }
 
+export interface MemoryListItem {
+  anchor: string
+  data_dim: number
+  created_at: number
+  tags: string[]
+  category: string | null
+  description: string | null
+  importance: number
+}
+
 export interface MemoryListResult {
   success: boolean
-  data: string[]
+  data: MemoryListItem[]
 }
 
 export interface PulseResult {

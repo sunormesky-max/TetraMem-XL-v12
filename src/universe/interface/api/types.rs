@@ -281,6 +281,17 @@ pub struct TraceHop {
     pub hop: usize,
 }
 
+#[derive(Serialize)]
+pub struct MemoryListItem {
+    pub anchor: String,
+    pub data_dim: usize,
+    pub created_at: u64,
+    pub tags: Vec<String>,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub importance: f64,
+}
+
 #[derive(Deserialize)]
 pub struct TraceRequest {
     pub anchor: [i32; 3],

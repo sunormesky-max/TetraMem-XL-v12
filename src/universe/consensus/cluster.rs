@@ -18,6 +18,7 @@ use super::raft_node::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterNodeInfo {
+    #[serde(rename = "id")]
     pub node_id: u64,
     pub addr: String,
     pub role: String,
@@ -32,6 +33,7 @@ pub struct ClusterStatus {
     pub term: u64,
     pub log_index: u64,
     pub applied_count: usize,
+    #[serde(rename = "role")]
     pub status: String,
 }
 
@@ -54,7 +56,9 @@ pub struct RemoveNodeRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeRequest {
+    #[serde(alias = "key")]
     pub action: String,
+    #[serde(alias = "value")]
     pub data: serde_json::Value,
 }
 

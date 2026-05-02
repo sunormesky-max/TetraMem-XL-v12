@@ -139,19 +139,8 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
-        tracing::warn!("⚠ AUTH IS DISABLED — all requests granted read-only user role");
-        tracing::warn!(
-            "⚠ Set TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 to restore admin access (NOT for production)"
-        );
-        let role = if std::env::var("TETRAMEM_ALLOW_NO_AUTH_ADMIN").as_deref() == Ok("1") {
-            tracing::warn!(
-                "⚠ TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 detected — granting admin (development only)"
-            );
-            "admin"
-        } else {
-            "user"
-        };
-        let claims = Claims::anonymous(role);
+        tracing::warn!("⚠ AUTH IS DISABLED — granting admin role for all requests");
+        let claims = Claims::anonymous("admin");
         req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
     }

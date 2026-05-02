@@ -29,7 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { api } from '../services/api'
-import type { EncodeResult, DecodeResult } from '../services/api'
+import type { EncodeResult, DecodeResult, MemoryListItem } from '../services/api'
 
 const ease = [0.16, 1, 0.3, 1] as [number, number, number, number]
 
@@ -52,16 +52,15 @@ interface MemoryItem {
   raw: string
 }
 
-function parseMemoryString(s: string): MemoryItem {
-  const anchorMatch = s.match(/anchor=\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)/)
-  const dimMatch = s.match(/(\d+)\s*dims/)
+function memoryItemFromApi(m: MemoryListItem): MemoryItem {
+  const coordMatch = m.anchor.match(/\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)/)
   return {
-    id: s,
-    coord: anchorMatch
-      ? [Math.round(+anchorMatch[1]), Math.round(+anchorMatch[2]), Math.round(+anchorMatch[3])]
+    id: m.anchor,
+    coord: coordMatch
+      ? [Math.round(+coordMatch[1]), Math.round(+coordMatch[2]), Math.round(+coordMatch[3])]
       : [0, 0, 0],
-    dims: dimMatch ? +dimMatch[1] : 0,
-    raw: s,
+    dims: m.data_dim,
+    raw: m.description || m.anchor,
   }
 }
 
@@ -88,7 +87,7 @@ export default function Memory() {
     try {
       setListError('')
       const res = await api.listMemories()
-      const items = res.data.map((s) => parseMemoryString(s))
+      const items = res.data.map((m) => memoryItemFromApi(m))
       setMemories(items)
     } catch (err: any) {
       setListError(err.message || '加载记忆列表失败')

@@ -32,10 +32,10 @@ pub enum HealthLevel {
 impl HealthLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
-            HealthLevel::Excellent => "EXCELLENT",
-            HealthLevel::Good => "GOOD",
-            HealthLevel::Warning => "WARNING",
-            HealthLevel::Critical => "CRITICAL",
+            HealthLevel::Excellent => "Healthy",
+            HealthLevel::Good => "Good",
+            HealthLevel::Warning => "Warning",
+            HealthLevel::Critical => "Critical",
         }
     }
 }

@@ -16,8 +16,6 @@ enabled = false
 raft_secret = "not-used"
 jwt_expiry_secs = 86400
 
-[[auth.users]]
-
 [logging]
 level = "warn"
 json_format = false

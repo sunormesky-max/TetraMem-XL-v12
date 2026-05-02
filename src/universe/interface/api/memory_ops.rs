@@ -188,9 +188,20 @@ pub async fn decode_memory(
     ))
 }
 
-pub async fn list_memories(State(state): State<SharedState>) -> Json<ApiResponse<Vec<String>>> {
+pub async fn list_memories(State(state): State<SharedState>) -> Json<ApiResponse<Vec<MemoryListItem>>> {
     let mems = state.memories.read().await;
-    let list: Vec<String> = mems.iter().map(|m| format!("{}", m)).collect();
+    let list: Vec<MemoryListItem> = mems
+        .iter()
+        .map(|m| MemoryListItem {
+            anchor: format!("{}", m.anchor()),
+            data_dim: m.data_dim(),
+            created_at: m.created_at(),
+            tags: m.tags().to_vec(),
+            category: m.category().map(String::from),
+            description: m.description().map(String::from),
+            importance: m.importance(),
+        })
+        .collect();
     Json(ApiResponse::ok(list))
 }
 
