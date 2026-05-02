@@ -1044,40 +1044,61 @@ fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
+        .filter(|w| !w.is_empty() && w.len() > 1)
         .collect();
 
+    let stop_words: &[&str] = &[
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can",
+        "need", "must", "ought", "to", "of", "in", "for", "on", "with", "at", "by", "from", "as",
+        "into", "through", "during", "before", "after", "above", "below", "between", "out", "off",
+        "over", "under", "again", "further", "then", "once", "and", "but", "or", "nor", "not",
+        "so", "yet", "both", "either", "neither", "each", "every", "all", "any", "few", "more",
+        "most", "other", "some", "such", "no", "only", "own", "same", "than", "too", "very",
+        "just", "because", "if", "when", "where", "how", "what", "which", "who", "whom", "this",
+        "that", "these", "those", "it", "its", "he", "she", "they", "them", "we", "you", "me",
+        "my", "your", "his", "her", "our", "their",
+    ];
+
     for word in &words {
-        let mut h: u64 = 0;
-        for b in word.as_bytes() {
-            h = h.wrapping_mul(31).wrapping_add(*b as u64);
+        if stop_words.contains(word) {
+            continue;
         }
-        let slot1 = (h as usize) % dim;
-        let slot2 = (h.wrapping_mul(37) as usize) % dim;
-        let slot3 = (h.wrapping_mul(53) as usize) % dim;
-        vec[slot1] += 1.0;
-        vec[slot2] += 0.7;
-        vec[slot3] += 0.3;
+
+        let subwords = extract_subwords(word);
+
+        let synonym_hash = synonym_bucket(word);
+
+        for sw in &subwords {
+            let mut h: u64 = 5381;
+            for b in sw.as_bytes() {
+                h = h.wrapping_mul(33).wrapping_add(*b as u64);
+            }
+            let s1 = (h as usize) % dim;
+            let s2 = (h.wrapping_mul(37) as usize) % dim;
+            let s3 = (h.wrapping_mul(53) as usize) % dim;
+            let s4 = (h.wrapping_mul(59) as usize) % dim;
+            vec[s1] += 1.0;
+            vec[s2] += 0.8;
+            vec[s3] += 0.5;
+            vec[s4] += 0.3;
+        }
+
+        if let Some(bucket) = synonym_hash {
+            let b = bucket as usize;
+            vec[b % dim] += 2.0;
+            vec[(b * 7 + 3) % dim] += 1.5;
+            vec[(b * 13 + 7) % dim] += 1.0;
+        }
     }
 
     for i in 0..lower.len().saturating_sub(2) {
         let trigram = &lower[i..i + 3];
-        let mut h: u64 = 0;
+        let mut h: u64 = 5381;
         for b in trigram.as_bytes() {
             h = h.wrapping_mul(37).wrapping_add(*b as u64);
         }
-        let slot = (h as usize) % dim;
-        vec[slot] += 0.5;
-    }
-
-    for i in 0..lower.len().saturating_sub(1) {
-        let bigram = &lower[i..i + 2];
-        let mut h: u64 = 0;
-        for b in bigram.as_bytes() {
-            h = h.wrapping_mul(31).wrapping_add(*b as u64);
-        }
-        let slot = (h as usize) % dim;
-        vec[slot] += 0.3;
+        vec[(h as usize) % dim] += 0.4;
     }
 
     vec[0] = words.len() as f64 * 0.1;
@@ -1092,6 +1113,243 @@ fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
     }
 
     vec
+}
+
+fn extract_subwords(word: &str) -> Vec<String> {
+    let mut subs = Vec::new();
+    let bytes = word.as_bytes();
+    let n = bytes.len();
+
+    if n >= 3 {
+        for start in 0..=n.saturating_sub(3) {
+            let end = (start + 5).min(n);
+            if end - start >= 3 {
+                subs.push(String::from_utf8_lossy(&bytes[start..end]).to_string());
+            }
+        }
+        subs.push(format!("<{}>", word));
+        subs.push(format!("<{}", &word[word.len().min(3)..]));
+        subs.push(format!("{}>", &word[..word.len().saturating_sub(3).max(1)]));
+    }
+
+    subs.push(word.to_string());
+
+    subs
+}
+
+fn synonym_bucket(word: &str) -> Option<u64> {
+    let buckets: &[&[&str]] = &[
+        &[
+            "prefer",
+            "like",
+            "love",
+            "enjoy",
+            "favor",
+            "fancy",
+            "adore",
+            "appreciate",
+        ],
+        &["dislike", "hate", "detest", "loathe", "abhor", "despise"],
+        &[
+            "good",
+            "great",
+            "excellent",
+            "fine",
+            "nice",
+            "wonderful",
+            "amazing",
+            "awesome",
+            "fantastic",
+        ],
+        &[
+            "bad", "poor", "terrible", "awful", "horrible", "dreadful", "worst",
+        ],
+        &[
+            "big", "large", "huge", "vast", "enormous", "massive", "giant", "immense",
+        ],
+        &[
+            "small", "tiny", "little", "mini", "micro", "compact", "minor",
+        ],
+        &[
+            "fast", "quick", "rapid", "swift", "speedy", "prompt", "hasty",
+        ],
+        &["slow", "sluggish", "gradual", "steady", "leisurely"],
+        &[
+            "happy",
+            "glad",
+            "joyful",
+            "cheerful",
+            "pleased",
+            "delighted",
+            "content",
+        ],
+        &[
+            "sad",
+            "unhappy",
+            "depressed",
+            "miserable",
+            "gloomy",
+            "sorrowful",
+        ],
+        &[
+            "important",
+            "significant",
+            "crucial",
+            "vital",
+            "essential",
+            "critical",
+            "key",
+        ],
+        &[
+            "think", "believe", "consider", "suppose", "assume", "guess", "reckon",
+        ],
+        &[
+            "know",
+            "understand",
+            "comprehend",
+            "grasp",
+            "realize",
+            "recognize",
+        ],
+        &["use", "utilize", "employ", "apply", "operate", "leverage"],
+        &[
+            "make",
+            "create",
+            "build",
+            "construct",
+            "produce",
+            "generate",
+            "develop",
+        ],
+        &["help", "assist", "support", "aid", "facilitate", "enable"],
+        &["need", "require", "demand", "want", "desire", "wish"],
+        &[
+            "change",
+            "modify",
+            "alter",
+            "adjust",
+            "transform",
+            "update",
+            "convert",
+        ],
+        &["start", "begin", "launch", "initiate", "commence", "open"],
+        &[
+            "stop",
+            "end",
+            "finish",
+            "complete",
+            "conclude",
+            "terminate",
+            "halt",
+        ],
+        &["work", "function", "operate", "perform", "run", "execute"],
+        &[
+            "system",
+            "platform",
+            "framework",
+            "engine",
+            "architecture",
+            "infrastructure",
+        ],
+        &[
+            "data",
+            "information",
+            "knowledge",
+            "facts",
+            "details",
+            "records",
+        ],
+        &["user", "client", "customer", "person", "human", "people"],
+        &["dark", "night", "shadow", "dim", "black", "obscure"],
+        &["light", "bright", "luminous", "clear", "vivid", "radiant"],
+        &[
+            "mode",
+            "setting",
+            "option",
+            "preference",
+            "configuration",
+            "theme",
+        ],
+        &["memory", "recall", "remember", "store", "retain", "record"],
+        &["learn", "study", "acquire", "absorb", "train", "educate"],
+        &[
+            "search", "find", "look", "seek", "discover", "explore", "query",
+        ],
+        &[
+            "show",
+            "display",
+            "present",
+            "reveal",
+            "exhibit",
+            "demonstrate",
+        ],
+        &["hide", "conceal", "mask", "cover", "obscure", "cloak"],
+        &[
+            "connect",
+            "link",
+            "join",
+            "associate",
+            "bind",
+            "attach",
+            "relate",
+        ],
+        &[
+            "error", "bug", "fault", "defect", "issue", "problem", "mistake",
+        ],
+        &[
+            "fix", "repair", "correct", "resolve", "patch", "solve", "debug",
+        ],
+        &[
+            "new", "fresh", "recent", "latest", "modern", "current", "novel",
+        ],
+        &[
+            "old", "ancient", "outdated", "legacy", "obsolete", "vintage",
+        ],
+        &[
+            "simple",
+            "easy",
+            "basic",
+            "straightforward",
+            "plain",
+            "elementary",
+        ],
+        &[
+            "complex",
+            "complicated",
+            "intricate",
+            "elaborate",
+            "sophisticated",
+        ],
+        &[
+            "safe",
+            "secure",
+            "protected",
+            "guarded",
+            "reliable",
+            "stable",
+        ],
+        &[
+            "danger",
+            "risk",
+            "threat",
+            "hazard",
+            "peril",
+            "vulnerability",
+        ],
+    ];
+
+    for (i, bucket) in buckets.iter().enumerate() {
+        if bucket.contains(&word) {
+            return Some(i as u64 * 17 + 3);
+        }
+        if bucket.iter().any(|&w| {
+            word.len() >= 4 && w.len() >= 4 && (word.starts_with(w) || w.starts_with(word))
+        }) {
+            return Some(i as u64 * 17 + 3);
+        }
+    }
+
+    None
 }
 
 fn text_to_anchor(text: &str) -> Coord7D {
