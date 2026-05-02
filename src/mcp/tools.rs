@@ -656,38 +656,12 @@ impl TetraMemTools {
                     .unwrap_or("agent")
                     .to_string();
 
-                let mut data = Vec::new();
-                for b in content.as_bytes().iter().take(28) {
-                    data.push((*b as f64) / 255.0 * importance);
-                }
-                while data.len() < 7 {
-                    data.push(0.0);
-                }
-                data.truncate(28);
-
-                let data_hash = {
-                    let mut h = 0u64;
-                    for b in content.as_bytes() {
-                        h = h.wrapping_mul(31).wrapping_add(*b as u64);
-                    }
-                    h
-                };
-                let ax = ((data_hash & 0xFFFF) as i32) % 1000;
-                let ay = (((data_hash >> 16) & 0xFFFF) as i32) % 1000;
-                let az = (((data_hash >> 32) & 0xFFFF) as i32) % 1000;
-                let anchor = Coord7D::new_even([ax, ay, az, 0, 0, 0, 0]);
+                let data = text_to_embedding(&content, importance);
+                let anchor = text_to_anchor(&content);
 
                 match MemoryCodec::encode(universe, &anchor, &data) {
                     Ok(mut mem) => {
                         let anchor_str = format!("{}", mem.anchor());
-                        let _mem_data: Vec<f64> = (0..mem.data_dim())
-                            .map(|i| {
-                                let idx = i;
-                                let base = if idx < 7 { 1.01 } else { 0.01 };
-                                base + data.get(idx).copied().unwrap_or(0.0)
-                                    - data.get(idx).copied().unwrap_or(0.0)
-                            })
-                            .collect();
 
                         for tag in &tags {
                             mem.add_tag(tag);
@@ -738,15 +712,7 @@ impl TetraMemTools {
                 };
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-                let mut query_data = Vec::new();
-                for b in query.as_bytes().iter().take(28) {
-                    query_data.push(*b as f64 / 255.0);
-                }
-                while query_data.len() < 7 {
-                    query_data.push(0.0);
-                }
-                query_data.truncate(28);
-
+                let query_data = text_to_embedding(&query, 0.5);
                 let knn_results = semantic.search_similar(&query_data, limit * 2);
 
                 let mut hits = Vec::new();
@@ -755,7 +721,6 @@ impl TetraMemTools {
                         break;
                     }
                     let anchor_basis = knn.atom_key.vertices_basis[0];
-                    let _anchor = Coord7D::new_even(anchor_basis);
                     if let Some(mem) = memories.iter().find(|m| m.anchor().basis() == anchor_basis)
                     {
                         let anchor_coord = *mem.anchor();
@@ -776,6 +741,10 @@ impl TetraMemTools {
                             "dimensions": mem.data_dim(),
                             "hebbian_neighbors": nb.len(),
                             "associated_memories": associated,
+                            "description": mem.description().unwrap_or(""),
+                            "tags": mem.tags(),
+                            "category": mem.category().unwrap_or(""),
+                            "importance": mem.importance(),
                         }));
                     }
                 }
@@ -798,21 +767,16 @@ impl TetraMemTools {
                 let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-                let mut topic_data = Vec::new();
-                for b in topic.as_bytes().iter().take(28) {
-                    topic_data.push(*b as f64 / 255.0);
-                }
-                while topic_data.len() < 7 {
-                    topic_data.push(0.0);
-                }
-                topic_data.truncate(28);
-
+                let topic_data = text_to_embedding(&topic, 0.5);
                 let knn = semantic.search_similar(&topic_data, 1);
                 let seed_anchor = match knn.first() {
                     Some(k) => Coord7D::new_even(k.atom_key.vertices_basis[0]),
-                    None => return super::protocol::ToolCallResult::ok(
-                        json!({"topic": topic, "associations": [], "message": "no matching memories found"}).to_string()
-                    ),
+                    None => {
+                        return super::protocol::ToolCallResult::ok(
+                            json!({"topic": topic, "associations": [], "message": "no matching memories found"})
+                                .to_string(),
+                        )
+                    }
                 };
 
                 let associations = ReasoningEngine::find_associations(
@@ -924,25 +888,9 @@ impl TetraMemTools {
                                 context_window.drain(..context_window.len() / 2).collect();
                             let mut archived_ids = Vec::new();
                             for entry in overflow_entries {
-                                let mut data = Vec::new();
-                                for b in entry.content.as_bytes().iter().take(28) {
-                                    data.push(*b as f64 / 255.0);
-                                }
-                                while data.len() < 7 {
-                                    data.push(0.0);
-                                }
-                                data.truncate(28);
+                                let data = text_to_embedding(&entry.content, 0.3);
 
-                                let hash = {
-                                    let mut h = 0u64;
-                                    for b in entry.content.as_bytes() {
-                                        h = h.wrapping_mul(31).wrapping_add(*b as u64);
-                                    }
-                                    h
-                                };
-                                let ax = ((hash & 0xFFFF) as i32) % 1000
-                                    + context_window.len() as i32 * 7;
-                                let anchor = Coord7D::new_even([ax, 0, 0, 0, 0, 0, 0]);
+                                let anchor = text_to_anchor(&entry.content);
 
                                 if let Ok(mem) = MemoryCodec::encode(universe, &anchor, &data) {
                                     semantic.index_memory(&mem, &data);
@@ -976,13 +924,16 @@ impl TetraMemTools {
 
                         let current_tokens: usize =
                             context_window.iter().map(|e| e.token_estimate).sum();
-                        super::protocol::ToolCallResult::ok(json!({
-                            "action": "add",
-                            "context_entries": context_window.len(),
-                            "current_tokens": current_tokens,
-                            "max_tokens": context_max_tokens,
-                            "overflow_archived": memory_id.as_ref().map(|ids| ids.len()).unwrap_or(0),
-                        }).to_string())
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "action": "add",
+                                "context_entries": context_window.len(),
+                                "current_tokens": current_tokens,
+                                "max_tokens": context_max_tokens,
+                                "overflow_archived": memory_id.as_ref().map(|ids| ids.len()).unwrap_or(0),
+                            })
+                            .to_string(),
+                        )
                     }
                     "status" => {
                         let current_tokens: usize =
@@ -1001,15 +952,7 @@ impl TetraMemTools {
                     }
                     "reconstruct" => {
                         let query = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                        let mut query_data = Vec::new();
-                        for b in query.as_bytes().iter().take(28) {
-                            query_data.push(*b as f64 / 255.0);
-                        }
-                        while query_data.len() < 7 {
-                            query_data.push(0.0);
-                        }
-                        query_data.truncate(28);
-
+                        let query_data = text_to_embedding(query, 0.5);
                         let knn = semantic.search_similar(&query_data, 5);
                         let mut reconstructed = Vec::new();
                         for k in &knn {
@@ -1020,6 +963,7 @@ impl TetraMemTools {
                                 reconstructed.push(json!({
                                     "anchor": format!("{}", mem.anchor()),
                                     "similarity": k.similarity,
+                                    "description": mem.description().unwrap_or(""),
                                 }));
                             }
                         }
@@ -1091,6 +1035,79 @@ impl TetraMemTools {
             _ => None,
         }
     }
+}
+
+fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
+    let dim = 28usize;
+    let mut vec = vec![0.0f64; dim];
+
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    for word in &words {
+        let mut h: u64 = 0;
+        for b in word.as_bytes() {
+            h = h.wrapping_mul(31).wrapping_add(*b as u64);
+        }
+        let slot1 = (h as usize) % dim;
+        let slot2 = (h.wrapping_mul(37) as usize) % dim;
+        let slot3 = (h.wrapping_mul(53) as usize) % dim;
+        vec[slot1] += 1.0;
+        vec[slot2] += 0.7;
+        vec[slot3] += 0.3;
+    }
+
+    for i in 0..lower.len().saturating_sub(2) {
+        let trigram = &lower[i..i + 3];
+        let mut h: u64 = 0;
+        for b in trigram.as_bytes() {
+            h = h.wrapping_mul(37).wrapping_add(*b as u64);
+        }
+        let slot = (h as usize) % dim;
+        vec[slot] += 0.5;
+    }
+
+    for i in 0..lower.len().saturating_sub(1) {
+        let bigram = &lower[i..i + 2];
+        let mut h: u64 = 0;
+        for b in bigram.as_bytes() {
+            h = h.wrapping_mul(31).wrapping_add(*b as u64);
+        }
+        let slot = (h as usize) % dim;
+        vec[slot] += 0.3;
+    }
+
+    vec[0] = words.len() as f64 * 0.1;
+    vec[1] = lower.len() as f64 * 0.01;
+    vec[2] = importance;
+
+    let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm > 1e-10 {
+        for v in &mut vec {
+            *v /= norm;
+        }
+    }
+
+    vec
+}
+
+fn text_to_anchor(text: &str) -> Coord7D {
+    let lower = text.to_lowercase();
+    let mut h1: u64 = 5381;
+    let mut h2: u64 = 5271;
+    let mut h3: u64 = 65537;
+    for b in lower.as_bytes() {
+        h1 = h1.wrapping_mul(33).wrapping_add(*b as u64);
+        h2 = h2.wrapping_mul(37).wrapping_add(*b as u64);
+        h3 = h3.wrapping_mul(41).wrapping_add(*b as u64);
+    }
+    let ax = (h1 as i32).abs() % 10000;
+    let ay = (h2 as i32).abs() % 10000;
+    let az = (h3 as i32).abs() % 10000;
+    Coord7D::new_even([ax, ay, az, 0, 0, 0, 0])
 }
 
 fn parse_3d_coord(args: &Value, key: &str) -> Result<Coord7D, String> {
