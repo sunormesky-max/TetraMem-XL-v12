@@ -9,6 +9,7 @@ use axum::{
 use crate::universe::autoscale::AutoScaler;
 use crate::universe::coord::Coord7D;
 use crate::universe::error::AppError;
+use crate::universe::events::UniverseEvent;
 
 use super::state::SharedState;
 use super::types::*;
@@ -27,6 +28,12 @@ pub async fn auto_scale(State(state): State<SharedState>) -> Json<ApiResponse<Sc
         reason = ?report.reason,
         "auto-scale complete"
     );
+
+    state.event_sender.publish(UniverseEvent::ScaleEvent {
+        nodes_added: report.nodes_added,
+        energy_expanded_by: report.energy_expanded_by,
+        reason: format!("{:?}", report.reason),
+    });
 
     Json(ApiResponse::ok(ScaleResponse {
         energy_expanded_by: report.energy_expanded_by,

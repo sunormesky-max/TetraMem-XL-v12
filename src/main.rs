@@ -67,8 +67,37 @@ fn main() {
 
             let effective_addr = addr.unwrap_or_else(|| config.server.addr.clone());
             let persist_path = PathBuf::from(&config.backup.persist_path);
+            let use_sqlite = config.backup.persist_backend == "sqlite";
 
-            let (universe, hebbian, memories, crystal) = if PersistFile::exists(&persist_path) {
+            let (universe, hebbian, memories, crystal) = if use_sqlite {
+                let sqlite_path = persist_path.with_extension("db");
+                match tetramem_v12::universe::persist_sqlite::PersistSqlite::load(&sqlite_path) {
+                    Ok((mut u, h, m, c)) => {
+                        u.set_manifestation_threshold(config.universe.manifestation_threshold);
+                        let stats = u.stats();
+                        tracing::info!(
+                            "restored SQLite state: {} nodes, {} memories, {} edges, E={:.0}",
+                            stats.active_nodes,
+                            m.len(),
+                            h.edge_count(),
+                            stats.total_energy
+                        );
+                        (u, h, m, c)
+                    }
+                    Err(e) => {
+                        tracing::warn!("SQLite load failed ({}), starting fresh", e);
+                        (
+                            DarkUniverse::new_with_threshold(
+                                config.universe.total_energy,
+                                config.universe.manifestation_threshold,
+                            ),
+                            HebbianMemory::new(),
+                            Vec::new(),
+                            tetramem_v12::universe::crystal::CrystalEngine::new(),
+                        )
+                    }
+                }
+            } else if PersistFile::exists(&persist_path) {
                 tracing::info!(
                     "found persisted state at {}, loading...",
                     persist_path.display()
@@ -127,6 +156,17 @@ fn main() {
 
             let perception_budget =
                 tetramem_v12::universe::perception::PerceptionBudget::new(universe.total_energy());
+            let semantic_engine =
+                tetramem_v12::universe::memory::SemanticEngine::new(Default::default());
+            let clustering_engine = tetramem_v12::universe::memory::ClusteringEngine::new(
+                tetramem_v12::universe::memory::ClusteringConfig::default(),
+            );
+            let constitution =
+                tetramem_v12::universe::constitution::Constitution::tetramem_default();
+            let event_bus = tetramem_v12::universe::events::EventBus::new();
+            let event_sender = event_bus.sender();
+            let watchdog =
+                tetramem_v12::universe::watchdog::Watchdog::with_defaults(universe.total_energy());
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
                 universe: tokio::sync::RwLock::new(universe),
                 hebbian: tokio::sync::RwLock::new(hebbian),
@@ -134,6 +174,12 @@ fn main() {
                 memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
                 crystal: tokio::sync::RwLock::new(crystal),
                 perception: tokio::sync::RwLock::new(perception_budget),
+                semantic: tokio::sync::RwLock::new(semantic_engine),
+                clustering: tokio::sync::RwLock::new(clustering_engine),
+                constitution: tokio::sync::RwLock::new(constitution),
+                events: std::sync::Mutex::new(event_bus),
+                event_sender,
+                watchdog: tokio::sync::RwLock::new(watchdog),
                 backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
                 cluster: tokio::sync::Mutex::new(
                     tetramem_v12::universe::cluster::ClusterManager::new(
@@ -275,25 +321,43 @@ fn main() {
                 }
 
                 if auto_persist && persist_interval > 0 {
+                    let use_sqlite_clone = use_sqlite;
                     let handle = tokio::spawn(async move {
                         let mut interval =
                             tokio::time::interval(std::time::Duration::from_secs(persist_interval));
                         interval.tick().await;
                         loop {
                             interval.tick().await;
-                            let json = {
+                            if use_sqlite_clone {
+                                let sqlite_path = persist_path_clone.with_extension("db");
                                 let u = state_clone.universe.read().await;
                                 let h = state_clone.hebbian.read().await;
                                 let mems = state_clone.memories.read().await;
                                 let c = state_clone.crystal.read().await;
-                                tetramem_v12::universe::persist::PersistEngine::to_json(
-                                    &u, &h, &mems, &c,
-                                )
-                            };
-                            match json {
-                                Ok(json_str) => {
-                                if let Some(parent) = persist_path_clone.parent() {
-                                    let _ = tokio::fs::create_dir_all(parent).await;
+                                match tetramem_v12::universe::persist_sqlite::PersistSqlite::save(
+                                    &sqlite_path, &u, &h, &mems, &c,
+                                ) {
+                                    Ok(rows) => {
+                                        tracing::debug!("auto-persist SQLite: {} rows", rows);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("auto-persist SQLite failed: {}", e)
+                                    }
+                                }
+                            } else {
+                                let json = {
+                                    let u = state_clone.universe.read().await;
+                                    let h = state_clone.hebbian.read().await;
+                                    let mems = state_clone.memories.read().await;
+                                    let c = state_clone.crystal.read().await;
+                                    tetramem_v12::universe::persist::PersistEngine::to_json(
+                                        &u, &h, &mems, &c,
+                                    )
+                                };
+                                match json {
+                                    Ok(json_str) => {
+                                    if let Some(parent) = persist_path_clone.parent() {
+                                        let _ = tokio::fs::create_dir_all(parent).await;
                                     }
                                     let tmp = persist_path_clone.with_extension("json.tmp");
                                     let tmp_clone = tmp.clone();
@@ -322,10 +386,13 @@ fn main() {
                                 }
                                 Err(e) => tracing::warn!("auto-persist serialize failed: {}", e),
                             }
+                            }
                         }
                     });
+                    let backend_name = if use_sqlite { "sqlite" } else { "json" };
                     tracing::info!(
-                        "auto-persist enabled, saving every {}s to {}",
+                        "auto-persist enabled ({}), saving every {}s to {}",
+                        backend_name,
                         persist_interval,
                         persist_path.display()
                     );

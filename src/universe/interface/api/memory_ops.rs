@@ -6,6 +6,7 @@ use axum::{extract::State, Json};
 
 use crate::universe::coord::Coord7D;
 use crate::universe::error::AppError;
+use crate::universe::events::UniverseEvent;
 use crate::universe::memory::{MemoryAtom, MemoryCodec};
 use crate::universe::metrics;
 
@@ -50,6 +51,16 @@ pub async fn encode_memory(
             )));
         }
     }
+    {
+        let con = state.constitution.read().await;
+        let check = con.validate_operation("materialize");
+        if !check.allowed {
+            return Err(AppError::Forbidden(format!(
+                "constitution blocks encode: {}",
+                check.violations.join("; ")
+            )));
+        }
+    }
     let mut u = state.universe.write().await;
     let mut mems = state.memories.write().await;
     let mut idx = state.memory_index.write().await;
@@ -66,10 +77,17 @@ pub async fn encode_memory(
             let manifested = atom.is_manifested(&u);
             let anchor_str = format!("{}", atom.anchor());
             let created_at = atom.created_at();
+            let data_dim = req.data.len();
+            let anchor_3 = req.anchor;
             tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
             let i = mems.len();
             mems.push(atom);
             idx.insert(anchor_str.clone(), i);
+            state.event_sender.publish(UniverseEvent::MemoryEncoded {
+                anchor: anchor_3,
+                data_dim,
+                importance: 0.5,
+            });
             Ok((
                 StatusCode::OK,
                 Json(ApiResponse::ok(EncodeResponse {

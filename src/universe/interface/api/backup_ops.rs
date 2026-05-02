@@ -6,6 +6,7 @@ use axum::{extract::State, Json};
 
 use crate::universe::backup::BackupTrigger;
 use crate::universe::error::AppError;
+use crate::universe::events::UniverseEvent;
 
 use super::state::SharedState;
 use super::types::*;
@@ -28,6 +29,12 @@ pub async fn create_backup(
     drop(mems);
     drop(c);
     drop(bs);
+
+    state.event_sender.publish(UniverseEvent::BackupCreated {
+        backup_id: report.metadata.id,
+        bytes: report.metadata.bytes,
+        conservation_ok: report.metadata.conservation_ok,
+    });
 
     Ok((
         StatusCode::OK,

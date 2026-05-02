@@ -21,6 +21,8 @@ fn build_state() -> Arc<AppState> {
     metrics::init_metrics();
     let mut config = AppConfig::default();
     config.auth.enabled = false;
+    let event_bus = tetramem_v12::universe::events::EventBus::new();
+    let event_sender = event_bus.sender();
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(10_000_000.0)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
@@ -29,6 +31,22 @@ fn build_state() -> Arc<AppState> {
         crystal: tokio::sync::RwLock::new(CrystalEngine::new()),
         perception: tokio::sync::RwLock::new(
             tetramem_v12::universe::perception::PerceptionBudget::new(10_000_000.0),
+        ),
+        semantic: tokio::sync::RwLock::new(tetramem_v12::universe::memory::SemanticEngine::new(
+            Default::default(),
+        )),
+        clustering: tokio::sync::RwLock::new(
+            tetramem_v12::universe::memory::ClusteringEngine::new(
+                tetramem_v12::universe::memory::ClusteringConfig::default(),
+            ),
+        ),
+        constitution: tokio::sync::RwLock::new(
+            tetramem_v12::universe::constitution::Constitution::tetramem_default(),
+        ),
+        events: std::sync::Mutex::new(event_bus),
+        event_sender,
+        watchdog: tokio::sync::RwLock::new(
+            tetramem_v12::universe::watchdog::Watchdog::with_defaults(10_000_000.0),
         ),
         backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),

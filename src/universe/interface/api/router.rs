@@ -26,7 +26,12 @@ use super::backup_ops::{create_backup, list_backups};
 use super::cluster_ops::{
     cluster_add_node, cluster_init, cluster_propose, cluster_remove_node, cluster_status,
 };
-use super::cognitive::{fire_pulse, perception_replenish, perception_status, regulate, run_dream};
+use super::cognitive::{
+    agent_execute_crystal, agent_execute_emotion, agent_execute_observer, clustering_maintenance,
+    clustering_status, constitution_status, events_status, fire_pulse, perception_replenish,
+    perception_status, regulate, run_dream, semantic_extract_concepts, semantic_index_all,
+    semantic_status, watchdog_checkup, watchdog_status,
+};
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
     dark_transfer,
@@ -302,6 +307,13 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/emotion/dream", post(emotion_dream))
         .route("/emotion/status", get(emotion_status))
         .route("/perception/status", get(perception_status))
+        .route("/semantic/status", get(semantic_status))
+        .route("/clustering/status", get(clustering_status))
+        .route("/constitution/status", get(constitution_status))
+        .route("/events/status", get(events_status))
+        .route("/watchdog/status", get(watchdog_status))
+        .route("/agent/observer", get(agent_execute_observer))
+        .route("/agent/emotion", get(agent_execute_emotion))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
@@ -327,6 +339,14 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/physics/configure", post(physics_configure))
         .route("/emotion/crystallize", post(emotion_crystallize))
         .route("/perception/replenish", post(perception_replenish))
+        .route("/semantic/index-all", post(semantic_index_all))
+        .route(
+            "/semantic/extract-concepts",
+            post(semantic_extract_concepts),
+        )
+        .route("/clustering/maintenance", post(clustering_maintenance))
+        .route("/watchdog/checkup", post(watchdog_checkup))
+        .route("/agent/crystal", post(agent_execute_crystal))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(admin_middleware))
         .layer(middleware::from_fn(metrics_middleware))

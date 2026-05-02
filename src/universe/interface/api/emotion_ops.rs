@@ -8,6 +8,7 @@ use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
 use crate::universe::dream::DreamEngine;
 use crate::universe::error::AppError;
+use crate::universe::events::UniverseEvent;
 use crate::universe::pulse::{EmotionPulseConfig, PulseEngine, PulseType};
 
 use super::state::SharedState;
@@ -177,6 +178,16 @@ pub async fn emotion_crystallize(
     State(state): State<SharedState>,
     Json(req): Json<EmotionCrystallizeRequest>,
 ) -> Result<Json<ApiResponse<EmotionCrystallizeResponse>>, AppError> {
+    {
+        let con = state.constitution.read().await;
+        let check = con.validate_operation("crystal_form");
+        if !check.allowed {
+            return Err(AppError::Forbidden(format!(
+                "constitution blocks crystallize: {}",
+                check.violations.join("; ")
+            )));
+        }
+    }
     let u = state.universe.read().await;
     let mut crystal = state.crystal.write().await;
     let h = state.hebbian.read().await;
@@ -189,6 +200,12 @@ pub async fn emotion_crystallize(
     tracing::info!(source = ?es, "running emotion crystallization");
 
     let report = crystal.crystallize_emotion(&h, &u, es);
+
+    state.event_sender.publish(UniverseEvent::CrystalFormed {
+        new_crystals: report.new_crystals,
+        new_super: report.new_super_crystals,
+        total_crystals: report.total_crystals,
+    });
 
     Ok(Json(ApiResponse::ok(EmotionCrystallizeResponse {
         new_crystals: report.new_crystals,

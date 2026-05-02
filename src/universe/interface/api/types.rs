@@ -227,3 +227,53 @@ pub struct PerceptionStatusResponse {
     pub returned: f64,
     pub utilization: f64,
 }
+
+#[derive(Serialize)]
+pub struct SemanticStatusResponse {
+    pub embeddings_indexed: usize,
+    pub relations_total: usize,
+    pub concepts_extracted: usize,
+}
+
+#[derive(Serialize)]
+pub struct ClusteringStatusResponse {
+    pub memories_clustered: usize,
+    pub attractors_found: usize,
+    pub tunnels_active: usize,
+    pub bridges_active: usize,
+}
+
+#[derive(Serialize)]
+pub struct ConstitutionStatusResponse {
+    pub rules_count: usize,
+    pub bounds_count: usize,
+    pub rules: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct EventsStatusResponse {
+    pub history_len: usize,
+    pub subscriber_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct WatchdogStatusResponse {
+    pub total_checkups: u64,
+    pub uptime_ms: f64,
+}
+
+#[derive(Serialize)]
+pub struct WatchdogCheckupResponse {
+    pub level: String,
+    pub utilization: f64,
+    pub conservation_ok: bool,
+    pub actions: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct AgentExecuteResponse {
+    pub agent: String,
+    pub success: bool,
+    pub duration_ms: f64,
+    pub details: String,
+}

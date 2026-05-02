@@ -93,6 +93,8 @@ pub struct BackupFileConfig {
     pub auto_persist: bool,
     #[serde(default = "default_persist_path")]
     pub persist_path: String,
+    #[serde(default = "default_persist_backend")]
+    pub persist_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +155,7 @@ fn default_backup() -> BackupFileConfig {
         max_generations: default_max_generations(),
         auto_persist: default_auto_persist(),
         persist_path: default_persist_path(),
+        persist_backend: default_persist_backend(),
     }
 }
 
@@ -219,6 +222,9 @@ fn default_auto_persist() -> bool {
 }
 fn default_persist_path() -> String {
     "./data/tetramem_state.json".to_string()
+}
+fn default_persist_backend() -> String {
+    "json".to_string()
 }
 fn default_rpm() -> u64 {
     1000
