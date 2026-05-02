@@ -188,7 +188,9 @@ pub async fn decode_memory(
     ))
 }
 
-pub async fn list_memories(State(state): State<SharedState>) -> Json<ApiResponse<Vec<MemoryListItem>>> {
+pub async fn list_memories(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<Vec<MemoryListItem>>> {
     let mems = state.memories.read().await;
     let list: Vec<MemoryListItem> = mems
         .iter()
