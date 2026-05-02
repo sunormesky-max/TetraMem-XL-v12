@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tetramem": {
+      "command": "tetramem-v12",
+      "args": ["mcp", "--energy", "10000000.0"],
+      "description": "TetraMem-XL v12.0 — 7D Dark Universe Memory System. 18 MCP tools: 13 core (encode/decode/pulse/dream/topology/...) + 5 agent-facing (remember/recall/associate/consolidate/context)."
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "models": [
+    {
+      "title": "TetraMem-XL Memory",
+      "provider": "mcp",
+      "model": "tetramem",
+      "mcpServers": {
+        "tetramem": {
+          "command": "tetramem-v12",
+          "args": ["mcp", "--energy", "10000000.0"]
+        }
+      }
+    }
+  ]
+}

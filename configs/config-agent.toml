@@ -1,0 +1,33 @@
+# TetraMem-XL v12.0 — Agent Mode Configuration
+# Optimized for AI agent memory integration via MCP + REST
+# Usage: tetramem-v12 serve -c config-agent.toml
+
+[server]
+addr = "127.0.0.1:3456"
+timeout_secs = 30
+body_limit_bytes = 10485760
+
+[universe]
+total_energy = 10000000.0
+manifestation_threshold = 0.5
+
+[auth]
+enabled = false
+raft_secret = "not-used"
+jwt_expiry_secs = 86400
+
+[[auth.users]]
+
+[logging]
+level = "warn"
+json_format = false
+
+[backup]
+dir = "./data/backups"
+interval_secs = 600
+max_generations = 5
+persist_backend = "sqlite"
+
+[rate_limit]
+requests_per_minute = 2000
+burst = 100

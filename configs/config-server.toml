@@ -1,0 +1,36 @@
+# TetraMem-XL v12.0 — Server Mode Configuration
+# Optimized for production REST API with auth and SQLite persistence
+# Usage: tetramem-v12 serve -c config-server.toml
+
+[server]
+addr = "0.0.0.0:3456"
+timeout_secs = 30
+body_limit_bytes = 52428800
+
+[universe]
+total_energy = 50000000.0
+manifestation_threshold = 0.5
+
+[auth]
+enabled = true
+raft_secret = "CHANGE-ME-TO-A-UNIQUE-RANDOM-SECRET"
+jwt_expiry_secs = 86400
+
+[[auth.users]]
+username = "admin"
+password_hash = "REPLACE_WITH_YOUR_OWN_ARGON2ID_HASH"
+role = "admin"
+
+[logging]
+level = "info"
+json_format = true
+
+[backup]
+dir = "./data/backups"
+interval_secs = 300
+max_generations = 20
+persist_backend = "sqlite"
+
+[rate_limit]
+requests_per_minute = 500
+burst = 30

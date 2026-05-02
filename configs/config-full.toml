@@ -1,0 +1,41 @@
+# TetraMem-XL v12.0 — Full Mode Configuration
+# All features enabled: auth, Raft consensus, SQLite, high energy
+# Usage: tetramem-v12 serve -c config-full.toml
+
+[server]
+addr = "0.0.0.0:3456"
+timeout_secs = 60
+body_limit_bytes = 104857600
+
+[universe]
+total_energy = 100000000.0
+manifestation_threshold = 0.5
+
+[auth]
+enabled = true
+raft_secret = "CHANGE-ME-TO-A-UNIQUE-RANDOM-SECRET"
+jwt_expiry_secs = 86400
+
+[[auth.users]]
+username = "admin"
+password_hash = "REPLACE_WITH_YOUR_OWN_ARGON2ID_HASH"
+role = "admin"
+
+[[auth.users]]
+username = "operator"
+password_hash = "REPLACE_WITH_YOUR_OWN_ARGON2ID_HASH"
+role = "operator"
+
+[logging]
+level = "debug"
+json_format = true
+
+[backup]
+dir = "./data/backups"
+interval_secs = 180
+max_generations = 50
+persist_backend = "sqlite"
+
+[rate_limit]
+requests_per_minute = 5000
+burst = 200

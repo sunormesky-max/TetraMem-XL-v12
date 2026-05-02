@@ -48,7 +48,11 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    Mcp,
+    Mcp {
+        #[arg(short, long, default_value = "10000000.0")]
+        energy: f64,
+    },
+    McpDemo,
     Skills,
 }
 
@@ -422,7 +426,13 @@ fn main() {
                 Err(e) => eprintln!("Error: {}", e),
             }
         }
-        Some(Commands::Mcp) => {
+        Some(Commands::Mcp { energy }) => {
+            let server = tetramem_v12::mcp::server::McpServer::new(energy);
+            if let Err(e) = server.run() {
+                tracing::error!("MCP server error: {}", e);
+            }
+        }
+        Some(Commands::McpDemo) => {
             tetramem_v12::mcp::server::run_mcp_demo();
         }
         Some(Commands::Skills) => {

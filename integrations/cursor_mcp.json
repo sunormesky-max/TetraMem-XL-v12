@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "tetramem": {
+        "command": "tetramem-v12",
+        "args": ["mcp", "--energy", "10000000.0"]
+      }
+    }
+  }
+}
