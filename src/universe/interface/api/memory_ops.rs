@@ -99,6 +99,21 @@ pub async fn encode_memory(
             {
                 let mut sem = state.semantic.write().await;
                 sem.index_memory(&atom, &req.data);
+                let similar = sem.search_similar(&req.data, 5);
+                drop(sem);
+
+                if !similar.is_empty() {
+                    let mut h = state.hebbian.write().await;
+                    for hit in &similar {
+                        if let Some(other) = mems.iter().find(|m| {
+                            let mk = crate::universe::memory::AtomKey::from_atom(m);
+                            mk == hit.atom_key
+                        }) {
+                            let semantic_strength = hit.similarity * 1.5;
+                            h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
+                        }
+                    }
+                }
             }
 
             let i = mems.len();

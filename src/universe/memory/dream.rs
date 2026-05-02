@@ -3,6 +3,7 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
+use crate::universe::coord::Coord7D;
 use crate::universe::core::physics::UniversePhysics;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
@@ -230,7 +231,7 @@ impl DreamEngine {
 
     fn replay_phase(&self, universe: &DarkUniverse, hebbian: &mut HebbianMemory) -> usize {
         let engine = PulseEngine::new();
-        let strong = hebbian.strongest_edges(20);
+        let strong = hebbian.strongest_edges(10);
         let mut replayed = 0;
 
         for ((a, b), w) in &strong {
@@ -268,22 +269,42 @@ impl DreamEngine {
             return 0;
         }
 
+        let anchor_set: std::collections::HashSet<Coord7D> =
+            memories.iter().map(|m| *m.anchor()).collect();
+
         let mut consolidated = 0;
-        for i in 0..memories.len() {
-            for j in (i + 1)..memories.len() {
-                let ai = memories[i].anchor();
-                let aj = memories[j].anchor();
-                let bias = hebbian.get_bias(ai, aj);
-                if bias >= self.config.consolidation_hebbian_threshold {
-                    let path = vec![*ai, *aj];
-                    hebbian.record_path(&path, bias * 1.5);
-                    consolidated += 1;
+        let mut seen_pairs: std::collections::HashSet<(Coord7D, Coord7D)> =
+            std::collections::HashSet::new();
+        for mem in memories {
+            let anchor = mem.anchor();
+            let neighbors = hebbian.get_neighbors(anchor);
+            for (neighbor_coord, weight) in &neighbors {
+                if !anchor_set.contains(neighbor_coord) {
+                    continue;
                 }
+                if *weight < self.config.consolidation_hebbian_threshold {
+                    continue;
+                }
+                let (a, b) = if *anchor < *neighbor_coord {
+                    (*anchor, *neighbor_coord)
+                } else {
+                    (*neighbor_coord, *anchor)
+                };
+                if seen_pairs.contains(&(a, b)) {
+                    continue;
+                }
+                seen_pairs.insert((a, b));
+                let path = vec![a, b];
+                hebbian.record_path(&path, weight * 1.5);
+                consolidated += 1;
             }
         }
 
         let engine = PulseEngine::new();
         for mem in memories {
+            if mem.importance() < 0.3 {
+                continue;
+            }
             let anchor = mem.anchor();
             if universe.get_node(anchor).is_some() {
                 engine.propagate(anchor, PulseType::Reinforcing, universe, hebbian);

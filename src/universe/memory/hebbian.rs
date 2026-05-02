@@ -161,6 +161,17 @@ impl HebbianMemory {
         self.edges.get(&key).map_or(0.0, |e| e.weight)
     }
 
+    pub fn boost_edge(&mut self, a: &Coord7D, b: &Coord7D, boost: f64) {
+        let key = canonical_edge(a, b);
+        if let Some(edge) = self.edges.get_mut(&key) {
+            edge.weight = (edge.weight + boost).min(MAX_EDGE_WEIGHT);
+            edge.traversal_count += 1;
+        } else {
+            self.edges
+                .insert(key, HebbianEdge::new(boost.min(MAX_EDGE_WEIGHT)));
+        }
+    }
+
     pub fn get_neighbors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
         let mut result = Vec::new();
         for ((a, b), edge) in &self.edges {
