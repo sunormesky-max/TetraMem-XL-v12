@@ -786,6 +786,14 @@ impl ClusteringEngine {
         self.placer.encode_with_clustering(universe, data)
     }
 
+    pub fn compute_ideal_anchor(&self, data: &[f64], universe: &DarkUniverse) -> Coord7D {
+        self.placer.compute_ideal_anchor(data, universe)
+    }
+
+    pub fn register_memory(&mut self, anchor: Coord7D, data: &[f64]) {
+        self.placer.register_memory(anchor, data);
+    }
+
     pub fn run_maintenance_cycle(
         &mut self,
         memories: &[MemoryAtom],

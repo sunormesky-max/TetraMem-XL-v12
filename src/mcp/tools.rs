@@ -321,7 +321,7 @@ impl TetraMemTools {
         memories: &mut Vec<MemoryAtom>,
         crystal: &mut CrystalEngine,
         semantic: &mut crate::universe::memory::semantic::SemanticEngine,
-        _clustering: &mut ClusteringEngine,
+        clustering: &mut ClusteringEngine,
         context_window: &mut Vec<ContextEntry>,
         context_max_tokens: usize,
     ) -> super::protocol::ToolCallResult {
@@ -657,7 +657,8 @@ impl TetraMemTools {
                     .to_string();
 
                 let data = text_to_embedding(&content, importance);
-                let anchor = text_to_anchor(&content);
+
+                let anchor = clustering.compute_ideal_anchor(&data, universe);
 
                 match MemoryCodec::encode(universe, &anchor, &data) {
                     Ok(mut mem) => {
@@ -687,6 +688,8 @@ impl TetraMemTools {
                             }
                         }
 
+                        clustering.register_memory(*mem.anchor(), &data);
+
                         let memory_id = format!("mem_{}", memories.len());
                         memories.push(mem);
                         super::protocol::ToolCallResult::ok(
@@ -701,7 +704,52 @@ impl TetraMemTools {
                         )
                     }
                     Err(e) => {
-                        super::protocol::ToolCallResult::err(format!("remember failed: {}", e))
+                        let fallback = text_to_anchor(&content);
+                        match MemoryCodec::encode(universe, &fallback, &data) {
+                            Ok(mut mem) => {
+                                let anchor_str = format!("{}", mem.anchor());
+                                for tag in &tags {
+                                    mem.add_tag(tag);
+                                }
+                                mem.set_category(&category);
+                                mem.set_description(&content);
+                                mem.set_source(&source);
+                                mem.set_importance(importance);
+                                semantic.index_memory(&mem, &data);
+                                let knn_results = semantic.search_similar(&data, 6);
+                                let mut links = 0usize;
+                                for knn in &knn_results {
+                                    if knn.atom_key.vertices_basis[0] != mem.anchor().basis() {
+                                        let neighbor_anchor =
+                                            Coord7D::new_even(knn.atom_key.vertices_basis[0]);
+                                        hebbian.boost_edge(
+                                            mem.anchor(),
+                                            &neighbor_anchor,
+                                            0.5 * knn.similarity,
+                                        );
+                                        links += 1;
+                                    }
+                                }
+                                clustering.register_memory(*mem.anchor(), &data);
+                                let memory_id = format!("mem_{}", memories.len());
+                                memories.push(mem);
+                                super::protocol::ToolCallResult::ok(
+                                    json!({
+                                        "success": true,
+                                        "memory_id": memory_id,
+                                        "anchor": anchor_str,
+                                        "semantic_links": links,
+                                        "conservation_ok": universe.verify_conservation(),
+                                        "fallback": true,
+                                    })
+                                    .to_string(),
+                                )
+                            }
+                            Err(e2) => super::protocol::ToolCallResult::err(format!(
+                                "remember failed: {} (fallback: {})",
+                                e, e2
+                            )),
+                        }
                     }
                 }
             }
