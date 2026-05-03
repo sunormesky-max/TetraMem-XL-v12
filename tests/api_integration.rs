@@ -74,27 +74,44 @@ async fn body_text(body: Body) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-fn get(uri: &str) -> Request<Body> {
+const API: &str = "/api";
+
+fn get(path: &str) -> Request<Body> {
+    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+        format!("{}{}", API, path)
+    } else {
+        path.to_string()
+    };
     Request::builder()
         .method("GET")
-        .uri(uri)
+        .uri(&uri)
         .body(Body::empty())
         .unwrap()
 }
 
-fn post(uri: &str, payload: Value) -> Request<Body> {
+fn post(path: &str, payload: Value) -> Request<Body> {
+    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+        format!("{}{}", API, path)
+    } else {
+        path.to_string()
+    };
     Request::builder()
         .method("POST")
-        .uri(uri)
+        .uri(&uri)
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap()
 }
 
-fn get_with_body(uri: &str, payload: Value) -> Request<Body> {
+fn get_with_body(path: &str, payload: Value) -> Request<Body> {
+    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+        format!("{}{}", API, path)
+    } else {
+        path.to_string()
+    };
     Request::builder()
         .method("GET")
-        .uri(uri)
+        .uri(&uri)
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap()
@@ -287,7 +304,7 @@ async fn test_dark_query() {
     let state = build_state();
     let app = create_router(state);
     let resp = app
-        .oneshot(get_with_body(
+        .oneshot(post(
             "/dark/query",
             json!({"coord": [99, 99, 99, 0, 0, 0, 0]}),
         ))
