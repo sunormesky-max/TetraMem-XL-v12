@@ -5,39 +5,19 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
+use super::core::TetraMemCore;
 use super::protocol::*;
 use super::tools::TetraMemTools;
 use crate::universe::config::AppConfig;
-use crate::universe::crystal::CrystalEngine;
-use crate::universe::hebbian::HebbianMemory;
-use crate::universe::memory::clustering::ClusteringEngine;
-use crate::universe::memory::semantic::SemanticConfig;
-use crate::universe::memory::semantic::SemanticEngine;
-use crate::universe::memory::MemoryAtom;
-use crate::universe::node::DarkUniverse;
 
 pub struct McpServer {
-    universe: DarkUniverse,
-    hebbian: HebbianMemory,
-    memories: Vec<MemoryAtom>,
-    crystal: CrystalEngine,
-    semantic: SemanticEngine,
-    clustering: ClusteringEngine,
-    context_window: Vec<super::tools::ContextEntry>,
-    context_max_tokens: usize,
+    core: TetraMemCore,
 }
 
 impl McpServer {
     pub fn new(total_energy: f64) -> Self {
         Self {
-            universe: DarkUniverse::new(total_energy),
-            hebbian: HebbianMemory::new(),
-            memories: Vec::new(),
-            crystal: CrystalEngine::new(),
-            semantic: SemanticEngine::new(SemanticConfig::default()),
-            clustering: ClusteringEngine::with_default_config(),
-            context_window: Vec::new(),
-            context_max_tokens: 4096,
+            core: TetraMemCore::new(total_energy),
         }
     }
 
@@ -137,18 +117,7 @@ impl McpServer {
                     }
                 };
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                let result = TetraMemTools::handle_tool(
-                    &tool_name,
-                    &args,
-                    &mut self.universe,
-                    &mut self.hebbian,
-                    &mut self.memories,
-                    &mut self.crystal,
-                    &mut self.semantic,
-                    &mut self.clustering,
-                    &mut self.context_window,
-                    self.context_max_tokens,
-                );
+                let result = TetraMemTools::handle_tool(&tool_name, &args, &mut self.core);
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap_or_default())
             }
             "resources/list" => {
@@ -174,12 +143,7 @@ impl McpServer {
                         )
                     }
                 };
-                match TetraMemTools::read_resource(
-                    &uri,
-                    &self.universe,
-                    &self.hebbian,
-                    &self.memories,
-                ) {
+                match TetraMemTools::read_resource(&uri, &self.core) {
                     Some(content) => JsonRpcResponse::success(id, json!({ "contents": [content] })),
                     None => JsonRpcResponse::error(
                         id,
@@ -194,18 +158,7 @@ impl McpServer {
 
 macro_rules! call_tool {
     ($server:expr, $name:expr, $args:expr) => {
-        TetraMemTools::handle_tool(
-            $name,
-            &$args,
-            &mut $server.universe,
-            &mut $server.hebbian,
-            &mut $server.memories,
-            &mut $server.crystal,
-            &mut $server.semantic,
-            &mut $server.clustering,
-            &mut $server.context_window,
-            $server.context_max_tokens,
-        )
+        TetraMemTools::handle_tool($name, &$args, &mut $server.core)
     };
 }
 

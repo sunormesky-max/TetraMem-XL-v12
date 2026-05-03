@@ -6,6 +6,7 @@ pub mod dream;
 pub mod hebbian;
 #[allow(clippy::module_inception)]
 pub mod memory;
+pub mod nlp;
 pub mod pulse;
 pub mod semantic;
 
@@ -15,6 +16,7 @@ pub use clustering::{
     TopologyBridge, TunnelEdge,
 };
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
+pub use nlp::{detect_contradictions, synonym_bucket, text_to_anchor, text_to_embedding};
 pub use semantic::{
     AtomKey, Concept, EmbeddingIndex, KnnResult, KnowledgeGraph, QueryFilter, QueryHit, Relation,
     RelationType, SemanticConfig, SemanticEmbedding, SemanticEngine, SemanticQuery, SemanticReport,

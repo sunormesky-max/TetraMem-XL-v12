@@ -237,6 +237,46 @@ impl EmotionMapper {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmotionReport {
+    pub pad: PadVector,
+    pub quadrant: EmotionalQuadrant,
+    pub pulse_suggestion: PulseStrategySuggestion,
+    pub dream_frequency_multiplier: f64,
+    pub crystal_threshold_modifier: f64,
+    pub energy_utilization: f64,
+    pub manifested_ratio: f64,
+    pub functional_cluster: String,
+    pub functional_valence: String,
+    pub functional_arousal: String,
+    pub is_positive: bool,
+    pub is_high_arousal: bool,
+}
+
+impl EmotionReport {
+    pub fn analyze(universe: &DarkUniverse) -> Self {
+        let reading = EmotionMapper::read(universe);
+        let func = crate::universe::cognitive::functional_emotion::FunctionalEmotion::from_pad(
+            reading.pad,
+            crate::universe::cognitive::functional_emotion::EmotionSource::Functional,
+        );
+        Self {
+            pad: reading.pad,
+            quadrant: reading.quadrant,
+            pulse_suggestion: reading.pulse_suggestion,
+            dream_frequency_multiplier: reading.dream_frequency_multiplier,
+            crystal_threshold_modifier: reading.crystal_threshold_modifier,
+            energy_utilization: reading.energy_utilization,
+            manifested_ratio: reading.manifested_ratio,
+            functional_cluster: func.cluster.name().to_string(),
+            functional_valence: format!("{:?}", func.valence),
+            functional_arousal: format!("{:?}", func.arousal),
+            is_positive: func.is_positive(),
+            is_high_arousal: func.is_high_arousal(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
