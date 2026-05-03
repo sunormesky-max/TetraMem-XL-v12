@@ -761,39 +761,103 @@ impl TetraMemTools {
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
                 let query_data = text_to_embedding(&query, 0.5);
-                let knn_results = semantic.search_similar(&query_data, limit * 2);
 
+                let ideal_anchor = clustering.compute_ideal_anchor(&query_data, universe);
+                let ideal_phys = ideal_anchor.physical();
+                let mut spatial_hits: Vec<(usize, f64)> = Vec::new();
+                for (i, mem) in memories.iter().enumerate() {
+                    let mem_phys = mem.anchor().physical();
+                    let dx = (ideal_phys[0] - mem_phys[0]).abs();
+                    let dy = (ideal_phys[1] - mem_phys[1]).abs();
+                    let dz = (ideal_phys[2] - mem_phys[2]).abs();
+                    if dx + dy + dz < 100 {
+                        let dist_sq = dx * dx + dy * dy + dz * dz;
+                        let score = 1.0 / (1.0 + (dist_sq as f64).sqrt());
+                        spatial_hits.push((i, score));
+                    }
+                }
+                spatial_hits
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                let mut seen_anchors = std::collections::HashSet::new();
                 let mut hits = Vec::new();
-                for knn in &knn_results {
+
+                for &(idx, spatial_score) in &spatial_hits {
                     if hits.len() >= limit {
                         break;
                     }
-                    let anchor_basis = knn.atom_key.vertices_basis[0];
-                    if let Some(mem) = memories.iter().find(|m| m.anchor().basis() == anchor_basis)
-                    {
-                        let anchor_coord = *mem.anchor();
-                        let nb = hebbian.get_neighbors(&anchor_coord);
-                        let associated: Vec<String> = nb
-                            .iter()
-                            .filter_map(|(coord, _)| {
-                                memories
-                                    .iter()
-                                    .find(|m| m.anchor() == coord)
-                                    .map(|m| format!("{}", m.anchor()))
-                            })
-                            .take(5)
-                            .collect();
-                        hits.push(json!({
-                            "anchor": format!("{}", mem.anchor()),
-                            "similarity": knn.similarity,
-                            "dimensions": mem.data_dim(),
-                            "hebbian_neighbors": nb.len(),
-                            "associated_memories": associated,
-                            "description": mem.description().unwrap_or(""),
-                            "tags": mem.tags(),
-                            "category": mem.category().unwrap_or(""),
-                            "importance": mem.importance(),
-                        }));
+                    let mem = &memories[idx];
+                    let anchor_key = mem.anchor().basis();
+                    if seen_anchors.contains(&anchor_key) {
+                        continue;
+                    }
+                    seen_anchors.insert(anchor_key);
+
+                    let anchor_coord = *mem.anchor();
+                    let nb = hebbian.get_neighbors(&anchor_coord);
+                    let associated: Vec<String> = nb
+                        .iter()
+                        .filter_map(|(coord, _)| {
+                            memories
+                                .iter()
+                                .find(|m| m.anchor() == coord)
+                                .map(|m| format!("{}", m.anchor()))
+                        })
+                        .take(5)
+                        .collect();
+                    hits.push(json!({
+                        "anchor": format!("{}", mem.anchor()),
+                        "similarity": spatial_score,
+                        "method": "spatial",
+                        "dimensions": mem.data_dim(),
+                        "hebbian_neighbors": nb.len(),
+                        "associated_memories": associated,
+                        "description": mem.description().unwrap_or(""),
+                        "tags": mem.tags(),
+                        "category": mem.category().unwrap_or(""),
+                        "importance": mem.importance(),
+                    }));
+                }
+
+                if hits.len() < limit {
+                    let knn_results = semantic.search_similar(&query_data, limit * 2);
+                    for knn in &knn_results {
+                        if hits.len() >= limit {
+                            break;
+                        }
+                        let anchor_basis = knn.atom_key.vertices_basis[0];
+                        if seen_anchors.contains(&anchor_basis) {
+                            continue;
+                        }
+                        seen_anchors.insert(anchor_basis);
+                        if let Some(mem) =
+                            memories.iter().find(|m| m.anchor().basis() == anchor_basis)
+                        {
+                            let anchor_coord = *mem.anchor();
+                            let nb = hebbian.get_neighbors(&anchor_coord);
+                            let associated: Vec<String> = nb
+                                .iter()
+                                .filter_map(|(coord, _)| {
+                                    memories
+                                        .iter()
+                                        .find(|m| m.anchor() == coord)
+                                        .map(|m| format!("{}", m.anchor()))
+                                })
+                                .take(5)
+                                .collect();
+                            hits.push(json!({
+                                "anchor": format!("{}", mem.anchor()),
+                                "similarity": knn.similarity,
+                                "method": "knn",
+                                "dimensions": mem.data_dim(),
+                                "hebbian_neighbors": nb.len(),
+                                "associated_memories": associated,
+                                "description": mem.description().unwrap_or(""),
+                                "tags": mem.tags(),
+                                "category": mem.category().unwrap_or(""),
+                                "importance": mem.importance(),
+                            }));
+                        }
                     }
                 }
 
@@ -801,7 +865,6 @@ impl TetraMemTools {
                     json!({
                         "query": query,
                         "results": hits,
-                        "total_found": knn_results.len(),
                         "returned": hits.len(),
                     })
                     .to_string(),
@@ -816,16 +879,23 @@ impl TetraMemTools {
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
                 let topic_data = text_to_embedding(&topic, 0.5);
-                let knn = semantic.search_similar(&topic_data, 1);
-                let seed_anchor = match knn.first() {
-                    Some(k) => Coord7D::new_even(k.atom_key.vertices_basis[0]),
-                    None => {
-                        return super::protocol::ToolCallResult::ok(
-                            json!({"topic": topic, "associations": [], "message": "no matching memories found"})
-                                .to_string(),
-                        )
-                    }
-                };
+                let ideal_anchor = clustering.compute_ideal_anchor(&topic_data, universe);
+
+                let seed_anchor = memories
+                    .iter()
+                    .min_by(|a, b| {
+                        let da = a.anchor().distance_sq(&ideal_anchor);
+                        let db = b.anchor().distance_sq(&ideal_anchor);
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|m| *m.anchor())
+                    .unwrap_or_else(|| {
+                        let knn = semantic.search_similar(&topic_data, 1);
+                        match knn.first() {
+                            Some(k) => Coord7D::new_even(k.atom_key.vertices_basis[0]),
+                            None => Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]),
+                        }
+                    });
 
                 let associations = ReasoningEngine::find_associations(
                     universe,
@@ -837,11 +907,18 @@ impl TetraMemTools {
 
                 let mut results = Vec::new();
                 for assoc in associations.iter().take(limit) {
-                    let targets: Vec<String> = assoc
+                    let targets: Vec<serde_json::Value> = assoc
                         .targets
                         .iter()
                         .take(5)
-                        .map(|t| t.to_string())
+                        .map(|t| {
+                            let desc = memories
+                                .iter()
+                                .find(|m| format!("{}", m.anchor()) == *t)
+                                .and_then(|m| m.description().map(String::from))
+                                .unwrap_or_default();
+                            json!({"anchor": t, "description": desc})
+                        })
                         .collect();
                     results.push(json!({
                         "source": assoc.source,
@@ -855,11 +932,28 @@ impl TetraMemTools {
                 let pulse_result =
                     engine.propagate(&seed_anchor, PulseType::Exploratory, universe, hebbian);
 
+                let mut cluster_neighbors = Vec::new();
+                let seed_phys = seed_anchor.physical();
+                for mem in memories.iter() {
+                    let mp = mem.anchor().physical();
+                    let d = (seed_phys[0] - mp[0]).abs()
+                        + (seed_phys[1] - mp[1]).abs()
+                        + (seed_phys[2] - mp[2]).abs();
+                    if d > 0 && d < 50 {
+                        cluster_neighbors.push(json!({
+                            "anchor": format!("{}", mem.anchor()),
+                            "distance": d,
+                            "description": mem.description().unwrap_or(""),
+                        }));
+                    }
+                }
+
                 super::protocol::ToolCallResult::ok(
                     json!({
                         "topic": topic,
                         "seed_anchor": format!("{}", seed_anchor),
                         "associations": results,
+                        "cluster_neighbors": cluster_neighbors,
                         "pulse_spread": {
                             "visited_nodes": pulse_result.visited_nodes,
                             "activation": pulse_result.total_activation,
@@ -878,15 +972,48 @@ impl TetraMemTools {
                 let engine = DreamEngine::new();
                 let report = engine.dream(universe, hebbian, memories);
 
+                let _cluster_report = clustering.run_maintenance_cycle(memories, hebbian, universe);
+
                 let mut weakened = 0usize;
                 let mut strengthened = 0usize;
+                let mut intra_cluster = 0usize;
+                let mut inter_cluster = 0usize;
+
+                let mem_anchors: Vec<Coord7D> = memories.iter().map(|m| *m.anchor()).collect();
                 for mem in memories.iter() {
                     let neighbors = hebbian.get_neighbors(mem.anchor());
-                    for (_, weight) in &neighbors {
+                    for (coord, weight) in &neighbors {
                         if *weight < importance_threshold {
                             weakened += 1;
                         } else {
                             strengthened += 1;
+                        }
+                        let is_near = mem_anchors.iter().any(|a| a.distance_sq(coord) < 2500.0);
+                        if is_near {
+                            intra_cluster += 1;
+                        } else {
+                            inter_cluster += 1;
+                        }
+                    }
+                }
+
+                if intra_cluster > 0 && inter_cluster > 0 {
+                    let ratio = intra_cluster as f64 / inter_cluster as f64;
+                    if ratio < 1.0 {
+                        for mem in memories.iter() {
+                            let mem_phys = mem.anchor().physical();
+                            for other in memories.iter() {
+                                if mem.anchor() == other.anchor() {
+                                    continue;
+                                }
+                                let other_phys = other.anchor().physical();
+                                let d = (mem_phys[0] - other_phys[0]).abs()
+                                    + (mem_phys[1] - other_phys[1]).abs()
+                                    + (mem_phys[2] - other_phys[2]).abs();
+                                if d < 30 {
+                                    hebbian.boost_edge(mem.anchor(), other.anchor(), 0.1);
+                                }
+                            }
                         }
                     }
                 }
@@ -900,6 +1027,8 @@ impl TetraMemTools {
                         "edges_after": report.hebbian_edges_after,
                         "strengthened_paths": strengthened,
                         "weakened_paths": weakened,
+                        "intra_cluster_edges": intra_cluster,
+                        "inter_cluster_edges": inter_cluster,
                         "conservation_ok": universe.verify_conservation(),
                     })
                     .to_string(),
