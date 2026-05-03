@@ -41,8 +41,7 @@ pub async fn remember(
     let mut h = state.hebbian.write().await;
     let mut cl = state.clustering.write().await;
 
-    let encode_result =
-        crate::universe::memory::MemoryCodec::encode(&mut u, &anchor, &data);
+    let encode_result = crate::universe::memory::MemoryCodec::encode(&mut u, &anchor, &data);
 
     let (_final_anchor, mut atom) = match encode_result {
         Ok(atom) => (anchor, atom),
@@ -231,7 +230,11 @@ pub async fn associate(
         .unwrap_or_else(|| Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]));
 
     let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
-        &u, &h, &crystal, &seed_anchor, depth,
+        &u,
+        &h,
+        &crystal,
+        &seed_anchor,
+        depth,
     );
 
     let mut results = Vec::new();
@@ -284,8 +287,7 @@ pub async fn consolidate(
     let mut cl = state.clustering.write().await;
     let mut h_mut = state.hebbian.write().await;
 
-    let _cluster_report =
-        cl.run_maintenance_cycle(&mems, &mut h_mut, &u);
+    let _cluster_report = cl.run_maintenance_cycle(&mems, &mut h_mut, &u);
 
     let mut weakened = 0usize;
     let mut strengthened = 0usize;

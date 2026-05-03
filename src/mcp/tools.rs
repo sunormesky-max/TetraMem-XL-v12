@@ -965,11 +965,9 @@ fn handle_consolidate(args: &Value, core: &mut TetraMemCore) -> super::protocol:
         &core.memories,
     );
 
-    let cluster_report = core.clustering.run_maintenance_cycle(
-        &core.memories,
-        &mut core.hebbian,
-        &core.universe,
-    );
+    let cluster_report =
+        core.clustering
+            .run_maintenance_cycle(&core.memories, &mut core.hebbian, &core.universe);
 
     let mut weakened = 0usize;
     let mut strengthened = 0usize;

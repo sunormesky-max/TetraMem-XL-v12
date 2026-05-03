@@ -395,10 +395,14 @@ pub fn create_router(state: SharedState) -> Router {
                 let inner = tower_http::services::ServeDir::new(dir)
                     .fallback(tower_http::services::ServeFile::new(&index_path));
                 let layered = tower::ServiceBuilder::new()
-                    .layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                        axum::http::header::CACHE_CONTROL,
-                        axum::http::HeaderValue::from_static("public, max-age=0, must-revalidate"),
-                    ))
+                    .layer(
+                        tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                            axum::http::header::CACHE_CONTROL,
+                            axum::http::HeaderValue::from_static(
+                                "public, max-age=0, must-revalidate",
+                            ),
+                        ),
+                    )
                     .service(inner);
                 router = router.fallback_service(layered);
             } else {
