@@ -77,7 +77,11 @@ async fn body_text(body: Body) -> String {
 const API: &str = "/api";
 
 fn get(path: &str) -> Request<Body> {
-    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+    let uri = if path.starts_with('/')
+        && !path.starts_with("/health")
+        && !path.starts_with("/login")
+        && !path.starts_with("/raft")
+    {
         format!("{}{}", API, path)
     } else {
         path.to_string()
@@ -90,7 +94,11 @@ fn get(path: &str) -> Request<Body> {
 }
 
 fn post(path: &str, payload: Value) -> Request<Body> {
-    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+    let uri = if path.starts_with('/')
+        && !path.starts_with("/health")
+        && !path.starts_with("/login")
+        && !path.starts_with("/raft")
+    {
         format!("{}{}", API, path)
     } else {
         path.to_string()
@@ -104,7 +112,11 @@ fn post(path: &str, payload: Value) -> Request<Body> {
 }
 
 fn get_with_body(path: &str, payload: Value) -> Request<Body> {
-    let uri = if path.starts_with('/') && !path.starts_with("/health") && !path.starts_with("/login") && !path.starts_with("/raft") {
+    let uri = if path.starts_with('/')
+        && !path.starts_with("/health")
+        && !path.starts_with("/login")
+        && !path.starts_with("/raft")
+    {
         format!("{}{}", API, path)
     } else {
         path.to_string()
