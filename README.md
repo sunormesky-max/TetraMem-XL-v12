@@ -5,6 +5,7 @@
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-270-brightgreen.svg)]()
+[![Stars](https://img.shields.io/github/stars/sunormesky-max/TetraMem-XL-v12?style=social)](https://github.com/sunormesky-max/TetraMem-XL-v12/stargazers)
 
 ## What is TetraMem-XL?
 
