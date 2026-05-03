@@ -20,7 +20,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 toml = "0.8.14"
 thiserror = "2.0.4"
 clap = { version = "4.5.7", features = ["derive"] }
-tower-http = { version = "0.6.2", features = ["cors", "trace", "request-id", "propagate-header", "timeout", "limit", "metrics"] }
+tower-http = { version = "0.6.2", features = ["cors", "trace", "request-id", "propagate-header", "timeout", "limit", "metrics", "fs"] }
 tower = { version = "0.5.1", features = ["full"] }
 uuid = { version = "1.9.1", features = ["v4"] }
 jsonwebtoken = "9.3.0"
@@ -40,6 +40,11 @@ reqwest = { version = "0.13.3", features = ["json"] }
 criterion = "0.8.2"
 http-body-util = "0.1.2"
 proptest = "1.11.0"
+
+[[test]]
+name = "e2e_api"
+path = "tests/e2e_api.rs"
+harness = false
 
 [[bench]]
 name = "benchmarks"

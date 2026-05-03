@@ -44,30 +44,176 @@ interface HistoryItem {
 }
 
 const endpoints: Endpoint[] = [
-  { method: 'GET', path: '/stats', desc: '宇宙统计信息' },
+  // ── PUBLIC (无需认证) ──
   { method: 'GET', path: '/health', desc: '健康检查' },
+  { method: 'POST', path: '/login', desc: 'JWT登录', params: [
+    { name: 'username', required: true, type: 'string' },
+    { name: 'password', required: true, type: 'string' },
+  ] },
+
+  // ── USER (JWT认证) ──
+  { method: 'GET', path: '/stats', desc: '宇宙统计信息' },
   { method: 'GET', path: '/metrics', desc: 'Prometheus指标' },
   { method: 'POST', path: '/memory/encode', desc: '编码记忆', params: [
-    { name: 'anchor', required: true, type: '[x, y, z]' },
+    { name: 'anchor', required: true, type: '[x,y,z]' },
     { name: 'data', required: true, type: 'number[]' },
+    { name: 'tags', required: false, type: 'string[]' },
+    { name: 'category', required: false, type: 'string' },
+    { name: 'description', required: false, type: 'string' },
+    { name: 'importance', required: false, type: 'number' },
   ] },
   { method: 'POST', path: '/memory/decode', desc: '解码记忆', params: [
-    { name: 'anchor', required: true, type: '[x, y, z]' },
+    { name: 'anchor', required: true, type: '[x,y,z]' },
     { name: 'data_dim', required: true, type: 'number' },
   ] },
   { method: 'GET', path: '/memory/list', desc: '记忆列表' },
+  { method: 'POST', path: '/memory/remember', desc: 'AI记忆存储', params: [
+    { name: 'content', required: true, type: 'string' },
+    { name: 'tags', required: false, type: 'string[]' },
+    { name: 'category', required: false, type: 'string' },
+    { name: 'importance', required: false, type: 'number' },
+    { name: 'source', required: false, type: 'string' },
+  ] },
+  { method: 'POST', path: '/memory/recall', desc: 'AI记忆检索', params: [
+    { name: 'query', required: true, type: 'string' },
+    { name: 'limit', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/memory/associate', desc: '关联发现', params: [
+    { name: 'topic', required: true, type: 'string' },
+    { name: 'depth', required: false, type: 'number' },
+    { name: 'limit', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/memory/forget', desc: '删除记忆', params: [
+    { name: 'anchor', required: true, type: '[x,y,z]' },
+  ] },
+  { method: 'POST', path: '/memory/annotate', desc: '标注记忆', params: [
+    { name: 'anchor', required: true, type: '[x,y,z]' },
+    { name: 'tags', required: false, type: 'string[]' },
+    { name: 'category', required: false, type: 'string' },
+    { name: 'description', required: false, type: 'string' },
+    { name: 'importance', required: false, type: 'number' },
+  ] },
+  { method: 'GET', path: '/memory/timeline', desc: '时间轴' },
+  { method: 'POST', path: '/memory/trace', desc: '追踪路径', params: [
+    { name: 'anchor', required: true, type: '[x,y,z]' },
+    { name: 'max_hops', required: false, type: 'number' },
+  ] },
   { method: 'POST', path: '/pulse', desc: '触发脉冲', params: [
-    { name: 'source', required: true, type: '[x, y, z]' },
-    { name: 'pulse_type', required: true, type: 'string' },
+    { name: 'source', required: true, type: '[x,y,z]' },
+    { name: 'pulse_type', required: false, type: 'string' },
   ] },
   { method: 'POST', path: '/dream', desc: '运行梦境周期' },
-  { method: 'POST', path: '/scale', desc: '自动缩放' },
-  { method: 'POST', path: '/regulate', desc: '运行调节周期' },
+  { method: 'POST', path: '/dream/consolidate', desc: '梦境整合', params: [
+    { name: 'importance_threshold', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/context', desc: '上下文管理', params: [
+    { name: 'action', required: true, type: '"status"|"reconstruct"|"pre_work"' },
+    { name: 'role', required: false, type: 'string' },
+    { name: 'content', required: false, type: 'string' },
+  ] },
   { method: 'GET', path: '/hebbian/neighbors/{x}/{y}/{z}', desc: '赫布邻居', params: [
     { name: 'x', required: true, type: 'number' },
     { name: 'y', required: true, type: 'number' },
     { name: 'z', required: true, type: 'number' },
   ] },
+  { method: 'GET', path: '/dark/query', desc: '查询暗维度节点' },
+  { method: 'POST', path: '/dark/flow', desc: '暗能量流动', params: [
+    { name: 'from', required: true, type: 'number[]' },
+    { name: 'to', required: true, type: 'number[]' },
+    { name: 'amount', required: true, type: 'number' },
+  ] },
+  { method: 'POST', path: '/dark/transfer', desc: '暗能量转移', params: [
+    { name: 'source', required: true, type: 'number[]' },
+    { name: 'target', required: true, type: 'number[]' },
+    { name: 'amount', required: true, type: 'number' },
+  ] },
+  { method: 'POST', path: '/dark/materialize', desc: '物化节点', params: [
+    { name: 'coord', required: true, type: 'number[]' },
+    { name: 'energy', required: true, type: 'number' },
+    { name: 'physical_ratio', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/dark/dematerialize', desc: '反物化节点', params: [
+    { name: 'coord', required: true, type: 'number[]' },
+  ] },
+  { method: 'GET', path: '/dark/pressure', desc: '暗维度压力' },
+  { method: 'GET', path: '/physics/status', desc: '物理引擎状态' },
+  { method: 'GET', path: '/physics/profile', desc: '物理引擎配置' },
+  { method: 'POST', path: '/physics/distance', desc: '7D距离计算', params: [
+    { name: 'from', required: true, type: 'number[]' },
+    { name: 'to', required: true, type: 'number[]' },
+  ] },
+  { method: 'POST', path: '/physics/project', desc: '坐标投影', params: [
+    { name: 'coord', required: true, type: 'number[]' },
+  ] },
+  { method: 'POST', path: '/semantic/search', desc: '语义向量搜索', params: [
+    { name: 'data', required: true, type: 'number[]' },
+    { name: 'k', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/semantic/query', desc: '语义文本搜索', params: [
+    { name: 'text', required: true, type: 'string' },
+    { name: 'k', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/semantic/relations', desc: '语义关系', params: [
+    { name: 'anchor', required: true, type: '[x,y,z]' },
+  ] },
+  { method: 'GET', path: '/semantic/status', desc: '语义引擎状态' },
+  { method: 'GET', path: '/phase/detect', desc: '相变检测' },
+  { method: 'GET', path: '/cluster/status', desc: '集群状态' },
+  { method: 'POST', path: '/emotion/pulse', desc: '情绪脉冲', params: [
+    { name: 'anchor', required: true, type: '[x,y,z]' },
+  ] },
+  { method: 'POST', path: '/emotion/dream', desc: '情绪梦境' },
+  { method: 'GET', path: '/emotion/status', desc: '情绪状态' },
+  { method: 'GET', path: '/perception/status', desc: '感知预算状态' },
+  { method: 'GET', path: '/clustering/status', desc: '聚类引擎状态' },
+  { method: 'GET', path: '/constitution/status', desc: '宪法状态' },
+  { method: 'GET', path: '/events/status', desc: '事件总线状态' },
+  { method: 'GET', path: '/watchdog/status', desc: '看门狗状态' },
+  { method: 'GET', path: '/agent/observer', desc: '观察者代理' },
+  { method: 'GET', path: '/agent/emotion', desc: '情绪代理' },
+
+  // ── ADMIN (JWT + 管理员角色) ──
+  { method: 'POST', path: '/scale', desc: '自动缩放' },
+  { method: 'POST', path: '/scale/frontier/{max_new}', desc: '前沿扩展', params: [
+    { name: 'max_new', required: true, type: 'number' },
+  ] },
+  { method: 'POST', path: '/regulate', desc: '运行调节周期' },
+  { method: 'POST', path: '/backup/create', desc: '创建备份' },
+  { method: 'GET', path: '/backup/list', desc: '备份列表' },
+  { method: 'POST', path: '/cluster/init', desc: '集群初始化', params: [
+    { name: 'node_id', required: false, type: 'number' },
+    { name: 'addr', required: false, type: 'string' },
+  ] },
+  { method: 'POST', path: '/cluster/propose', desc: '集群提案', params: [
+    { name: 'key', required: true, type: 'string' },
+    { name: 'value', required: true, type: 'string' },
+  ] },
+  { method: 'POST', path: '/cluster/add-node', desc: '添加集群节点', params: [
+    { name: 'node_id', required: true, type: 'number' },
+    { name: 'addr', required: true, type: 'string' },
+  ] },
+  { method: 'POST', path: '/cluster/remove-node', desc: '移除集群节点', params: [
+    { name: 'node_id', required: true, type: 'number' },
+  ] },
+  { method: 'POST', path: '/phase/consensus', desc: '相变共识', params: [
+    { name: 'force', required: false, type: 'boolean' },
+  ] },
+  { method: 'POST', path: '/phase/quorum/start', desc: '启动法定人数', params: [
+    { name: 'required_energy_budget', required: false, type: 'number' },
+  ] },
+  { method: 'POST', path: '/phase/quorum/confirm', desc: '确认法定人数' },
+  { method: 'GET', path: '/phase/quorum/status', desc: '法定人数状态' },
+  { method: 'POST', path: '/phase/quorum/execute', desc: '执行法定人数决策', params: [
+    { name: 'force', required: false, type: 'boolean' },
+  ] },
+  { method: 'POST', path: '/physics/configure', desc: '配置物理引擎' },
+  { method: 'POST', path: '/emotion/crystallize', desc: '情绪结晶' },
+  { method: 'POST', path: '/perception/replenish', desc: '感知预算补充' },
+  { method: 'POST', path: '/semantic/index-all', desc: '语义全量索引' },
+  { method: 'POST', path: '/semantic/extract-concepts', desc: '提取概念' },
+  { method: 'POST', path: '/clustering/maintenance', desc: '聚类维护' },
+  { method: 'POST', path: '/watchdog/checkup', desc: '看门狗检查' },
+  { method: 'POST', path: '/agent/crystal', desc: '晶体代理' },
 ]
 
 export default function Api() {
@@ -81,29 +227,47 @@ export default function Api() {
 
   const handleSelectEndpoint = useCallback((ep: Endpoint) => {
     setSelectedEndpoint(ep)
-    if (ep.method === 'POST' && ep.path.includes('encode')) {
-      setRequestBody(JSON.stringify({
-        anchor: [128, 128, 128],
-        data: [1.0, -2.5, 3.14, 0.0, 2.71],
-      }, null, 2))
-    } else if (ep.method === 'POST' && ep.path.includes('decode')) {
-      setRequestBody(JSON.stringify({
-        anchor: [128, 128, 128],
-        data_dim: 5,
-      }, null, 2))
-    } else if (ep.method === 'POST' && ep.path.includes('pulse')) {
-      setRequestBody(JSON.stringify({
-        source: [128, 128, 128],
-        pulse_type: 'associative',
-      }, null, 2))
-    } else if (ep.method === 'POST' && ep.path.includes('hebbian')) {
-      setRequestBody('')
-    } else if (ep.method === 'GET' && ep.path.includes('hebbian')) {
-      setRequestBody('')
+    setResponseBody('')
+
+    const templates: Record<string, object> = {
+      '/login': { username: 'admin', password: 'password123' },
+      '/memory/encode': { anchor: [128, 128, 128], data: [1.0, -2.5, 3.14, 0.0, 2.71] },
+      '/memory/decode': { anchor: [128, 128, 128], data_dim: 5 },
+      '/memory/remember': { content: '示例记忆内容', tags: ['示例'], category: 'general', importance: 0.5, source: 'api' },
+      '/memory/recall': { query: '示例查询', limit: 10 },
+      '/memory/associate': { topic: '示例主题', depth: 2, limit: 5 },
+      '/memory/forget': { anchor: [128, 128, 128] },
+      '/memory/annotate': { anchor: [128, 128, 128], tags: ['标注'], category: 'annotated', description: '标注描述', importance: 0.7 },
+      '/memory/trace': { anchor: [128, 128, 128], max_hops: 3 },
+      '/pulse': { source: [128, 128, 128], pulse_type: 'associative' },
+      '/dream/consolidate': { importance_threshold: 0.3 },
+      '/context': { action: 'status', role: 'user', content: '' },
+      '/dark/flow': { from: [100, 100, 100], to: [200, 200, 200], amount: 0.5 },
+      '/dark/transfer': { source: [100, 100, 100], target: [200, 200, 200], amount: 0.5 },
+      '/dark/materialize': { coord: [128, 128, 128], energy: 1.0, physical_ratio: 0.5 },
+      '/dark/dematerialize': { coord: [128, 128, 128] },
+      '/physics/distance': { from: [0, 0, 0], to: [128, 128, 128] },
+      '/physics/project': { coord: [128, 128, 128] },
+      '/semantic/search': { data: [0.1, 0.2, 0.3], k: 5 },
+      '/semantic/query': { text: '示例查询', k: 5 },
+      '/semantic/relations': { anchor: [128, 128, 128] },
+      '/emotion/pulse': { anchor: [128, 128, 128] },
+      '/cluster/init': { node_id: 1, addr: 'http://localhost:8080' },
+      '/cluster/propose': { key: 'example_key', value: 'example_value' },
+      '/cluster/add-node': { node_id: 2, addr: 'http://localhost:8081' },
+      '/cluster/remove-node': { node_id: 2 },
+      '/phase/consensus': { force: false },
+      '/phase/quorum/start': { required_energy_budget: 100 },
+      '/phase/quorum/execute': { force: false },
+      '/hebbian/neighbors/{x}/{y}/{z}': { x: 128, y: 128, z: 128 },
+    }
+
+    const template = templates[ep.path]
+    if (template) {
+      setRequestBody(JSON.stringify(template, null, 2))
     } else {
       setRequestBody('')
     }
-    setResponseBody('')
   }, [])
 
   const handleSendRequest = useCallback(async () => {

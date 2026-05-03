@@ -8,7 +8,6 @@ import {
   Loader2,
   XCircle,
   CheckCircle,
-  Tag,
   Target,
   Route,
 } from 'lucide-react'
@@ -160,7 +159,7 @@ export default function Semantic() {
             {[
               {
                 label: 'Embeddings Indexed',
-                value: status ? String(status.embeddings_indexed) : '--',
+                value: status ? String(status.embeddings_indexed) : statusLoading ? '...' : '--',
                 icon: Target,
                 color: 'var(--accent-cyan)',
               },

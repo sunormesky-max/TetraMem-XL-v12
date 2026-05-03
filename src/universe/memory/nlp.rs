@@ -64,10 +64,12 @@ pub fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
         }
     }
 
-    for i in 0..lower.len().saturating_sub(2) {
-        let trigram = &lower[i..i + 3];
+    let lower_bytes = lower.as_bytes();
+    for i in 0..lower_bytes.len().saturating_sub(2) {
+        let end = (i + 3).min(lower_bytes.len());
+        let trigram = &lower_bytes[i..end];
         let mut h: u64 = 5381;
-        for b in trigram.as_bytes() {
+        for b in trigram {
             h = h.wrapping_mul(37).wrapping_add(*b as u64);
         }
         vec[(h as usize) % dim] += 0.4;
@@ -89,19 +91,17 @@ pub fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
 
 pub fn extract_subwords(word: &str) -> Vec<String> {
     let mut subs = Vec::new();
-    let bytes = word.as_bytes();
-    let n = bytes.len();
+    let chars: Vec<char> = word.chars().collect();
+    let n = chars.len();
 
-    if n >= 3 {
-        for start in 0..=n.saturating_sub(3) {
-            let end = (start + 5).min(n);
-            if end - start >= 3 {
-                subs.push(String::from_utf8_lossy(&bytes[start..end]).to_string());
+    if n >= 2 {
+        for start in 0..n.saturating_sub(1) {
+            let end = (start + 3).min(n);
+            if end - start >= 2 {
+                subs.push(chars[start..end].iter().collect());
             }
         }
         subs.push(format!("<{}>", word));
-        subs.push(format!("<{}", &word[word.len().min(3)..]));
-        subs.push(format!("{}>", &word[..word.len().saturating_sub(3).max(1)]));
     }
 
     subs.push(word.to_string());

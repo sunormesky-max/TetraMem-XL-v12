@@ -25,7 +25,6 @@ import {
   type ClusteringStatusResult,
   type ConstitutionStatusResult,
   type EventsStatusResult,
-  type StatsData,
 } from '../services/api'
 
 const ease = [0.16, 1, 0.3, 1] as [number, number, number, number]

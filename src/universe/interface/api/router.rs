@@ -280,7 +280,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/pulse", post(fire_pulse))
         .route("/dream", post(run_dream))
         .route("/hebbian/neighbors/:x/:y/:z", get(get_hebbian_neighbors))
-        .route("/dark/query", get(dark_query))
+        .route("/dark/query", post(dark_query))
         .route("/dark/flow", post(dark_flow))
         .route("/dark/transfer", post(dark_transfer))
         .route("/dark/materialize", post(dark_materialize))
@@ -356,7 +356,7 @@ pub fn create_router(state: SharedState) -> Router {
             auth_middleware,
         ));
 
-    Router::new()
+    let mut router = Router::new()
         .merge(public_routes)
         .merge(raft_routes)
         .nest("/api", user_routes.merge(admin_routes))
@@ -377,7 +377,25 @@ pub fn create_router(state: SharedState) -> Router {
                     Duration::from_secs(state.config.server.timeout_secs),
                 )),
         )
-        .with_state(state)
+        .with_state(state.clone());
+
+    if let Some(ref dir) = state.config.server.static_dir {
+        if std::path::Path::new(dir).exists() {
+            let index_path = std::path::Path::new(dir).join("index.html");
+            if index_path.exists() {
+                tracing::info!(dir = %dir, "serving static frontend from disk");
+                let serve_dir = tower_http::services::ServeDir::new(dir)
+                    .fallback(tower_http::services::ServeFile::new(index_path));
+                router = router.fallback_service(serve_dir);
+            } else {
+                tracing::warn!(dir = %dir, "static_dir exists but no index.html found, skipping SPA fallback");
+            }
+        } else {
+            tracing::info!(dir = %dir, "static_dir not found, frontend not served");
+        }
+    }
+
+    router
 }
 
 #[cfg(test)]

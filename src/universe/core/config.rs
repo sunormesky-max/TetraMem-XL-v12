@@ -33,6 +33,8 @@ pub struct ServerConfig {
     pub tls: Option<TlsConfig>,
     #[serde(default = "default_cors_origins")]
     pub cors_origins: Vec<String>,
+    #[serde(default)]
+    pub static_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +114,7 @@ fn default_server() -> ServerConfig {
         body_limit_bytes: default_body_limit(),
         tls: None,
         cors_origins: default_cors_origins(),
+        static_dir: None,
     }
 }
 
