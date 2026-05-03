@@ -111,24 +111,6 @@ fn post(path: &str, payload: Value) -> Request<Body> {
         .unwrap()
 }
 
-fn get_with_body(path: &str, payload: Value) -> Request<Body> {
-    let uri = if path.starts_with('/')
-        && !path.starts_with("/health")
-        && !path.starts_with("/login")
-        && !path.starts_with("/raft")
-    {
-        format!("{}{}", API, path)
-    } else {
-        path.to_string()
-    };
-    Request::builder()
-        .method("GET")
-        .uri(&uri)
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_string(&payload).unwrap()))
-        .unwrap()
-}
-
 #[tokio::test]
 async fn test_health() {
     let state = build_state();
