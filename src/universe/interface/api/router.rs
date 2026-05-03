@@ -97,6 +97,7 @@ async fn rate_limit_middleware(
 }
 
 async fn security_headers_middleware(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -110,15 +111,21 @@ async fn security_headers_middleware(req: Request, next: Next) -> Response {
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
     headers.insert(
-        "content-security-policy",
-        HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
-    );
-    headers.insert(
         "permissions-policy",
         HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
     );
-    headers.insert("cache-control", HeaderValue::from_static("no-store"));
-    headers.insert("pragma", HeaderValue::from_static("no-cache"));
+    let is_api = path.starts_with("/api")
+        || path == "/health"
+        || path == "/login"
+        || path.starts_with("/raft");
+    if is_api {
+        headers.insert(
+            "content-security-policy",
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+        headers.insert("cache-control", HeaderValue::from_static("no-store"));
+        headers.insert("pragma", HeaderValue::from_static("no-cache"));
+    }
     response
 }
 
@@ -271,6 +278,7 @@ pub fn create_router(state: SharedState) -> Router {
         ));
 
     let user_routes = Router::new()
+        .route("/health", get(get_health))
         .route("/stats", get(get_stats))
         .route("/metrics", get(get_metrics))
         .route("/openapi.json", get(get_openapi))
@@ -384,9 +392,15 @@ pub fn create_router(state: SharedState) -> Router {
             let index_path = std::path::Path::new(dir).join("index.html");
             if index_path.exists() {
                 tracing::info!(dir = %dir, "serving static frontend from disk");
-                let serve_dir = tower_http::services::ServeDir::new(dir)
-                    .fallback(tower_http::services::ServeFile::new(index_path));
-                router = router.fallback_service(serve_dir);
+                let inner = tower_http::services::ServeDir::new(dir)
+                    .fallback(tower_http::services::ServeFile::new(&index_path));
+                let layered = tower::ServiceBuilder::new()
+                    .layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                        axum::http::header::CACHE_CONTROL,
+                        axum::http::HeaderValue::from_static("public, max-age=0, must-revalidate"),
+                    ))
+                    .service(inner);
+                router = router.fallback_service(layered);
             } else {
                 tracing::warn!(dir = %dir, "static_dir exists but no index.html found, skipping SPA fallback");
             }
