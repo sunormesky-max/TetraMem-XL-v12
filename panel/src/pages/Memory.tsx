@@ -159,6 +159,21 @@ export default function Memory() {
     }
   }
 
+  const handleDelete = async (item: MemoryItem) => {
+    try {
+      const anchor = item.coord as [number, number, number]
+      await api.forget(anchor)
+      if (showDetail?.id === item.id) setShowDetail(null)
+      if (selectedId === item.id) {
+        setSelectedId('')
+        setDecodeResult(null)
+      }
+      loadMemories()
+    } catch (err: any) {
+      setListError(err.message || '删除失败')
+    }
+  }
+
   return (
     <div className="relative min-h-[100dvh]">
       <div className="relative z-10 p-6">
@@ -505,6 +520,7 @@ export default function Memory() {
                             variant="ghost"
                             size="sm"
                             className="h-6 px-2 text-xs text-[var(--accent-red)]"
+                            onClick={() => handleDelete(mem)}
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>
@@ -615,6 +631,7 @@ export default function Memory() {
                   <Button
                     variant="destructive"
                     size="sm"
+                    onClick={() => handleDelete(showDetail)}
                   >
                     <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                     删除

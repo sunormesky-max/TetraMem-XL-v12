@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   Network,
@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { api, type StatsData } from '../services/api'
+import { api, type StatsData, type PhaseDetectResult, type TraceResult } from '../services/api'
 
 const ease = [0.16, 1, 0.3, 1] as [number, number, number, number]
 
@@ -53,20 +53,16 @@ interface TopologyFeature {
   discovery: string
 }
 
-const mockFeatures: TopologyFeature[] = [
-  { id: 1, name: 'Beta-0', type: 'component', value: 1, discovery: '2分钟前' },
-  { id: 2, name: 'Beta-1-A', type: 'cycle', value: 847, discovery: '15分钟前' },
-  { id: 3, name: 'Beta-1-B', type: 'cycle', value: 256, discovery: '32分钟前' },
-  { id: 4, name: 'Beta-2', type: 'void', value: 12, discovery: '1小时前' },
-  { id: 5, name: 'Crystal-A', type: 'crystal', value: 3, discovery: '2小时前' },
-  { id: 6, name: 'Crystal-B', type: 'crystal', value: 5, discovery: '3小时前' },
-]
+
 
 export default function Topology() {
-  const [fromNode, setFromNode] = useState('4521847')
-  const [toNode, setToNode] = useState('4521001')
+  const [anchorInput, setAnchorInput] = useState('452,1000,1000')
+  const [maxHops, setMaxHops] = useState('8')
   const [pathResult, setPathResult] = useState<string | null>(null)
+  const [pathLoading, setPathLoading] = useState(false)
+  const [traceResult, setTraceResult] = useState<TraceResult['data'] | null>(null)
   const [stats, setStats] = useState<StatsData['data'] | null>(null)
+  const [phaseData, setPhaseData] = useState<PhaseDetectResult['data'] | null>(null)
 
   useEffect(() => {
     api.getStats().then((res) => {
@@ -74,27 +70,62 @@ export default function Topology() {
     }).catch(() => {})
   }, [])
 
-  const handleFindPath = useCallback(() => {
-    const dist = Math.abs(parseInt(fromNode) - parseInt(toNode))
-    const hops = Math.floor(Math.random() * 8) + 2
-    setPathResult(
-      `找到路径：${hops} 跳，距离 ${dist.toLocaleString()} 节点`
-    )
-  }, [fromNode, toNode])
-
-  const handleRandomPair = useCallback(() => {
-    const f = 4521000 + Math.floor(Math.random() * 2000)
-    const t = 4521000 + Math.floor(Math.random() * 2000)
-    setFromNode(String(f))
-    setToNode(String(t))
-    setPathResult(null)
+  useEffect(() => {
+    api.phaseDetect().then((res) => {
+      if (res.success) setPhaseData(res.data)
+    }).catch(() => {})
   }, [])
 
-  const beta0 = mockFeatures.find((f) => f.name === 'Beta-0')?.value ?? 1
-  const beta1 = mockFeatures
-    .filter((f) => f.type === 'cycle')
-    .reduce((s, f) => s + f.value, 0)
-  const beta2 = mockFeatures.find((f) => f.name === 'Beta-2')?.value ?? 0
+  const features = useMemo<TopologyFeature[]>(() => {
+    const items: TopologyFeature[] = []
+    let id = 1
+    if (phaseData) {
+      items.push({ id: id++, name: 'Phase', type: 'component', value: phaseData.crystal_count + phaseData.amorphous_count, discovery: phaseData.phase })
+      items.push({ id: id++, name: 'Crystal-Regions', type: 'crystal', value: phaseData.crystal_count, discovery: phaseData.transition_ongoing ? '转换中' : '稳定' })
+      items.push({ id: id++, name: 'Amorphous-Regions', type: 'void', value: phaseData.amorphous_count, discovery: phaseData.transition_ongoing ? '转换中' : '稳定' })
+    }
+    if (stats) {
+      items.push({ id: id++, name: 'Hebbian-Edges', type: 'cycle', value: stats.hebbian_edges, discovery: `${stats.nodes} 节点` })
+      items.push({ id: id++, name: 'Even-Parity', type: 'component', value: stats.even, discovery: `${stats.nodes} 节点` })
+      items.push({ id: id++, name: 'Odd-Parity', type: 'component', value: stats.odd, discovery: `${stats.nodes} 节点` })
+    }
+    return items
+  }, [phaseData, stats])
+
+  const handleFindPath = useCallback(() => {
+    const parts = anchorInput.split(',').map((s) => parseInt(s.trim()))
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      setPathResult('无效的锚点坐标，请使用 x,y,z 格式')
+      return
+    }
+    const hops = parseInt(maxHops) || 8
+    setPathLoading(true)
+    setTraceResult(null)
+    api.traceMemory(parts as [number, number, number], hops)
+      .then((res) => {
+        if (res.success && res.data.length > 0) {
+          setTraceResult(res.data)
+          setPathResult(`追踪完成：${res.data.length} 跳，最大跳数 ${hops}`)
+        } else {
+          setPathResult('未找到路径')
+        }
+      })
+      .catch(() => setPathResult('追踪失败'))
+      .finally(() => setPathLoading(false))
+  }, [anchorInput, maxHops])
+
+  const handleRandomPair = useCallback(() => {
+    const x = Math.floor(Math.random() * 2000) - 1000
+    const y = Math.floor(Math.random() * 2000) - 1000
+    const z = Math.floor(Math.random() * 2000) - 1000
+    setAnchorInput(`${x},${y},${z}`)
+    setPathResult(null)
+    setTraceResult(null)
+  }, [])
+
+  const beta0 = (stats?.nodes ?? 0) > 0 ? 1 : 0
+  const beta1 = stats?.hebbian_edges ?? 0
+  const beta2 = phaseData?.amorphous_count ?? 0
 
   const nodeCount = stats?.nodes ?? 0
   const manifestedCount = stats?.manifested ?? 0
@@ -231,21 +262,22 @@ export default function Topology() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="mb-1 block font-body text-[12px] font-semibold text-[var(--text-secondary)]">
-                  起始节点
+                  锚点坐标 (x,y,z)
                 </label>
                 <Input
-                  value={fromNode}
-                  onChange={(e) => setFromNode(e.target.value)}
+                  value={anchorInput}
+                  onChange={(e) => setAnchorInput(e.target.value)}
                   className="font-mono text-xs"
+                  placeholder="452,1000,1000"
                 />
               </div>
               <div>
                 <label className="mb-1 block font-body text-[12px] font-semibold text-[var(--text-secondary)]">
-                  目标节点
+                  最大跳数
                 </label>
                 <Input
-                  value={toNode}
-                  onChange={(e) => setToNode(e.target.value)}
+                  value={maxHops}
+                  onChange={(e) => setMaxHops(e.target.value)}
                   className="font-mono text-xs"
                 />
               </div>
@@ -254,9 +286,10 @@ export default function Topology() {
                   className="flex-1"
                   style={{ backgroundColor: 'var(--dim-e)' }}
                   onClick={handleFindPath}
+                  disabled={pathLoading}
                 >
                   <Search className="mr-1.5 h-4 w-4" />
-                  查找路径
+                  {pathLoading ? '追踪中...' : '追踪路径'}
                 </Button>
                 <Button variant="outline" onClick={handleRandomPair}>
                   <Shuffle className="h-4 w-4" />
@@ -273,6 +306,15 @@ export default function Topology() {
                 <p className="font-body text-sm text-[var(--accent-green)]">
                   {pathResult}
                 </p>
+                {traceResult && traceResult.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {traceResult.map((hop) => (
+                      <p key={hop.hop} className="font-mono text-xs text-[var(--text-secondary)]">
+                        跳 {hop.hop}: {hop.anchor} (dim={hop.data_dim}, conf={hop.confidence.toFixed(3)})
+                      </p>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
           </motion.div>
@@ -284,7 +326,7 @@ export default function Topology() {
                 拓扑报告
               </h2>
               <Badge variant="outline" className="font-mono text-xs">
-                {mockFeatures.length} 特征
+                {features.length} 特征
               </Badge>
             </div>
 
@@ -299,7 +341,7 @@ export default function Topology() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mockFeatures.map((f) => (
+                  {features.map((f) => (
                     <TableRow key={f.id}>
                       <TableCell className="font-mono text-xs font-semibold text-[var(--text-primary)]">
                         {f.name}

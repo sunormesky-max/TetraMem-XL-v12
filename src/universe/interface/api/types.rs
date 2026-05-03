@@ -380,3 +380,66 @@ pub struct AgentExecuteResponse {
     pub duration_ms: f64,
     pub details: String,
 }
+
+#[derive(Deserialize)]
+pub struct RememberRequest {
+    pub content: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default = "default_category")]
+    pub category: Option<String>,
+    #[serde(default = "default_importance")]
+    pub importance: f64,
+    #[serde(default = "default_source")]
+    pub source: Option<String>,
+}
+
+fn default_category() -> Option<String> {
+    Some("general".to_string())
+}
+
+fn default_source() -> Option<String> {
+    Some("api".to_string())
+}
+
+#[derive(Deserialize)]
+pub struct RecallRequest {
+    pub query: String,
+    #[serde(default = "default_k")]
+    pub limit: usize,
+}
+
+#[derive(Deserialize)]
+pub struct AssociateRequest {
+    pub topic: String,
+    #[serde(default = "default_depth")]
+    pub depth: usize,
+    #[serde(default = "default_k")]
+    pub limit: usize,
+}
+
+fn default_depth() -> usize {
+    3
+}
+
+#[derive(Deserialize)]
+pub struct ConsolidateRequest {
+    #[serde(default = "default_importance_threshold")]
+    pub importance_threshold: f64,
+}
+
+fn default_importance_threshold() -> f64 {
+    0.3
+}
+
+#[derive(Deserialize)]
+pub struct ContextRequest {
+    pub action: String,
+    pub role: Option<String>,
+    pub content: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ForgetRequest {
+    pub anchor: [i32; 3],
+}

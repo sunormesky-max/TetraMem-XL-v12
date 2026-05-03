@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { api } from '../services/api'
-import type { StatsData } from '../services/api'
+import type { StatsData, DarkQueryResult } from '../services/api'
 
 /* ─────────────── EASING TOKEN ─────────────── */
 const ease = [0.16, 1, 0.3, 1] as [number, number, number, number]
@@ -77,6 +77,8 @@ export default function Universe() {
   const [search, setSearch] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const [stats, setStats] = useState<StatsData['data'] | null>(null)
+  const [nodeIdInput, setNodeIdInput] = useState('')
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -96,7 +98,30 @@ export default function Universe() {
     }
   }, [])
 
-  const allNodes = useMemo(() => generateMockNodes(50), [])
+  const [allNodes, setAllNodes] = useState<NodeItem[]>(() => generateMockNodes(50))
+
+  useEffect(() => {
+    let mounted = true
+    const fetchNodes = async () => {
+      try {
+        const res: DarkQueryResult = await api.darkQuery()
+        if (mounted && res.success && res.data.nodes.length > 0) {
+          const mapped: NodeItem[] = res.data.nodes.map((n, i) => ({
+            id: 4521000 + i,
+            coord: typeof n.coord === 'string'
+              ? n.coord.split(',').map(Number)
+              : Array.isArray(n.coord) ? n.coord : [0, 0, 0, 0, 0, 0, 0],
+            type: n.is_manifested ? 'physical' as const : 'dark' as const,
+            energy: n.energy,
+          }))
+          setAllNodes(mapped)
+        }
+      } catch {}
+    }
+    fetchNodes()
+    const interval = setInterval(fetchNodes, 10000)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [])
 
   const filteredNodes = useMemo(() => {
     return allNodes.filter((n) => {
@@ -121,6 +146,51 @@ export default function Universe() {
   const handleDelete = useCallback((id: number) => {
     setConfirmDelete(id)
   }, [])
+
+  const showFeedback = useCallback((type: 'success' | 'error', msg: string) => {
+    setFeedback({ type, msg })
+    setTimeout(() => setFeedback(null), 3000)
+  }, [])
+
+  const handleMaterialize = useCallback(async () => {
+    try {
+      const coord = nodeIdInput
+        ? nodeIdInput.split(',').map(Number).filter((n) => !isNaN(n))
+        : [0, 0, 0, 0, 0, 0, 0]
+      if (coord.length < 3) {
+        showFeedback('error', '坐标格式无效，请使用逗号分隔的数字')
+        return
+      }
+      const res = await api.darkMaterialize(coord, 1.0, 0.5)
+      if (res.success) {
+        showFeedback('success', `物化成功: ${res.data.coord}`)
+      } else {
+        showFeedback('error', '物化失败')
+      }
+    } catch (err) {
+      showFeedback('error', `物化错误: ${String(err)}`)
+    }
+  }, [nodeIdInput, showFeedback])
+
+  const handleDematerialize = useCallback(async () => {
+    try {
+      const coord = nodeIdInput
+        ? nodeIdInput.split(',').map(Number).filter((n) => !isNaN(n))
+        : [0, 0, 0, 0, 0, 0, 0]
+      if (coord.length < 3) {
+        showFeedback('error', '坐标格式无效，请使用逗号分隔的数字')
+        return
+      }
+      const res = await api.darkDematerialize(coord)
+      if (res.success) {
+        showFeedback('success', `去物化成功: ${res.data.coord}`)
+      } else {
+        showFeedback('error', '去物化失败')
+      }
+    } catch (err) {
+      showFeedback('error', `去物化错误: ${String(err)}`)
+    }
+  }, [nodeIdInput, showFeedback])
 
   return (
     <div className="relative min-h-[100dvh]">
@@ -239,23 +309,35 @@ export default function Universe() {
 
             {/* Node actions */}
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleMaterialize}>
                 <Box className="mr-1.5 h-4 w-4" />
                 物化节点
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleDematerialize}>
                 <Trash2 className="mr-1.5 h-4 w-4" />
                 去物化节点
               </Button>
               <div className="flex items-center gap-2">
                 <span className="font-body text-[12px] text-[var(--text-muted)]">
-                  节点 ID
+                  坐标
                 </span>
                 <Input
-                  placeholder="输入节点ID..."
+                  placeholder="0,0,0,0,0,0,0"
+                  value={nodeIdInput}
+                  onChange={(e) => setNodeIdInput(e.target.value)}
                   className="h-8 w-[160px]"
                 />
               </div>
+              {feedback && (
+                <span
+                  className="self-center font-body text-[12px]"
+                  style={{
+                    color: feedback.type === 'success' ? 'var(--accent-green)' : 'var(--accent-red)',
+                  }}
+                >
+                  {feedback.msg}
+                </span>
+              )}
             </div>
           </motion.div>
 

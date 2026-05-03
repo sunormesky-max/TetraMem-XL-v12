@@ -11,6 +11,11 @@ import {
   Box,
   Server,
   Clock,
+  Eye,
+  Ruler,
+  Brain,
+  Heart,
+  Shield,
 } from 'lucide-react'
 
 const navSections = [
@@ -31,6 +36,16 @@ const navSections = [
       { to: '/regulation', icon: Activity, label: '调节' },
       { to: '/cluster', icon: Server, label: '集群' },
       { to: '/timeline', icon: Clock, label: '时间轴' },
+    ],
+  },
+  {
+    label: '维度',
+    items: [
+      { to: '/dark', icon: Eye, label: '暗维度' },
+      { to: '/physics', icon: Ruler, label: '物理引擎' },
+      { to: '/semantic', icon: Brain, label: '语义搜索' },
+      { to: '/emotion', icon: Heart, label: '情绪系统' },
+      { to: '/watchdog', icon: Shield, label: '看门狗' },
     ],
   },
   {

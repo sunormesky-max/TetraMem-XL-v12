@@ -22,6 +22,7 @@ use crate::universe::auth::Claims;
 use crate::universe::error::AppError;
 use crate::universe::metrics;
 
+use super::agent_ops::{associate, consolidate, context, forget, recall, remember};
 use super::backup_ops::{create_backup, list_backups};
 use super::cluster_ops::{
     cluster_add_node, cluster_init, cluster_propose, cluster_remove_node, cluster_status,
@@ -292,6 +293,12 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/memory/timeline", get(memory_timeline))
         .route("/memory/trace", post(memory_trace))
         .route("/memory/annotate", post(annotate_memory))
+        .route("/memory/remember", post(remember))
+        .route("/memory/recall", post(recall))
+        .route("/memory/associate", post(associate))
+        .route("/memory/forget", post(forget))
+        .route("/dream/consolidate", post(consolidate))
+        .route("/context", post(context))
         .route("/semantic/search", post(semantic_search))
         .route("/semantic/query", post(semantic_text_query))
         .route("/semantic/relations", post(semantic_relations))
@@ -352,8 +359,7 @@ pub fn create_router(state: SharedState) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(raft_routes)
-        .merge(user_routes)
-        .merge(admin_routes)
+        .nest("/api", user_routes.merge(admin_routes))
         .layer(Extension(limiter))
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(DefaultBodyLimit::max(state.config.server.body_limit_bytes))

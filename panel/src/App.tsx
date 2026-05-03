@@ -13,6 +13,11 @@ const Regulation = lazy(() => import('./pages/Regulation'))
 const ApiPlayground = lazy(() => import('./pages/Api'))
 const Cluster = lazy(() => import('./pages/Cluster'))
 const Timeline = lazy(() => import('./pages/Timeline'))
+const Dark = lazy(() => import('./pages/Dark'))
+const Physics = lazy(() => import('./pages/Physics'))
+const Semantic = lazy(() => import('./pages/Semantic'))
+const Emotion = lazy(() => import('./pages/Emotion'))
+const Watchdog = lazy(() => import('./pages/Watchdog'))
 
 export default function App() {
   return (
@@ -27,6 +32,11 @@ export default function App() {
         <Route path="/regulation" element={<Regulation />} />
         <Route path="/cluster" element={<Cluster />} />
         <Route path="/timeline" element={<Timeline />} />
+        <Route path="/dark" element={<Dark />} />
+        <Route path="/physics" element={<Physics />} />
+        <Route path="/semantic" element={<Semantic />} />
+        <Route path="/emotion" element={<Emotion />} />
+        <Route path="/watchdog" element={<Watchdog />} />
         <Route path="/api" element={<ApiPlayground />} />
       </Routes>
     </Layout>
