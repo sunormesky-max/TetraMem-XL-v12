@@ -173,7 +173,7 @@ impl TetraMemTools {
             },
             ToolDefinition {
                 name: "tetramem_remember".into(),
-                description: "Store a memory for an AI agent. Automatically encodes content, indexes semantically, and links to similar existing memories via Hebbian edges. Solves cross-session memory loss.".into(),
+                description: "Store a memory for an AI agent. Automatically encodes content, indexes semantically, links to similar memories, and detects contradictions with existing beliefs. Use category='decision' for decision logging. Returns contradiction warnings if conflicting memories found.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -257,7 +257,7 @@ impl TetraMemTools {
             },
             ToolDefinition {
                 name: "tetramem_consolidate".into(),
-                description: "Run dream consolidation cycle: strengthen important memories, weaken noise, create new associations. Solves the 'cannot distinguish importance' problem.".into(),
+                description: "Run dream consolidation cycle: strengthen important memories, weaken noise, detect emergent knowledge clusters, and track self-model evolution via dark dimension analysis. Returns fermentation report with emergence insights.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -271,14 +271,14 @@ impl TetraMemTools {
             },
             ToolDefinition {
                 name: "tetramem_context".into(),
-                description: "Manage agent context window. Add messages; when context overflows, older messages are automatically encoded to TetraMem memory and can be recalled later. Solves context window overflow.".into(),
+                description: "Manage agent context window. Add messages; when context overflows, older messages are automatically encoded to TetraMem memory and can be recalled later. Use 'pre_work' to auto-activate relevant memories before starting a task.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["add", "status", "reconstruct", "clear"],
-                            "description": "Action: 'add' message, 'status' check, 'reconstruct' from memory, 'clear' window"
+                            "enum": ["add", "status", "reconstruct", "clear", "pre_work"],
+                            "description": "Action: 'add' message, 'status' check, 'reconstruct' from memory, 'clear' window, 'pre_work' activate relevant memories for upcoming task"
                         },
                         "role": {
                             "type": "string",
@@ -286,7 +286,7 @@ impl TetraMemTools {
                         },
                         "content": {
                             "type": "string",
-                            "description": "Message content (for 'add' or 'reconstruct' query)"
+                            "description": "Message content (for 'add' or 'reconstruct' or 'pre_work' query)"
                         }
                     },
                     "required": ["action"]
@@ -691,17 +691,36 @@ impl TetraMemTools {
                         clustering.register_memory(*mem.anchor(), &data);
 
                         let memory_id = format!("mem_{}", memories.len());
+
+                        let is_decision = category == "decision";
+
+                        let contradictions = detect_contradictions(
+                            &content,
+                            mem.anchor(),
+                            memories,
+                            universe,
+                            hebbian,
+                        );
+
                         memories.push(mem);
-                        super::protocol::ToolCallResult::ok(
-                            json!({
-                                "success": true,
-                                "memory_id": memory_id,
-                                "anchor": anchor_str,
-                                "semantic_links": links,
-                                "conservation_ok": universe.verify_conservation(),
-                            })
-                            .to_string(),
-                        )
+                        let mut result = json!({
+                            "success": true,
+                            "memory_id": memory_id,
+                            "anchor": anchor_str,
+                            "semantic_links": links,
+                            "conservation_ok": universe.verify_conservation(),
+                        });
+                        if !contradictions.is_empty() {
+                            result["contradiction_warnings"] = json!(contradictions);
+                            result["contradiction_count"] = json!(contradictions.len());
+                        }
+                        if is_decision {
+                            result["decision_logged"] = json!(true);
+                            result["decision_note"] = json!(
+                                "this decision is tracked and can be recalled for future reference"
+                            );
+                        }
+                        super::protocol::ToolCallResult::ok(result.to_string())
                     }
                     Err(e) => {
                         let fallback = text_to_anchor(&content);
@@ -972,7 +991,7 @@ impl TetraMemTools {
                 let engine = DreamEngine::new();
                 let report = engine.dream(universe, hebbian, memories);
 
-                let _cluster_report = clustering.run_maintenance_cycle(memories, hebbian, universe);
+                let cluster_report = clustering.run_maintenance_cycle(memories, hebbian, universe);
 
                 let mut weakened = 0usize;
                 let mut strengthened = 0usize;
@@ -1020,6 +1039,130 @@ impl TetraMemTools {
 
                 semantic.auto_link_similar(memories);
 
+                let mut clusters: Vec<serde_json::Value> = Vec::new();
+                let mut visited = std::collections::HashSet::new();
+                for (i, _mem_a) in memories.iter().enumerate() {
+                    if visited.contains(&i) {
+                        continue;
+                    }
+                    let mut cluster_members = Vec::new();
+                    let mut stack = vec![i];
+                    while let Some(ci) = stack.pop() {
+                        if visited.contains(&ci) {
+                            continue;
+                        }
+                        visited.insert(ci);
+                        let cm = &memories[ci];
+                        cluster_members.push(json!({
+                            "anchor": format!("{}", cm.anchor()),
+                            "description": cm.description().unwrap_or(""),
+                            "category": cm.category().unwrap_or(""),
+                            "importance": cm.importance(),
+                        }));
+                        for (cj, mem_b) in memories.iter().enumerate() {
+                            if visited.contains(&cj) {
+                                continue;
+                            }
+                            let d = cm.anchor().distance_sq(mem_b.anchor());
+                            if d < 2500.0 {
+                                stack.push(cj);
+                            }
+                        }
+                    }
+                    if cluster_members.len() >= 2 {
+                        let cats: Vec<&str> = cluster_members
+                            .iter()
+                            .filter_map(|m| m.get("category").and_then(|c| c.as_str()))
+                            .filter(|c| !c.is_empty())
+                            .collect();
+                        let mut cat_set = std::collections::HashSet::new();
+                        for c in &cats {
+                            cat_set.insert(*c);
+                        }
+                        clusters.push(json!({
+                            "size": cluster_members.len(),
+                            "categories": cat_set.into_iter().collect::<Vec<&str>>(),
+                            "members": cluster_members,
+                        }));
+                    }
+                }
+
+                let mut emergent_links: Vec<serde_json::Value> = Vec::new();
+                for mem_a in memories.iter() {
+                    let nb = hebbian.get_neighbors(mem_a.anchor());
+                    for (coord, weight) in &nb {
+                        if *weight > 0.8 {
+                            if let Some(mem_b) = memories.iter().find(|m| m.anchor() == coord) {
+                                let cat_a = mem_a.category().unwrap_or("");
+                                let cat_b = mem_b.category().unwrap_or("");
+                                if !cat_a.is_empty() && !cat_b.is_empty() && cat_a != cat_b {
+                                    emergent_links.push(json!({
+                                        "from": mem_a.description().unwrap_or(""),
+                                        "to": mem_b.description().unwrap_or(""),
+                                        "categories": [cat_a, cat_b],
+                                        "strength": weight,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                emergent_links.sort_by(|a, b| {
+                    b.get("strength")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0)
+                        .partial_cmp(&a.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                emergent_links.truncate(5);
+
+                let mut dark_dims = [0.0f64; 4];
+                let mut phys_center = [0.0f64; 3];
+                for mem in memories.iter() {
+                    let p = mem.anchor().physical();
+                    let d = mem.anchor().dark();
+                    phys_center[0] += p[0] as f64;
+                    phys_center[1] += p[1] as f64;
+                    phys_center[2] += p[2] as f64;
+                    dark_dims[0] += d[0] as f64;
+                    dark_dims[1] += d[1] as f64;
+                    dark_dims[2] += d[2] as f64;
+                    dark_dims[3] += d[3] as f64;
+                }
+                let n = memories.len().max(1) as f64;
+                for v in phys_center.iter_mut() {
+                    *v /= n;
+                }
+                for v in dark_dims.iter_mut() {
+                    *v /= n;
+                }
+
+                let mut knowledge_spread = 0.0f64;
+                for mem in memories.iter() {
+                    let p = mem.anchor().physical();
+                    knowledge_spread += (p[0] as f64 - phys_center[0]).powi(2)
+                        + (p[1] as f64 - phys_center[1]).powi(2)
+                        + (p[2] as f64 - phys_center[2]).powi(2);
+                }
+                knowledge_spread = (knowledge_spread / n).sqrt();
+
+                let mut belief_stability = 0.0f64;
+                if memories.len() > 1 {
+                    let mut times: Vec<u64> = memories.iter().map(|m| m.created_at()).collect();
+                    times.sort();
+                    if let (Some(first), Some(last)) = (times.first(), times.last()) {
+                        let span = (*last - *first).max(1);
+                        belief_stability = (memories.len() as f64).ln()
+                            / (span as f64 / 86400000.0).ln().abs().max(1.0);
+                    }
+                }
+
+                let uncertainty = if knowledge_spread > 0.0 {
+                    1.0 / (1.0 + knowledge_spread * 0.01)
+                } else {
+                    1.0
+                };
+
                 super::protocol::ToolCallResult::ok(
                     json!({
                         "consolidation": format!("{}", report),
@@ -1030,6 +1173,25 @@ impl TetraMemTools {
                         "intra_cluster_edges": intra_cluster,
                         "inter_cluster_edges": inter_cluster,
                         "conservation_ok": universe.verify_conservation(),
+                        "fermentation_report": {
+                            "clusters_found": clusters.len(),
+                            "clusters": clusters,
+                            "emergent_cross_category_links": emergent_links,
+                            "cluster_maintenance": {
+                                "attractors": cluster_report.attractors,
+                                "tunnels_applied": cluster_report.tunnels_applied,
+                                "bridges_bridged": cluster_report.bridges_created,
+                            },
+                        },
+                        "self_model": {
+                            "attention_density": dark_dims[0],
+                            "knowledge_breadth": dark_dims[1],
+                            "belief_stability": belief_stability,
+                            "uncertainty": uncertainty,
+                            "knowledge_spread": knowledge_spread,
+                            "total_beliefs": memories.len(),
+                            "physical_center": phys_center,
+                        },
                     })
                     .to_string(),
                 )
@@ -1149,6 +1311,133 @@ impl TetraMemTools {
                             json!({
                                 "reconstructed_context": reconstructed,
                                 "current_window_entries": context_window.len(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    "pre_work" => {
+                        let query = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let query_data = text_to_embedding(query, 0.6);
+
+                        let ideal_anchor = clustering.compute_ideal_anchor(&query_data, universe);
+                        let ideal_phys = ideal_anchor.physical();
+
+                        let mut recent: Vec<serde_json::Value> = Vec::new();
+                        let mut all_anchors = Vec::new();
+                        for mem in memories.iter() {
+                            all_anchors.push((
+                                mem.anchor().physical(),
+                                *mem.anchor(),
+                                mem.created_at(),
+                            ));
+                        }
+                        all_anchors.sort_by_key(|b| std::cmp::Reverse(b.2));
+
+                        let mut used_basis = std::collections::HashSet::<[i32; 7]>::new();
+                        for (phys, anchor, _ts) in &all_anchors {
+                            if recent.len() >= 5 {
+                                break;
+                            }
+                            let dx = (ideal_phys[0] - phys[0]).abs();
+                            let dy = (ideal_phys[1] - phys[1]).abs();
+                            let dz = (ideal_phys[2] - phys[2]).abs();
+                            if dx + dy + dz < 150 {
+                                if used_basis.contains(&anchor.basis()) {
+                                    continue;
+                                }
+                                used_basis.insert(anchor.basis());
+                                if let Some(mem) = memories.iter().find(|m| m.anchor() == anchor) {
+                                    let desc = mem.description().unwrap_or("").to_string();
+                                    if !desc.is_empty() {
+                                        recent.push(json!({
+                                            "description": desc,
+                                            "tags": mem.tags(),
+                                            "category": mem.category().unwrap_or(""),
+                                            "importance": mem.importance(),
+                                            "method": "spatial",
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+
+                        if recent.len() < 5 {
+                            let knn = semantic.search_similar(&query_data, 10);
+                            for k in &knn {
+                                if recent.len() >= 5 {
+                                    break;
+                                }
+                                let anchor = Coord7D::new_even(k.atom_key.vertices_basis[0]);
+                                if used_basis.contains(&anchor.basis()) {
+                                    continue;
+                                }
+                                used_basis.insert(anchor.basis());
+                                if let Some(mem) = memories
+                                    .iter()
+                                    .find(|m| m.anchor().basis() == k.atom_key.vertices_basis[0])
+                                {
+                                    let desc = mem.description().unwrap_or("").to_string();
+                                    if !desc.is_empty() {
+                                        recent.push(json!({
+                                            "description": desc,
+                                            "tags": mem.tags(),
+                                            "category": mem.category().unwrap_or(""),
+                                            "importance": mem.importance(),
+                                            "method": "knn",
+                                            "similarity": k.similarity,
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+
+                        let knn_seed = semantic.search_similar(&query_data, 3);
+                        if let Some(seed_k) = knn_seed.first() {
+                            let seed_anchor = Coord7D::new_even(seed_k.atom_key.vertices_basis[0]);
+                            let h_neighbors = hebbian.get_neighbors(&seed_anchor);
+                            for (coord, weight) in h_neighbors.iter().take(3) {
+                                if recent.len() >= 8 {
+                                    break;
+                                }
+                                if let Some(mem) = memories.iter().find(|m| m.anchor() == coord) {
+                                    let desc = mem.description().unwrap_or("").to_string();
+                                    if !desc.is_empty()
+                                        && !used_basis.contains(&mem.anchor().basis())
+                                    {
+                                        used_basis.insert(mem.anchor().basis());
+                                        recent.push(json!({
+                                            "description": desc,
+                                            "tags": mem.tags(),
+                                            "method": "hebbian",
+                                            "edge_weight": weight,
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+
+                        for entry in &recent {
+                            if let Some(desc) = entry.get("description").and_then(|d| d.as_str()) {
+                                context_window.push(ContextEntry {
+                                    role: "system".to_string(),
+                                    content: format!("[activated memory] {}", desc),
+                                    token_estimate: desc.split_whitespace().count() * 2,
+                                    memory_id: None,
+                                });
+                            }
+                        }
+
+                        let current_tokens: usize =
+                            context_window.iter().map(|e| e.token_estimate).sum();
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "action": "pre_work",
+                                "query": query,
+                                "activated_memories": recent.len(),
+                                "memories": recent,
+                                "context_entries": context_window.len(),
+                                "current_tokens": current_tokens,
+                                "max_tokens": context_max_tokens,
                             })
                             .to_string(),
                         )
@@ -1527,6 +1816,104 @@ fn synonym_bucket(word: &str) -> Option<u64> {
     }
 
     None
+}
+
+fn detect_contradictions(
+    new_content: &str,
+    new_anchor: &Coord7D,
+    memories: &[MemoryAtom],
+    _universe: &DarkUniverse,
+    hebbian: &HebbianMemory,
+) -> Vec<serde_json::Value> {
+    let mut contradictions = Vec::new();
+    let _new_data = text_to_embedding(new_content, 0.5);
+    let new_phys = new_anchor.physical();
+
+    let contradict_pairs: &[&[&str]] = &[
+        &["should", "should not", "must not", "never"],
+        &["always", "never", "sometimes", "rarely"],
+        &["good", "bad", "terrible", "awful"],
+        &["like", "hate", "dislike", "loathe"],
+        &["agree", "disagree", "oppose", "reject"],
+        &["true", "false", "wrong", "incorrect"],
+        &["yes", "no"],
+        &["possible", "impossible"],
+        &["easy", "hard", "difficult", "complex"],
+        &["safe", "dangerous", "risky", "unsafe"],
+    ];
+
+    let new_lower = new_content.to_lowercase();
+    let mut new_sentiment_group: Option<usize> = None;
+    'outer: for (gi, group) in contradict_pairs.iter().enumerate() {
+        for word in *group {
+            if new_lower.contains(word) {
+                new_sentiment_group = Some(gi);
+                break 'outer;
+            }
+        }
+    }
+
+    if new_sentiment_group.is_none() {
+        return contradictions;
+    }
+
+    let sg = new_sentiment_group.unwrap();
+    let group = contradict_pairs[sg];
+
+    let neighbors = hebbian.get_neighbors(new_anchor);
+    let mut candidates: Vec<&MemoryAtom> = Vec::new();
+
+    for mem in memories.iter() {
+        let mp = mem.anchor().physical();
+        let d =
+            (new_phys[0] - mp[0]).abs() + (new_phys[1] - mp[1]).abs() + (new_phys[2] - mp[2]).abs();
+        if d < 200 && d > 0 {
+            candidates.push(mem);
+        }
+    }
+
+    for (coord, _weight) in &neighbors {
+        if let Some(mem) = memories.iter().find(|m| m.anchor() == coord) {
+            if !candidates.iter().any(|c| c.anchor() == mem.anchor()) {
+                candidates.push(mem);
+            }
+        }
+    }
+
+    for mem in candidates.iter().take(10) {
+        let desc = match mem.description() {
+            Some(d) => d.to_lowercase(),
+            None => continue,
+        };
+
+        let mut has_same = false;
+        let mut has_opposite = false;
+        for (wi, word) in group.iter().enumerate() {
+            if new_lower.contains(word) {
+                for (wj, other_word) in group.iter().enumerate() {
+                    if desc.contains(other_word) {
+                        if wi == wj {
+                            has_same = true;
+                        } else if wi / 2 != wj / 2 {
+                            has_opposite = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if has_opposite && !has_same {
+            let edge_w = hebbian.get_bias(new_anchor, mem.anchor());
+            contradictions.push(json!({
+                "conflict_with": desc,
+                "anchor": format!("{}", mem.anchor()),
+                "edge_weight": edge_w,
+                "confidence": if edge_w > 0.5 { "high" } else { "medium" },
+            }));
+        }
+    }
+
+    contradictions
 }
 
 fn text_to_anchor(text: &str) -> Coord7D {
