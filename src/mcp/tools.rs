@@ -4,6 +4,11 @@
 use serde_json::{json, Value};
 
 use super::protocol::{ResourceDefinition, ToolDefinition};
+use crate::universe::adaptive::autoscale::AutoScaler;
+use crate::universe::adaptive::watchdog::Watchdog;
+use crate::universe::cognitive::emotion::EmotionMapper;
+use crate::universe::cognitive::functional_emotion::FunctionalEmotion;
+use crate::universe::cognitive::perception::PerceptionBudget;
 use crate::universe::coord::Coord7D;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::dream::DreamEngine;
@@ -290,6 +295,92 @@ impl TetraMemTools {
                         }
                     },
                     "required": ["action"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_reason".into(),
+                description: "Advanced reasoning: find analogies between memories, infer chains between two anchors, or discover new knowledge via exploratory pulse. Returns confidence scores and hop counts.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "enum": ["analogies", "infer_chain", "discover"],
+                            "description": "Reasoning method: 'analogies' finds similar memories, 'infer_chain' finds path between two anchors, 'discover' explores via pulse"
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Similarity threshold for analogies (default 0.7)"
+                        },
+                        "from_anchor": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Start anchor for infer_chain [x, y, z]",
+                            "minItems": 3, "maxItems": 3
+                        },
+                        "to_anchor": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "End anchor for infer_chain [x, y, z]",
+                            "minItems": 3, "maxItems": 3
+                        },
+                        "seed_anchor": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Seed anchor for discover [x, y, z]",
+                            "minItems": 3, "maxItems": 3
+                        },
+                        "max_hops": {
+                            "type": "integer",
+                            "description": "Maximum hops for infer_chain (default 15)"
+                        }
+                    },
+                    "required": ["method"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_emotion".into(),
+                description: "Read the emotional state of the universe from dark energy dimensions. Returns PAD vector (Pleasure-Arousal-Dominance), emotional quadrant, functional emotion cluster, and pulse strategy recommendation.".into(),
+                input_schema: json!({"type": "object", "properties": {}, "required": []}),
+            },
+            ToolDefinition {
+                name: "tetramem_scale".into(),
+                description: "Auto-scale the universe: expand energy when utilization is high, shrink when low, or grow the lattice frontier. Ensures energy conservation throughout.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["auto", "frontier"],
+                            "description": "'auto' evaluates and scales based on utilization, 'frontier' expands lattice boundary"
+                        },
+                        "max_new_nodes": {
+                            "type": "integer",
+                            "description": "Max nodes to add for frontier expansion (default 200)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
+            ToolDefinition {
+                name: "tetramem_watchdog".into(),
+                description: "Run a watchdog checkup: comprehensive health monitoring with watermark thresholds, conservation tracking, and auto-backup triggering. Returns multi-level alert status.".into(),
+                input_schema: json!({"type": "object", "properties": {}, "required": []}),
+            },
+            ToolDefinition {
+                name: "tetramem_forget".into(),
+                description: "Erase a memory by its anchor position, freeing its energy back to the universe pool. Requires exact anchor coordinates.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "anchor": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "3D anchor coordinate of the memory to erase [x, y, z]",
+                            "minItems": 3, "maxItems": 3
+                        }
+                    },
+                    "required": ["anchor"]
                 }),
             },
         ]
@@ -1459,6 +1550,302 @@ impl TetraMemTools {
                         action
                     )),
                 }
+            }
+            "tetramem_forget" => {
+                let anchor = match parse_3d_coord(args, "anchor") {
+                    Ok(c) => c,
+                    Err(e) => return super::protocol::ToolCallResult::err(e),
+                };
+                let idx = match memories.iter().position(|m| m.anchor() == &anchor) {
+                    Some(i) => i,
+                    None => {
+                        return super::protocol::ToolCallResult::err(format!(
+                            "no memory at {:?}",
+                            anchor.basis()
+                        ))
+                    }
+                };
+                let mem = &memories[idx];
+                let desc = mem.description().unwrap_or("").to_string();
+                MemoryCodec::erase(universe, mem);
+                memories.remove(idx);
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "success": true,
+                        "erased_anchor": format!("{}", anchor),
+                        "description": desc,
+                        "remaining_memories": memories.len(),
+                        "conservation_ok": universe.verify_conservation(),
+                    })
+                    .to_string(),
+                )
+            }
+            "tetramem_reason" => {
+                let method = match args.get("method").and_then(|v| v.as_str()) {
+                    Some(m) => m,
+                    None => {
+                        return super::protocol::ToolCallResult::err(
+                            "method is required: analogies/infer_chain/discover",
+                        )
+                    }
+                };
+                match method {
+                    "analogies" => {
+                        let threshold = args
+                            .get("threshold")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.7);
+                        let analogies =
+                            ReasoningEngine::find_analogies(universe, memories, threshold);
+                        let results: Vec<Value> = analogies
+                            .iter()
+                            .map(|r| {
+                                let desc_source = memories
+                                    .iter()
+                                    .find(|m| format!("{}", m.anchor()) == r.source)
+                                    .and_then(|m| m.description().map(String::from))
+                                    .unwrap_or_default();
+                                let desc_target = r
+                                    .targets
+                                    .first()
+                                    .and_then(|t| {
+                                        memories
+                                            .iter()
+                                            .find(|m| format!("{}", m.anchor()) == *t)
+                                            .and_then(|m| m.description().map(String::from))
+                                    })
+                                    .unwrap_or_default();
+                                json!({
+                                    "source": r.source,
+                                    "source_description": desc_source,
+                                    "target": r.targets.first().unwrap_or(&"".into()),
+                                    "target_description": desc_target,
+                                    "confidence": r.confidence,
+                                })
+                            })
+                            .collect();
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "method": "analogies",
+                                "threshold": threshold,
+                                "analogies_found": results.len(),
+                                "results": results,
+                            })
+                            .to_string(),
+                        )
+                    }
+                    "infer_chain" => {
+                        let from = match parse_3d_coord(args, "from_anchor") {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return super::protocol::ToolCallResult::err(format!(
+                                    "from_anchor required: {}",
+                                    e
+                                ))
+                            }
+                        };
+                        let to = match parse_3d_coord(args, "to_anchor") {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return super::protocol::ToolCallResult::err(format!(
+                                    "to_anchor required: {}",
+                                    e
+                                ))
+                            }
+                        };
+                        let max_hops =
+                            args.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
+                        let chain =
+                            ReasoningEngine::infer_chain(universe, hebbian, &from, &to, max_hops);
+                        let hops: Vec<Value> = chain
+                            .iter()
+                            .map(|r| {
+                                json!({
+                                    "from": r.source,
+                                    "to": r.targets.first().unwrap_or(&"".into()),
+                                    "confidence": r.confidence,
+                                    "hop": r.hops,
+                                })
+                            })
+                            .collect();
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "method": "infer_chain",
+                                "from": format!("{}", from),
+                                "to": format!("{}", to),
+                                "chain_length": hops.len(),
+                                "found": !hops.is_empty(),
+                                "hops": hops,
+                            })
+                            .to_string(),
+                        )
+                    }
+                    "discover" => {
+                        let seed = match parse_3d_coord(args, "seed_anchor") {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return super::protocol::ToolCallResult::err(format!(
+                                    "seed_anchor required: {}",
+                                    e
+                                ))
+                            }
+                        };
+                        let discoveries = ReasoningEngine::discover(universe, hebbian, &seed, 0.5);
+                        let results: Vec<Value> = discoveries
+                            .iter()
+                            .map(|r| {
+                                let desc = r
+                                    .targets
+                                    .first()
+                                    .and_then(|t| {
+                                        memories
+                                            .iter()
+                                            .find(|m| format!("{}", m.anchor()) == *t)
+                                            .and_then(|m| m.description().map(String::from))
+                                    })
+                                    .unwrap_or_default();
+                                json!({
+                                    "from": r.source,
+                                    "discovered": r.targets.first().unwrap_or(&"".into()),
+                                    "description": desc,
+                                    "confidence": r.confidence,
+                                })
+                            })
+                            .collect();
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "method": "discover",
+                                "seed": format!("{}", seed),
+                                "discoveries": results.len(),
+                                "results": results,
+                            })
+                            .to_string(),
+                        )
+                    }
+                    _ => super::protocol::ToolCallResult::err(
+                        "method must be analogies/infer_chain/discover",
+                    ),
+                }
+            }
+            "tetramem_emotion" => {
+                let reading = EmotionMapper::read(universe);
+                let func_emotion = FunctionalEmotion::from_pad(
+                    reading.pad,
+                    crate::universe::cognitive::functional_emotion::EmotionSource::Functional,
+                );
+                let budget = PerceptionBudget::new(universe.stats().total_energy);
+                let perception_report = budget.report();
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "pad": {
+                            "pleasure": reading.pad.pleasure,
+                            "arousal": reading.pad.arousal,
+                            "dominance": reading.pad.dominance,
+                            "magnitude": reading.pad.magnitude(),
+                            "quadrant": format!("{:?}", reading.quadrant),
+                            "dominance_label": reading.pad.dominance_label(),
+                        },
+                        "functional_emotion": {
+                            "cluster": func_emotion.cluster.name(),
+                            "valence": format!("{:?}", func_emotion.valence),
+                            "arousal_level": format!("{:?}", func_emotion.arousal),
+                            "is_positive": func_emotion.is_positive(),
+                            "is_high_arousal": func_emotion.is_high_arousal(),
+                        },
+                        "recommendations": {
+                            "pulse_strategy": format!("{:?}", reading.pulse_suggestion),
+                            "dream_frequency_multiplier": reading.dream_frequency_multiplier,
+                            "crystal_threshold_modifier": reading.crystal_threshold_modifier,
+                        },
+                        "perception": {
+                            "total_budget": perception_report.total_budget,
+                            "allocated": perception_report.allocated,
+                            "spent": perception_report.spent,
+                            "returned": perception_report.returned,
+                            "utilization": perception_report.utilization,
+                            "active_perceptions": perception_report.active_perceptions,
+                        },
+                        "universe_state": {
+                            "energy_utilization": reading.energy_utilization,
+                            "manifested_ratio": reading.manifested_ratio,
+                        },
+                    })
+                    .to_string(),
+                )
+            }
+            "tetramem_scale" => {
+                let action = match args.get("action").and_then(|v| v.as_str()) {
+                    Some(a) => a,
+                    None => {
+                        return super::protocol::ToolCallResult::err(
+                            "action is required: auto/frontier",
+                        )
+                    }
+                };
+                let scaler = AutoScaler::new();
+                match action {
+                    "auto" => {
+                        let report = scaler.auto_scale(universe, hebbian, memories);
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "action": "auto_scale",
+                                "energy_expanded_by": report.energy_expanded_by,
+                                "nodes_added": report.nodes_added,
+                                "nodes_removed": report.nodes_removed,
+                                "rebalanced": report.rebalanced,
+                                "reason": format!("{:?}", report.reason),
+                                "conservation_ok": universe.verify_conservation(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    "frontier" => {
+                        let max_new = args
+                            .get("max_new_nodes")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(200) as usize;
+                        let report = scaler.frontier_expansion(universe, max_new);
+                        super::protocol::ToolCallResult::ok(
+                            json!({
+                                "action": "frontier_expansion",
+                                "energy_expanded_by": report.energy_expanded_by,
+                                "nodes_added": report.nodes_added,
+                                "nodes_removed": report.nodes_removed,
+                                "rebalanced": report.rebalanced,
+                                "conservation_ok": universe.verify_conservation(),
+                            })
+                            .to_string(),
+                        )
+                    }
+                    _ => super::protocol::ToolCallResult::err("action must be auto or frontier"),
+                }
+            }
+            "tetramem_watchdog" => {
+                let stats = universe.stats();
+                let mut watchdog = Watchdog::with_defaults(stats.total_energy);
+                let report = watchdog.checkup(universe, hebbian, crystal, memories);
+                super::protocol::ToolCallResult::ok(
+                    json!({
+                        "level": report.level.as_str(),
+                        "health": report.health.as_str(),
+                        "utilization": report.utilization,
+                        "node_count": report.node_count,
+                        "memory_count": report.memory_count,
+                        "conservation_ok": report.conservation_ok,
+                        "consecutive_conservation_failures": report.consecutive_conservation_failures,
+                        "total_checkups": report.total_checkups,
+                        "backup_count": report.backup_count,
+                        "energy": {
+                            "initial": report.initial_energy,
+                            "current": report.current_energy,
+                            "total": stats.total_energy,
+                            "available": stats.available_energy,
+                        },
+                        "elapsed_ms": report.elapsed_ms,
+                        "actions_available": report.actions.iter().map(|a| a.action.clone()).collect::<Vec<_>>(),
+                    })
+                    .to_string(),
+                )
             }
             _ => super::protocol::ToolCallResult::err(format!("unknown tool: {}", name)),
         }
