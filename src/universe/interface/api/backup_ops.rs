@@ -14,21 +14,15 @@ use super::types::*;
 pub async fn create_backup(
     State(state): State<SharedState>,
 ) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
-    let u = state.universe.read().await;
-    let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let c = state.crystal.read().await;
-    let mut bs = state.backup.write().await;
-
-    let report = bs
-        .create_backup(BackupTrigger::Manual, &u, &h, &mems, &c)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    drop(u);
-    drop(h);
-    drop(mems);
-    drop(c);
-    drop(bs);
+    let report = {
+        let u = state.universe.read().await;
+        let h = state.hebbian.read().await;
+        let mems = state.memories.read().await;
+        let c = state.crystal.read().await;
+        let mut bs = state.backup.write().await;
+        bs.create_backup(BackupTrigger::Manual, &u, &h, &mems, &c)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    };
 
     state.event_sender.publish(UniverseEvent::BackupCreated {
         backup_id: report.metadata.id,

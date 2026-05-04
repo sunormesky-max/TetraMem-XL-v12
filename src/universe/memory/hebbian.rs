@@ -76,6 +76,7 @@ pub struct HebbianEdgeFull {
 #[derive(Clone)]
 pub struct HebbianMemory {
     edges: HashMap<(Coord7D, Coord7D), HebbianEdge>,
+    adj: HashMap<Coord7D, Vec<(Coord7D, f64)>>,
     pub max_paths: usize,
     decay: f64,
     reinforce: f64,
@@ -92,6 +93,7 @@ impl HebbianMemory {
     pub fn new() -> Self {
         Self {
             edges: HashMap::new(),
+            adj: HashMap::new(),
             max_paths: DEFAULT_MAX_PATHS,
             decay: DEFAULT_DECAY,
             reinforce: DEFAULT_REINFORCE,
@@ -130,7 +132,7 @@ impl HebbianMemory {
         for i in 0..path.len() - 1 {
             let key = canonical_edge(&path[i], &path[i + 1]);
 
-            if let Some(edge) = self.edges.get_mut(&key) {
+            let new_weight = if let Some(edge) = self.edges.get_mut(&key) {
                 edge.weight = (edge.weight + edge_strength).min(MAX_EDGE_WEIGHT);
                 edge.traversal_count += 1;
 
@@ -142,13 +144,19 @@ impl HebbianMemory {
                 if edge.traversal_count == GOLDEN_THRESHOLD {
                     edge.weight = (edge.weight * GOLDEN_MULTIPLIER).min(MAX_EDGE_WEIGHT);
                 }
+
+                edge.weight
             } else {
                 let edge = match emotion {
                     Some(src) => HebbianEdge::with_emotion(edge_strength, src),
                     None => HebbianEdge::new(edge_strength),
                 };
                 self.edges.insert(key, edge);
-            }
+                self.add_adj_entry(&key.0, &key.1, edge_strength);
+                continue;
+            };
+
+            self.update_adj_weight(&key.0, &key.1, new_weight);
         }
 
         if self.edges.len() > self.max_paths * 3 / 2 {
@@ -172,25 +180,64 @@ impl HebbianMemory {
         }
     }
 
-    pub fn get_neighbors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
-        let mut result = Vec::new();
-        for ((a, b), edge) in &self.edges {
-            if a == node {
-                result.push((*b, edge.weight));
-            } else if b == node {
-                result.push((*a, edge.weight));
+    fn add_adj_entry(&mut self, a: &Coord7D, b: &Coord7D, weight: f64) {
+        self.adj.entry(*a).or_default().push((*b, weight));
+        self.adj.entry(*b).or_default().push((*a, weight));
+    }
+
+    fn update_adj_weight(&mut self, a: &Coord7D, b: &Coord7D, weight: f64) {
+        if let Some(neighbors) = self.adj.get_mut(a) {
+            if let Some(entry) = neighbors.iter_mut().find(|(c, _)| c == b) {
+                entry.1 = weight;
             }
         }
+        if let Some(neighbors) = self.adj.get_mut(b) {
+            if let Some(entry) = neighbors.iter_mut().find(|(c, _)| c == a) {
+                entry.1 = weight;
+            }
+        }
+    }
+
+    fn remove_adj_entry(&mut self, a: &Coord7D, b: &Coord7D) {
+        if let Some(neighbors) = self.adj.get_mut(a) {
+            neighbors.retain(|(c, _)| c != b);
+            if neighbors.is_empty() {
+                self.adj.remove(a);
+            }
+        }
+        if let Some(neighbors) = self.adj.get_mut(b) {
+            neighbors.retain(|(c, _)| c != a);
+            if neighbors.is_empty() {
+                self.adj.remove(b);
+            }
+        }
+    }
+
+    pub fn get_neighbors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
+        let mut result = self.adj.get(node).cloned().unwrap_or_default();
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
 
     pub fn decay_all(&mut self) {
         let min_w = self.min_weight;
-        self.edges.retain(|_, edge| {
-            edge.weight *= self.decay;
-            edge.weight >= min_w
-        });
+        let mut to_remove = Vec::new();
+        let mut to_update = Vec::new();
+        for (k, e) in &mut self.edges {
+            e.weight *= self.decay;
+            if e.weight < min_w {
+                to_remove.push(*k);
+            } else {
+                to_update.push((*k, e.weight));
+            }
+        }
+        for k in &to_remove {
+            self.edges.remove(k);
+            self.remove_adj_entry(&k.0, &k.1);
+        }
+        for ((a, b), w) in &to_update {
+            self.update_adj_weight(a, b, *w);
+        }
     }
 
     pub fn prune(&mut self) {
@@ -207,6 +254,20 @@ impl HebbianMemory {
         });
         entries.truncate(target);
         self.edges = entries.into_iter().collect();
+        self.rebuild_adj_from_edges();
+    }
+
+    fn rebuild_adj_from_edges(&mut self) {
+        let entries: Vec<_> = self
+            .edges
+            .iter()
+            .map(|((a, b), e)| (*a, *b, e.weight))
+            .collect();
+        self.adj.clear();
+        for (a, b, w) in &entries {
+            self.adj.entry(*a).or_default().push((*b, *w));
+            self.adj.entry(*b).or_default().push((*a, *w));
+        }
     }
 
     pub fn strongest_edges(&self, n: usize) -> Vec<((Coord7D, Coord7D), f64)> {
@@ -253,6 +314,7 @@ impl HebbianMemory {
         edge.traversal_count = traversal_count;
         edge.emotion_weight = emotion_weight;
         self.edges.insert(key, edge);
+        self.add_adj_entry(&a, &b, weight);
     }
 
     pub fn edges_by_emotion(&self, source: EmotionSource) -> Vec<((Coord7D, Coord7D), f64)> {

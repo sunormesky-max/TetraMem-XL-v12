@@ -67,28 +67,23 @@ pub async fn login(
     }
 
     if req.username.is_empty() || req.password.is_empty() {
-        return Err(AppError::BadRequest(
-            "username and password required".to_string(),
+        return Err(AppError::Unauthorized(
+            "invalid username or password".to_string(),
         ));
     }
-    if req.password.len() < 8 {
-        return Err(AppError::BadRequest(
-            "password must be at least 8 characters".to_string(),
-        ));
-    }
-    if req.password.len() > 128 {
-        return Err(AppError::BadRequest(
-            "password must be at most 128 characters".to_string(),
+    if req.password.len() < 8 || req.password.len() > 128 {
+        return Err(AppError::Unauthorized(
+            "invalid username or password".to_string(),
         ));
     }
 
-    tracing::info!(username = %req.username, "user login attempt");
+    tracing::info!(ip = ?addr.map(|ConnectInfo(a)| a.ip()), "login attempt");
 
     let role = state
         .users
         .verify(&req.username, &req.password)
         .ok_or_else(|| {
-            tracing::warn!(username = %req.username, "login failed: invalid credentials");
+            tracing::warn!("login failed: invalid credentials");
             AppError::Unauthorized("invalid username or password".to_string())
         })?
         .to_string();

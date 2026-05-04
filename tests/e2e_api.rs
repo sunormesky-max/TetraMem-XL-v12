@@ -42,7 +42,7 @@ fn make_test_state() -> Arc<AppState> {
             }],
             vec![],
         )),
-        events: std::sync::Mutex::new(EventBus::new()),
+        events: tokio::sync::Mutex::new(EventBus::new()),
         event_sender: EventBus::new().sender(),
         watchdog: tokio::sync::RwLock::new(Watchdog::with_defaults(10000.0)),
         backup: tokio::sync::RwLock::new(BackupScheduler::new(BackupConfig::default())),

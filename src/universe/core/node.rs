@@ -254,6 +254,9 @@ impl DarkUniverse {
         to: &Coord7D,
         amount: f64,
     ) -> Result<(), EnergyError> {
+        if from == to {
+            return Ok(());
+        }
         let taken = {
             let from_node = self
                 .nodes

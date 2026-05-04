@@ -13,6 +13,18 @@ pub const EPSILON_STRICT: f64 = 1e-15;
 pub const EPSILON_NORMAL: f64 = 1e-10;
 pub const EPSILON_RELATIVE: f64 = 1e-12;
 
+fn kahan_sum(values: &[f64]) -> f64 {
+    let mut sum = 0.0f64;
+    let mut c = 0.0f64;
+    for &v in values {
+        let y = v - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+    sum
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EnergyError {
     InsufficientEnergy { requested: f64, available: f64 },
@@ -117,7 +129,7 @@ impl EnergyField {
 
     pub fn from_dims(dims: [f64; DIM]) -> Result<Self, EnergyError> {
         for (i, &d) in dims.iter().enumerate() {
-            if d.is_nan() {
+            if d.is_nan() || !d.is_finite() {
                 return Err(EnergyError::NegativeDimension { dim: i, value: d });
             }
             if d < -EPSILON_NORMAL {
@@ -437,18 +449,20 @@ impl EnergyPool {
     }
 
     pub fn verify_conservation(&self) -> bool {
-        let diff = (self.allocated + self.available - self.total).abs();
+        let sum = kahan_sum(&[self.allocated, self.available, -self.total]);
+        let diff = sum.abs();
         let scale = self.total.abs().max(1.0);
         diff < EPSILON_NORMAL || diff / scale < EPSILON_RELATIVE
     }
 
     pub fn verify_conservation_with_tolerance(&self, tolerance: f64) -> bool {
-        let diff = (self.allocated + self.available - self.total).abs();
+        let sum = kahan_sum(&[self.allocated, self.available, -self.total]);
+        let diff = sum.abs();
         diff < tolerance
     }
 
     pub fn energy_drift(&self) -> f64 {
-        (self.allocated + self.available - self.total).abs()
+        kahan_sum(&[self.allocated, self.available, -self.total]).abs()
     }
 
     pub fn expand(&mut self, additional: f64) -> Result<f64, EnergyError> {

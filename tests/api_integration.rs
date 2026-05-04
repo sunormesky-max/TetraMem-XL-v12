@@ -43,7 +43,7 @@ fn build_state() -> Arc<AppState> {
         constitution: tokio::sync::RwLock::new(
             tetramem_v12::universe::constitution::Constitution::tetramem_default(),
         ),
-        events: std::sync::Mutex::new(event_bus),
+        events: tokio::sync::Mutex::new(event_bus),
         event_sender,
         watchdog: tokio::sync::RwLock::new(
             tetramem_v12::universe::watchdog::Watchdog::with_defaults(10_000_000.0),

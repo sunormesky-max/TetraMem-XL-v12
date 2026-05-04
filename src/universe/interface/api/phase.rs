@@ -53,9 +53,9 @@ pub async fn phase_consensus(
         drop(cm);
         drop(u);
         drop(h);
-        let mut crystal_w = state.crystal.write().await;
         let u_r = state.universe.read().await;
         let h_r = state.hebbian.read().await;
+        let mut crystal_w = state.crystal.write().await;
         let crystal_report = crystal_w.crystallize(&h_r, &u_r);
         return Ok(Json(ApiResponse::ok(serde_json::json!({
             "status": "local_consensus",
@@ -82,9 +82,9 @@ pub async fn phase_consensus(
             drop(crystal);
             drop(u);
             drop(h);
-            let mut crystal_w = state.crystal.write().await;
             let u_r = state.universe.read().await;
             let h_r = state.hebbian.read().await;
+            let mut crystal_w = state.crystal.write().await;
             let crystal_report = crystal_w.crystallize(&h_r, &u_r);
             Ok(Json(ApiResponse::ok(serde_json::json!({
                 "status": "consensus_committed",
@@ -197,9 +197,9 @@ pub async fn quorum_execute(
             drop(crystal);
             drop(u);
             drop(h);
-            let mut crystal_w = state.crystal.write().await;
             let u_r = state.universe.read().await;
             let h_r = state.hebbian.read().await;
+            let mut crystal_w = state.crystal.write().await;
             let crystal_report = crystal_w.crystallize(&h_r, &u_r);
             drop(cm);
             tracing::info!(

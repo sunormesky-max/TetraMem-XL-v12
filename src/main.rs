@@ -181,7 +181,7 @@ fn main() {
                 semantic: tokio::sync::RwLock::new(semantic_engine),
                 clustering: tokio::sync::RwLock::new(clustering_engine),
                 constitution: tokio::sync::RwLock::new(constitution),
-                events: std::sync::Mutex::new(event_bus),
+                events: tokio::sync::Mutex::new(event_bus),
                 event_sender,
                 watchdog: tokio::sync::RwLock::new(watchdog),
                 backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
@@ -221,6 +221,7 @@ fn main() {
                     }
                     match tetramem_v12::universe::raft_node::new_log_store_with_persistence(
                         &raft_db_path,
+                        &config.auth.raft_secret,
                     ) {
                         Ok(ls) => {
                             tracing::info!("raft log store using SQLite: {}", raft_db_path.display());

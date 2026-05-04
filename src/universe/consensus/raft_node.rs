@@ -75,12 +75,14 @@ fn lock_failed<T>(e: std::sync::PoisonError<T>) -> io::Error {
     io::Error::other(format!("lock poisoned: {}", e))
 }
 
-fn compute_hmac(data: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(data.as_bytes());
-    hasher.update(b"tetramem-raft-log-v1");
-    format!("{:x}", hasher.finalize())
+fn compute_hmac_with_key(data: &str, key: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac =
+        HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(data.as_bytes());
+    format!("{:x}", mac.finalize().into_bytes())
 }
 
 #[derive(Debug, Default)]
@@ -89,9 +91,19 @@ pub struct LogStoreInner {
     log: BTreeMap<u64, EntryOf<TypeName>>,
     vote: Option<VoteOf<TypeName>>,
     db: Option<rusqlite::Connection>,
+    hmac_key: String,
 }
 
 impl LogStoreInner {
+    pub fn with_hmac_key(mut self, key: &str) -> Self {
+        self.hmac_key = if key.is_empty() {
+            "tetramem-raft-log-v1".to_string()
+        } else {
+            key.to_string()
+        };
+        self
+    }
+
     pub fn last_log_index(&self) -> u64 {
         self.log
             .iter()
@@ -100,11 +112,15 @@ impl LogStoreInner {
             .unwrap_or(0)
     }
 
+    fn compute_entry_hmac(&self, data: &str) -> String {
+        compute_hmac_with_key(data, &self.hmac_key)
+    }
+
     fn persist_entry(&self, index: u64, entry: &EntryOf<TypeName>) -> Result<(), String> {
         if let Some(ref db) = self.db {
             let data = serde_json::to_string(entry)
                 .map_err(|e| format!("serialize raft log entry {}: {}", index, e))?;
-            let hash = compute_hmac(&data);
+            let hash = self.compute_entry_hmac(&data);
             db.execute(
                 "INSERT OR REPLACE INTO raft_log (idx, data, hmac) VALUES (?1, ?2, ?3)",
                 rusqlite::params![index as i64, &data, &hash],
@@ -184,7 +200,10 @@ pub fn new_log_store() -> LogStore {
     Arc::new(Mutex::new(LogStoreInner::default()))
 }
 
-pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogStore, io::Error> {
+pub fn new_log_store_with_persistence(
+    db_path: &std::path::Path,
+    hmac_key: &str,
+) -> Result<LogStore, io::Error> {
     let conn = rusqlite::Connection::open(db_path)
         .map_err(|e| io::Error::other(format!("failed to open raft log db: {}", e)))?;
 
@@ -201,7 +220,7 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
     )
     .map_err(|e| io::Error::other(format!("raft log db init: {}", e)))?;
 
-    let mut inner = LogStoreInner::default();
+    let mut inner = LogStoreInner::default().with_hmac_key(hmac_key);
 
     {
         let mut stmt = conn
@@ -220,7 +239,7 @@ pub fn new_log_store_with_persistence(db_path: &std::path::Path) -> Result<LogSt
             let (idx, data, hmac) =
                 row.map_err(|e| io::Error::other(format!("raft log row: {}", e)))?;
             if !hmac.is_empty() {
-                let expected = compute_hmac(&data);
+                let expected = inner.compute_entry_hmac(&data);
                 if hmac != expected {
                     tracing::error!(
                         "HMAC mismatch on raft log entry {} — data may be tampered",

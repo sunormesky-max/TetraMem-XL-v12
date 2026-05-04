@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::{extract::State, Json};
+use serde::Deserialize;
 
 use crate::universe::coord::Coord7D;
 use crate::universe::error::AppError;
@@ -14,6 +16,12 @@ use super::state::SharedState;
 use super::types::*;
 
 const MAX_DATA_VALUE: f64 = 1e15;
+
+#[derive(Debug, Deserialize)]
+pub struct ListMemoriesParams {
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
 
 fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
     for &v in c {
@@ -38,6 +46,14 @@ pub async fn encode_memory(
         )));
     }
     validate_coord_3(&req.anchor)?;
+    validate_tags(&req.tags).map_err(AppError::BadRequest)?;
+    if let Some(ref desc) = req.description {
+        validate_field_len("description", desc, MAX_STRING_FIELD_LEN)
+            .map_err(AppError::BadRequest)?;
+    }
+    if let Some(ref cat) = req.category {
+        validate_field_len("category", cat, MAX_TAG_LEN).map_err(AppError::BadRequest)?;
+    }
     for &v in &req.data {
         if !v.is_finite() {
             return Err(AppError::BadRequest(
@@ -190,10 +206,16 @@ pub async fn decode_memory(
 
 pub async fn list_memories(
     State(state): State<SharedState>,
-) -> Json<ApiResponse<Vec<MemoryListItem>>> {
+    Query(params): Query<ListMemoriesParams>,
+) -> Json<ApiResponseWithMeta<Vec<MemoryListItem>>> {
     let mems = state.memories.read().await;
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(100).min(1000);
+    let total = mems.len();
     let list: Vec<MemoryListItem> = mems
         .iter()
+        .skip(offset)
+        .take(limit)
         .map(|m| MemoryListItem {
             anchor: format!("{}", m.anchor()),
             data_dim: m.data_dim(),
@@ -204,7 +226,10 @@ pub async fn list_memories(
             importance: m.importance(),
         })
         .collect();
-    Json(ApiResponse::ok(list))
+    Json(ApiResponseWithMeta::ok(
+        list,
+        serde_json::json!({"offset": offset, "limit": limit, "total": total}),
+    ))
 }
 
 pub async fn memory_timeline(
@@ -302,6 +327,14 @@ pub async fn annotate_memory(
     Json(req): Json<AnnotateRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<AnnotateResponse>>), AppError> {
     validate_coord_3(&req.anchor)?;
+    validate_tags(&req.tags).map_err(AppError::BadRequest)?;
+    if let Some(ref desc) = req.description {
+        validate_field_len("description", desc, MAX_STRING_FIELD_LEN)
+            .map_err(AppError::BadRequest)?;
+    }
+    if let Some(ref cat) = req.category {
+        validate_field_len("category", cat, MAX_TAG_LEN).map_err(AppError::BadRequest)?;
+    }
     let mut mems = state.memories.write().await;
     let idx = state.memory_index.read().await;
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
@@ -385,8 +418,13 @@ pub async fn semantic_text_query(
     let sem = state.semantic.read().await;
     let mems = state.memories.read().await;
     let k = req.k.clamp(1, 100);
+    let text = if req.text.len() > MAX_STRING_FIELD_LEN {
+        &req.text[..MAX_STRING_FIELD_LEN]
+    } else {
+        &req.text
+    };
 
-    let knn_results = sem.search_by_text(&req.text, k);
+    let knn_results = sem.search_by_text(text, k);
 
     let hits: Vec<SemanticHit> = knn_results
         .into_iter()

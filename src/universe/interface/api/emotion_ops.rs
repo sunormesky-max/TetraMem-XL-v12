@@ -189,8 +189,8 @@ pub async fn emotion_crystallize(
         }
     }
     let u = state.universe.read().await;
-    let mut crystal = state.crystal.write().await;
     let h = state.hebbian.read().await;
+    let mut crystal = state.crystal.write().await;
 
     let es = match req.emotion_source.as_str() {
         "Perceived" => EmotionSource::Perceived,

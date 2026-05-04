@@ -147,8 +147,10 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     if !state.config.auth.enabled {
-        tracing::warn!("⚠ AUTH IS DISABLED — granting admin role for all requests");
-        let claims = Claims::anonymous("admin");
+        tracing::warn!(
+            "⚠ AUTH IS DISABLED — granting public role; admin operations will be rejected"
+        );
+        let claims = Claims::anonymous("public");
         req.extensions_mut().insert(claims);
         return Ok(next.run(req).await);
     }
@@ -171,7 +173,23 @@ async fn auth_middleware(
     }
 }
 
-async fn admin_middleware(req: Request, next: Next) -> Result<Response, AppError> {
+async fn admin_middleware(
+    State(state): State<SharedState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    if !state.config.auth.enabled {
+        let dev_admin = std::env::var("TETRAMEM_ALLOW_NO_AUTH_ADMIN")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !dev_admin {
+            return Err(AppError::Forbidden(
+                "admin operations require authentication — set TETRAMEM_ALLOW_NO_AUTH_ADMIN=1 for development".to_string(),
+            ));
+        }
+        return Ok(next.run(req).await);
+    }
+
     let claims = req
         .extensions()
         .get::<Claims>()
@@ -357,7 +375,10 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/watchdog/checkup", post(watchdog_checkup))
         .route("/agent/crystal", post(agent_execute_crystal))
         .layer(middleware::from_fn(rate_limit_middleware))
-        .layer(middleware::from_fn(admin_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            admin_middleware,
+        ))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),

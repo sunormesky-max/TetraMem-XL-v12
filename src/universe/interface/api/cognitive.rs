@@ -210,8 +210,8 @@ pub async fn semantic_status(
 pub async fn semantic_index_all(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<SemanticStatusResponse>> {
-    let mems = state.memories.read().await;
     let u = state.universe.read().await;
+    let mems = state.memories.read().await;
     let mut sem = state.semantic.write().await;
     for atom in mems.iter() {
         if let Ok(data) = crate::universe::memory::MemoryCodec::decode(&u, atom) {
@@ -262,8 +262,8 @@ pub async fn clustering_status(
 pub async fn clustering_maintenance(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<ClusteringStatusResponse>> {
-    let mems = state.memories.read().await;
     let u = state.universe.read().await;
+    let mems = state.memories.read().await;
     let mut h = state.hebbian.write().await;
     let mut cl = state.clustering.write().await;
     let report = cl.run_maintenance_cycle(&mems, &mut h, &u);
@@ -289,7 +289,7 @@ pub async fn constitution_status(
 pub async fn events_status(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<EventsStatusResponse>> {
-    let ev = state.events.lock().unwrap();
+    let ev = state.events.lock().await;
     Json(ApiResponse::ok(EventsStatusResponse {
         history_len: ev.history_len(),
         subscriber_count: ev.subscriber_count(),

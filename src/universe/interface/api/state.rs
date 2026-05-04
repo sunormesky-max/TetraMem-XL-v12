@@ -29,7 +29,7 @@ pub struct AppState {
     pub semantic: RwLock<SemanticEngine>,
     pub clustering: RwLock<ClusteringEngine>,
     pub constitution: RwLock<Constitution>,
-    pub events: std::sync::Mutex<EventBus>,
+    pub events: tokio::sync::Mutex<EventBus>,
     pub event_sender: crate::universe::events::EventBusSender,
     pub watchdog: RwLock<Watchdog>,
     pub backup: RwLock<BackupScheduler>,

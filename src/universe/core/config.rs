@@ -252,10 +252,19 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
-            tracing::info!("config file not found, using defaults: {}", path.display());
+            let dev_mode = std::env::var("TETRAMEM_DEV_MODE").is_ok()
+                || std::env::var("TETRAMEM_DEV_MODE")
+                    .map(|v| v == "1")
+                    .unwrap_or(false);
+            if !dev_mode {
+                return Err(ConfigError::Io(format!(
+                    "config file not found: {} — set TETRAMEM_DEV_MODE=1 to allow development mode",
+                    path.display()
+                )));
+            }
+            tracing::warn!("TETRAMEM_DEV_MODE=1 — running without config file, auth disabled, NOT for production");
             let mut config = Self::default();
             config.auth.enabled = false;
-            tracing::warn!("no config file found — auth disabled for development; create a config file with [[auth.users]] for production");
             config.resolve_env_overrides();
             config.validate()?;
             return Ok(config);
@@ -443,8 +452,10 @@ mod tests {
 
     #[test]
     fn load_nonexistent_returns_default() {
+        std::env::set_var("TETRAMEM_DEV_MODE", "1");
         let config = AppConfig::load(Path::new("/nonexistent/config.toml")).unwrap();
         assert_eq!(config.server.addr, "127.0.0.1:3456");
+        std::env::remove_var("TETRAMEM_DEV_MODE");
     }
 
     #[test]

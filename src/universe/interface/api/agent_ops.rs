@@ -26,7 +26,8 @@ pub async fn remember(
     let importance = req.importance;
     let source = req.source.unwrap_or_else(|| "api".to_string());
 
-    let data = nlp::text_to_embedding(&content, importance);
+    let full_embedding = nlp::text_to_embedding(&content, importance);
+    let data: Vec<f64> = full_embedding.into_iter().take(28).collect();
 
     let anchor = {
         let u = state.universe.read().await;
@@ -281,13 +282,18 @@ pub async fn consolidate(
         crate::universe::dream::DreamEngine::new().dream(&u, &mut h, &mems)
     };
 
-    let u = state.universe.read().await;
-    let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let mut cl = state.clustering.write().await;
-    let mut h_mut = state.hebbian.write().await;
+    let maintenance_report = {
+        let u = state.universe.read().await;
+        let mems = state.memories.read().await;
+        let mut h = state.hebbian.write().await;
+        let mut cl = state.clustering.write().await;
+        cl.run_maintenance_cycle(&mems, &mut h, &u);
+        (cl, h)
+    };
+    let (_cl, h) = maintenance_report;
 
-    let _cluster_report = cl.run_maintenance_cycle(&mems, &mut h_mut, &u);
+    let u = state.universe.read().await;
+    let mems = state.memories.read().await;
 
     let mut weakened = 0usize;
     let mut strengthened = 0usize;

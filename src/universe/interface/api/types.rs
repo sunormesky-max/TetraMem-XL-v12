@@ -10,6 +10,14 @@ pub struct ApiResponse<T: Serialize> {
     pub error: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct ApiResponseWithMeta<T: Serialize> {
+    pub success: bool,
+    pub data: Option<T>,
+    pub meta: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 impl<T: Serialize> ApiResponse<T> {
     pub fn ok(data: T) -> Self {
         Self {
@@ -24,6 +32,17 @@ impl<T: Serialize> ApiResponse<T> {
             success: false,
             data: None,
             error: Some(msg.into()),
+        }
+    }
+}
+
+impl<T: Serialize> ApiResponseWithMeta<T> {
+    pub fn ok(data: T, meta: serde_json::Value) -> Self {
+        Self {
+            success: true,
+            data: Some(data),
+            meta: Some(meta),
+            error: None,
         }
     }
 }
@@ -442,4 +461,42 @@ pub struct ContextRequest {
 #[derive(Deserialize)]
 pub struct ForgetRequest {
     pub anchor: [i32; 3],
+}
+
+pub const MAX_STRING_FIELD_LEN: usize = 4096;
+pub const MAX_DATA_DIM: usize = 1024;
+pub const MAX_TAGS_COUNT: usize = 64;
+pub const MAX_TAG_LEN: usize = 256;
+
+pub fn validate_field_len(field: &str, value: &str, max: usize) -> Result<(), String> {
+    if value.len() > max {
+        Err(format!(
+            "field '{}' exceeds maximum length of {} bytes",
+            field, max
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn validate_tags(tags: &[String]) -> Result<(), String> {
+    if tags.len() > MAX_TAGS_COUNT {
+        return Err(format!("too many tags: maximum {}", MAX_TAGS_COUNT));
+    }
+    for t in tags {
+        validate_field_len("tag", t, MAX_TAG_LEN)?;
+    }
+    Ok(())
+}
+
+pub fn validate_data_dim(data: &[f64]) -> Result<(), String> {
+    if data.len() > MAX_DATA_DIM {
+        Err(format!(
+            "data dimension {} exceeds maximum {}",
+            data.len(),
+            MAX_DATA_DIM
+        ))
+    } else {
+        Ok(())
+    }
 }
