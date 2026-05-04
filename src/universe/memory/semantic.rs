@@ -150,8 +150,8 @@ impl SemanticEmbedding {
         }
 
         if data.len() >= 4 {
-            let mut fft_mag = vec![0.0f64; FREQ_DIM];
-            for k in 0..FREQ_DIM.min(data.len() / 2) {
+            let mut fft_mag = [0.0f64; FREQ_DIM];
+            for (k, slot) in fft_mag.iter_mut().enumerate().take(FREQ_DIM.min(data.len() / 2)) {
                 let mut re = 0.0f64;
                 let mut im = 0.0f64;
                 for t in 0..data.len() {
@@ -160,12 +160,12 @@ impl SemanticEmbedding {
                     re += data[t] * angle.cos();
                     im -= data[t] * angle.sin();
                 }
-                fft_mag[k] = (re * re + im * im).sqrt() / data.len() as f64;
+                *slot = (re * re + im * im).sqrt() / data.len() as f64;
             }
-            for i in 0..FREQ_DIM {
-                let slot = STAT_DIM + HIST_DIM + i;
-                if slot < EMBED_DIM {
-                    vec[slot] = fft_mag[i];
+            for (i, &val) in fft_mag.iter().enumerate().take(FREQ_DIM) {
+                let pos = STAT_DIM + HIST_DIM + i;
+                if pos < EMBED_DIM {
+                    vec[pos] = val;
                 }
             }
         }
@@ -191,10 +191,10 @@ impl SemanticEmbedding {
         let text = text_parts.join(" ");
         let text_emb = nlp::text_to_embedding(&text, atom.importance());
 
-        for i in 0..META_DIM.min(text_emb.len()) {
+        for (i, &val) in text_emb.iter().enumerate().take(META_DIM.min(text_emb.len())) {
             let slot = EMBED_DIM - META_DIM + i;
             if slot < EMBED_DIM {
-                vec[slot] = text_emb[i];
+                vec[slot] = val;
             }
         }
 
@@ -224,9 +224,8 @@ impl SemanticEmbedding {
 
         let tags_text = atom.tags().join(" ");
         let tag_emb = nlp::text_to_embedding(&tags_text, 0.5);
-        for i in 0..6.min(tag_emb.len()) {
-            vec[6 + i] = tag_emb[i];
-        }
+        let tag_copy_len = 6.min(tag_emb.len());
+        vec[6..(6 + tag_copy_len)].copy_from_slice(&tag_emb[..tag_copy_len]);
 
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
@@ -291,8 +290,8 @@ impl SemanticEmbedding {
         let old_weight = n_members as f64;
         let new_weight = 1.0;
         let total = old_weight + new_weight;
-        for i in 0..EMBED_DIM {
-            vec[i] = (centroid.vector[i] * old_weight + self.vector[i] * new_weight) / total;
+        for (i, slot) in vec.iter_mut().enumerate().take(EMBED_DIM) {
+            *slot = (centroid.vector[i] * old_weight + self.vector[i] * new_weight) / total;
         }
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
@@ -724,6 +723,7 @@ struct ConceptCluster {
     members: Vec<AtomKey>,
     category: Option<String>,
     tags: HashMap<String, usize>,
+    #[allow(dead_code)]
     total_variance: f64,
 }
 
@@ -926,7 +926,7 @@ pub enum QueryFilter {
     RelationType(RelationType),
     RelatedTo(AtomKey),
     SimilarToData(Vec<f64>),
-    SimilarToEmbedding(SemanticEmbedding),
+    SimilarToEmbedding(Box<SemanticEmbedding>),
     MinSimilarity(f64),
     MaxResults(usize),
     ConceptName(String),
@@ -987,7 +987,7 @@ impl SemanticQuery {
 
     pub fn similar_to_embedding(mut self, embedding: SemanticEmbedding) -> Self {
         self.filters
-            .push(QueryFilter::SimilarToEmbedding(embedding));
+            .push(QueryFilter::SimilarToEmbedding(Box::new(embedding)));
         self
     }
 
@@ -1034,7 +1034,7 @@ impl SemanticQuery {
         let query_embedding: Option<SemanticEmbedding> =
             self.filters.iter().find_map(|f| match f {
                 QueryFilter::SimilarToData(data) => Some(SemanticEmbedding::from_data(data)),
-                QueryFilter::SimilarToEmbedding(e) => Some(e.clone()),
+                QueryFilter::SimilarToEmbedding(e) => Some((**e).clone()),
                 _ => None,
             });
 
