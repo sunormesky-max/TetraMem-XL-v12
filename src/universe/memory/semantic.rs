@@ -151,7 +151,11 @@ impl SemanticEmbedding {
 
         if data.len() >= 4 {
             let mut fft_mag = [0.0f64; FREQ_DIM];
-            for (k, slot) in fft_mag.iter_mut().enumerate().take(FREQ_DIM.min(data.len() / 2)) {
+            for (k, slot) in fft_mag
+                .iter_mut()
+                .enumerate()
+                .take(FREQ_DIM.min(data.len() / 2))
+            {
                 let mut re = 0.0f64;
                 let mut im = 0.0f64;
                 for t in 0..data.len() {
@@ -191,7 +195,11 @@ impl SemanticEmbedding {
         let text = text_parts.join(" ");
         let text_emb = nlp::text_to_embedding(&text, atom.importance());
 
-        for (i, &val) in text_emb.iter().enumerate().take(META_DIM.min(text_emb.len())) {
+        for (i, &val) in text_emb
+            .iter()
+            .enumerate()
+            .take(META_DIM.min(text_emb.len()))
+        {
             let slot = EMBED_DIM - META_DIM + i;
             if slot < EMBED_DIM {
                 vec[slot] = val;
