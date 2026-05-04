@@ -113,6 +113,13 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
         "dream cycle complete"
     );
 
+    drop(mems);
+    let mems = state.memories.read().await;
+    {
+        let mut sem = state.semantic.write().await;
+        sem.sync_after_dream(&mems, &u);
+    }
+
     state.event_sender.publish(UniverseEvent::DreamCompleted {
         phase: "default".to_string(),
         paths_replayed: report.paths_replayed,

@@ -10,7 +10,7 @@
 
 use crate::universe::memory::nlp::{self, TfIdfIndex};
 use crate::universe::memory::MemoryAtom;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ═══════════════════════════════════════════════════════════════════════
 // S2: Semantic Embedding Layer (64-dim)
@@ -172,7 +172,94 @@ impl SemanticEmbedding {
                     vec[pos] = val;
                 }
             }
+        } else {
+            let freq_base = STAT_DIM + HIST_DIM;
+            if data.len() >= 2 {
+                let diff0 = data[1] - data[0];
+                vec[freq_base] = diff0.abs();
+                vec[freq_base + 1] = diff0.signum();
+            }
+            if data.len() >= 3 {
+                let d1 = data[1] - data[0];
+                let d2 = data[2] - data[1];
+                vec[freq_base + 2] = (d2 - d1).abs();
+                vec[freq_base + 3] = d1 * d2;
+            }
+            let n_f64 = data.len() as f64;
+            let gcd_approx = if data.len() >= 2 {
+                let r = data[0].fract();
+                if r.abs() < 1e-10 {
+                    0.0
+                } else {
+                    r.abs().ln().abs()
+                }
+            } else {
+                0.0
+            };
+            vec[freq_base + 4] = gcd_approx;
+            vec[freq_base + 5] = n_f64.ln();
+            let peak_to_peak = vec[4];
+            vec[freq_base + 6] = peak_to_peak * vec[6];
+            vec[freq_base + 7] = mean * n_f64;
+            let ratio_first = if data.len() >= 2 && data[0].abs() > 1e-10 {
+                data[1] / data[0]
+            } else {
+                0.0
+            };
+            vec[freq_base + 8] = ratio_first;
+            vec[freq_base + 9] = ratio_first * vec[6];
+            vec[freq_base + 10] = sum / (range + 1e-10);
+            vec[freq_base + 11] = (n_f64 - 1.0).max(0.0);
         }
+
+        let meta_base = EMBED_DIM - META_DIM;
+        vec[meta_base] = 1.0f64.signum();
+        vec[meta_base + 1] = if data.iter().all(|v| *v >= 0.0) {
+            1.0
+        } else if data.iter().all(|v| *v <= 0.0) {
+            -1.0
+        } else {
+            0.0
+        };
+        vec[meta_base + 2] = (data.len() as f64).log2();
+        vec[meta_base + 3] = if let Some(first) = data.first() {
+            first.signum()
+        } else {
+            0.0
+        };
+        vec[meta_base + 4] = if let Some(last) = data.last() {
+            last.signum()
+        } else {
+            0.0
+        };
+        let monotone = data.windows(2).all(|w| w[0] <= w[1]);
+        let mono_decr = data.windows(2).all(|w| w[0] >= w[1]);
+        vec[meta_base + 5] = if monotone {
+            1.0
+        } else if mono_decr {
+            -1.0
+        } else {
+            0.0
+        };
+        let has_zero = data.iter().any(|v| v.abs() < 1e-10);
+        vec[meta_base + 6] = if has_zero { 1.0 } else { 0.0 };
+        let integer_ratio = data.iter().filter(|v| (v.fract()).abs() < 1e-10).count() as f64 / n;
+        vec[meta_base + 7] = integer_ratio;
+        let unique_count = {
+            let mut sorted = data.to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mut count = 1;
+            for i in 1..sorted.len() {
+                if (sorted[i] - sorted[i - 1]).abs() > 1e-10 {
+                    count += 1;
+                }
+            }
+            count as f64
+        };
+        vec[meta_base + 8] = unique_count / n;
+        vec[meta_base + 9] = mean.signum() * std_dev;
+        vec[meta_base + 10] = vec[7] * vec[8];
+        vec[meta_base + 11] = vec[4] / (std_dev + 1e-10);
 
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
@@ -691,6 +778,266 @@ impl KnowledgeGraph {
     pub fn is_empty(&self) -> bool {
         self.relations.is_empty()
     }
+
+    pub fn infer_transitive_closure(&mut self, rel_type: RelationType, max_depth: usize) -> usize {
+        let mut new_relations = Vec::new();
+        let mut current_pairs: HashSet<(AtomKey, AtomKey)> = self
+            .relations
+            .iter()
+            .filter(|r| r.rel_type == rel_type)
+            .map(|r| (r.from.clone(), r.to.clone()))
+            .collect();
+
+        let mut all_pairs = current_pairs.clone();
+
+        for _depth in 0..max_depth {
+            let mut next_pairs = HashSet::new();
+            for (a, b) in &current_pairs {
+                for (c, d) in &current_pairs {
+                    if b == c && !all_pairs.contains(&(a.clone(), d.clone())) {
+                        next_pairs.insert((a.clone(), d.clone()));
+                    }
+                }
+            }
+            if next_pairs.is_empty() {
+                break;
+            }
+            for (from, to) in &next_pairs {
+                new_relations.push(
+                    Relation::new(from.clone(), to.clone(), rel_type)
+                        .with_weight(0.5)
+                        .with_metadata("inferred", "transitive_closure")
+                        .with_metadata("depth", format!("{}", _depth + 2)),
+                );
+            }
+            all_pairs.extend(next_pairs.iter().cloned());
+            current_pairs = next_pairs;
+        }
+
+        let count = new_relations.len();
+        for rel in new_relations {
+            self.add_relation(rel);
+        }
+        count
+    }
+
+    pub fn infer_isa_inheritance(&mut self) -> usize {
+        let isa_chains = self.compute_isa_chains();
+        let mut new_relations = Vec::new();
+
+        for (leaf, ancestors) in &isa_chains {
+            for ancestor in ancestors {
+                let existing_partof = self.relations.iter().any(|r| {
+                    &r.from == leaf && &r.to == ancestor && r.rel_type == RelationType::PartOf
+                });
+                if !existing_partof {
+                    new_relations.push(
+                        Relation::new(leaf.clone(), ancestor.clone(), RelationType::PartOf)
+                            .with_weight(0.6)
+                            .with_metadata("inferred", "isa_inheritance"),
+                    );
+                }
+
+                for leaf_attr in self.relations_from(leaf) {
+                    if leaf_attr.rel_type == RelationType::IsA {
+                        continue;
+                    }
+                    if leaf_attr.rel_type.is_symmetric() {
+                        continue;
+                    }
+                    let already = self.relations.iter().any(|r| {
+                        &r.from == ancestor
+                            && r.to == leaf_attr.to
+                            && r.rel_type == leaf_attr.rel_type
+                    });
+                    if !already {
+                        new_relations.push(
+                            Relation::new(
+                                ancestor.clone(),
+                                leaf_attr.to.clone(),
+                                leaf_attr.rel_type,
+                            )
+                            .with_weight(leaf_attr.weight * 0.5)
+                            .with_metadata("inferred", "isa_inheritance")
+                            .with_metadata("source", "property_promotion"),
+                        );
+                    }
+                }
+            }
+        }
+
+        let count = new_relations.len();
+        for rel in new_relations {
+            self.add_relation(rel);
+        }
+        count
+    }
+
+    fn compute_isa_chains(&self) -> HashMap<AtomKey, Vec<AtomKey>> {
+        let isa_map: HashMap<AtomKey, AtomKey> = self
+            .relations
+            .iter()
+            .filter(|r| r.rel_type == RelationType::IsA)
+            .map(|r| (r.from.clone(), r.to.clone()))
+            .collect();
+
+        let mut result: HashMap<AtomKey, Vec<AtomKey>> = HashMap::new();
+        for leaf in isa_map.keys() {
+            let mut ancestors = Vec::new();
+            let mut current = leaf.clone();
+            let mut visited = HashSet::new();
+            while let Some(parent) = isa_map.get(&current) {
+                if visited.contains(parent) {
+                    break;
+                }
+                ancestors.push(parent.clone());
+                visited.insert(parent.clone());
+                current = parent.clone();
+            }
+            if !ancestors.is_empty() {
+                result.insert(leaf.clone(), ancestors);
+            }
+        }
+        result
+    }
+
+    pub fn infer_causes_chains(&mut self, max_length: usize) -> usize {
+        let mut new_relations = Vec::new();
+        let mut chains: HashMap<AtomKey, Vec<(AtomKey, f64)>> = HashMap::new();
+
+        for rel in &self.relations {
+            if rel.rel_type == RelationType::Causes {
+                chains
+                    .entry(rel.from.clone())
+                    .or_default()
+                    .push((rel.to.clone(), rel.weight));
+            }
+        }
+
+        for (start, nexts) in &chains {
+            let mut frontier: Vec<(AtomKey, f64, usize)> =
+                nexts.iter().map(|(k, w)| (k.clone(), *w, 1usize)).collect();
+            let mut visited = HashSet::new();
+            visited.insert(start.clone());
+
+            while let Some((current, cum_weight, depth)) = frontier.pop() {
+                if visited.contains(&current) {
+                    continue;
+                }
+                visited.insert(current.clone());
+
+                if depth >= max_length {
+                    continue;
+                }
+
+                if let Some(following) = chains.get(&current) {
+                    for (next, edge_w) in following {
+                        let new_w = cum_weight * edge_w * 0.7;
+                        if new_w < 0.1 {
+                            continue;
+                        }
+                        let already = self.relations.iter().any(|r| {
+                            &r.from == start && &r.to == next && r.rel_type == RelationType::Causes
+                        });
+                        if !already && !visited.contains(next) {
+                            new_relations.push(
+                                Relation::new(start.clone(), next.clone(), RelationType::Causes)
+                                    .with_weight(new_w)
+                                    .with_metadata("inferred", "causes_chain")
+                                    .with_metadata("chain_length", format!("{}", depth + 1)),
+                            );
+                        }
+                        frontier.push((next.clone(), new_w, depth + 1));
+                    }
+                }
+            }
+        }
+
+        let count = new_relations.len();
+        for rel in new_relations {
+            self.add_relation(rel);
+        }
+        count
+    }
+
+    pub fn infer_similar_transitivity(&mut self, max_hops: usize) -> usize {
+        let mut new_relations = Vec::new();
+        let adj: HashMap<AtomKey, Vec<(AtomKey, f64)>> = {
+            let mut map: HashMap<AtomKey, Vec<(AtomKey, f64)>> = HashMap::new();
+            for rel in &self.relations {
+                if rel.rel_type == RelationType::SimilarTo {
+                    map.entry(rel.from.clone())
+                        .or_default()
+                        .push((rel.to.clone(), rel.weight));
+                }
+            }
+            map
+        };
+
+        for start in adj.keys() {
+            let mut frontier = vec![(start.clone(), 0usize, 1.0f64)];
+            let mut visited = HashSet::new();
+            visited.insert(start.clone());
+
+            while let Some((current, hops, cum_sim)) = frontier.pop() {
+                if hops >= max_hops {
+                    continue;
+                }
+                if let Some(neighbors) = adj.get(&current) {
+                    for (next, w) in neighbors {
+                        if visited.contains(next) {
+                            continue;
+                        }
+                        visited.insert(next.clone());
+                        let inferred_sim = cum_sim * w;
+                        if inferred_sim < 0.3 {
+                            continue;
+                        }
+                        let already = self.relations.iter().any(|r| {
+                            (&r.from == start && &r.to == next)
+                                || (&r.from == next && &r.to == start)
+                        });
+                        if !already {
+                            new_relations.push(
+                                Relation::new(start.clone(), next.clone(), RelationType::SimilarTo)
+                                    .with_weight(inferred_sim)
+                                    .with_metadata("inferred", "similar_transitivity")
+                                    .with_metadata("hops", format!("{}", hops + 1)),
+                            );
+                        }
+                        frontier.push((next.clone(), hops + 1, inferred_sim));
+                    }
+                }
+            }
+        }
+
+        let count = new_relations.len();
+        for rel in new_relations {
+            self.add_relation(rel);
+        }
+        count
+    }
+
+    pub fn run_full_inference(&mut self) -> InferenceReport {
+        let isa = self.infer_isa_inheritance();
+        let causes = self.infer_causes_chains(5);
+        let similar = self.infer_similar_transitivity(3);
+        let transitive_partof = self.infer_transitive_closure(RelationType::PartOf, 4);
+        InferenceReport {
+            isa_inherited: isa,
+            causes_inferred: causes,
+            similar_inferred: similar,
+            partof_transitive: transitive_partof,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InferenceReport {
+    pub isa_inherited: usize,
+    pub causes_inferred: usize,
+    pub similar_inferred: usize,
+    pub partof_transitive: usize,
 }
 
 impl Default for KnowledgeGraph {
@@ -1560,6 +1907,111 @@ impl SemanticEngine {
         });
         results
     }
+
+    pub fn sync_after_dream(
+        &mut self,
+        surviving_memories: &[MemoryAtom],
+        universe: &crate::universe::node::DarkUniverse,
+    ) -> DreamSyncReport {
+        let _before_index = self.index.len();
+        let before_relations = self.graph.relation_count();
+
+        let surviving_keys: HashSet<AtomKey> =
+            surviving_memories.iter().map(AtomKey::from_atom).collect();
+
+        let indexed_keys: Vec<AtomKey> = self
+            .index
+            .entries
+            .iter()
+            .map(|e| e.atom_key.clone())
+            .collect();
+        let mut removed = 0usize;
+        for key in &indexed_keys {
+            if !surviving_keys.contains(key) {
+                self.index.remove(key);
+                self.graph.remove_relations_for(key);
+                removed += 1;
+            }
+        }
+
+        for atom in surviving_memories {
+            let key = AtomKey::from_atom(atom);
+            if self.index.get_embedding(&key).is_none() {
+                if let Ok(data) = crate::universe::memory::MemoryCodec::decode(universe, atom) {
+                    self.index_memory(atom, &data);
+                }
+            } else {
+                if let Ok(data) = crate::universe::memory::MemoryCodec::decode(universe, atom) {
+                    let new_emb = SemanticEmbedding::from_data_and_annotation(&data, atom);
+                    let category = atom.category().map(String::from);
+                    self.index.upsert(key, new_emb, category);
+                }
+            }
+        }
+
+        self.auto_link_similar(surviving_memories);
+
+        DreamSyncReport {
+            embeddings_removed: removed,
+            embeddings_indexed: self.index.len(),
+            relations_before: before_relations,
+            relations_after: self.graph.relation_count(),
+        }
+    }
+
+    pub fn run_inference(&mut self) -> InferenceReport {
+        self.graph.run_full_inference()
+    }
+
+    pub fn search_by_text_emotional(
+        &self,
+        text: &str,
+        k: usize,
+        pad: Option<[f64; 3]>,
+    ) -> Vec<KnnResult> {
+        let mut results = self.search_by_text(text, k * 2);
+        if let Some(pad_vals) = pad {
+            let pleasure = pad_vals[0];
+            let arousal = pad_vals[1];
+            let dominance = pad_vals[2];
+
+            let emotion_boost = 1.0 + pleasure * 0.15 + arousal * 0.1;
+            let emotion_penalty = 1.0 - (1.0 - dominance) * 0.2;
+
+            for result in &mut results {
+                let raw_sim = result.similarity;
+                let adjusted = raw_sim * emotion_boost * emotion_penalty;
+                result.similarity = adjusted.clamp(0.0, 1.0);
+                result.distance = 1.0 - result.similarity;
+            }
+
+            results.sort_by(|a, b| {
+                b.similarity
+                    .partial_cmp(&a.similarity)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        results.truncate(k);
+        results
+    }
+
+    pub fn extract_concepts_emotional(
+        &mut self,
+        atoms_by_key: &HashMap<AtomKey, &MemoryAtom>,
+        pad: Option<[f64; 3]>,
+    ) -> &[Concept] {
+        if let Some(pad_vals) = pad {
+            let arousal = pad_vals[1].abs();
+            let threshold_adjustment = arousal * 0.1;
+            let adjusted_threshold =
+                (self.config.concept_similarity_threshold - threshold_adjustment).clamp(0.5, 0.99);
+            self.concept_extractor = ConceptExtractor::new()
+                .with_similarity_threshold(adjusted_threshold)
+                .with_min_cluster_size(self.config.concept_min_size);
+        }
+        self.concept_extractor
+            .extract_concepts(&self.index, atoms_by_key)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1576,6 +2028,14 @@ pub struct SemanticAnalogy {
     pub from: AtomKey,
     pub to: AtomKey,
     pub similarity: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DreamSyncReport {
+    pub embeddings_removed: usize,
+    pub embeddings_indexed: usize,
+    pub relations_before: usize,
+    pub relations_after: usize,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
