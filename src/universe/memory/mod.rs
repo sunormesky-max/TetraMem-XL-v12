@@ -18,6 +18,7 @@ pub use clustering::{
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
 pub use nlp::{detect_contradictions, synonym_bucket, text_to_anchor, text_to_embedding};
 pub use semantic::{
-    AtomKey, Concept, EmbeddingIndex, KnnResult, KnowledgeGraph, QueryFilter, QueryHit, Relation,
-    RelationType, SemanticConfig, SemanticEmbedding, SemanticEngine, SemanticQuery, SemanticReport,
+    AtomKey, Concept, EmbeddingIndex, KnnResult, KnowledgeGraph, MultihopResult, QueryFilter,
+    QueryHit, Relation, RelationType, SemanticAnalogy, SemanticConfig, SemanticEmbedding,
+    SemanticEngine, SemanticQuery, SemanticReport,
 };

@@ -5,6 +5,7 @@ use crate::universe::coord::Coord7D;
 use crate::universe::core::physics::UniversePhysics;
 use crate::universe::crystal::CrystalEngine;
 use crate::universe::hebbian::HebbianMemory;
+use crate::universe::memory::semantic::{AtomKey, SemanticEngine};
 use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
 use crate::universe::perception::{PerceptionBudget, PerceptionError};
@@ -386,6 +387,86 @@ impl ReasoningEngine {
         perception.settle(alloc, actual)?;
         Ok(results)
     }
+
+    pub fn find_analogies_semantic(
+        semantic: &SemanticEngine,
+        memories: &[MemoryAtom],
+        threshold: f64,
+    ) -> Vec<ReasoningResult> {
+        let analogies = semantic.find_analogies_semantic(memories, threshold);
+        analogies
+            .into_iter()
+            .map(|a| ReasoningResult {
+                result_type: ReasoningType::Analogy,
+                source: format_key(&a.from, memories),
+                targets: vec![format_key(&a.to, memories)],
+                confidence: a.similarity,
+                hops: 0,
+            })
+            .collect()
+    }
+
+    pub fn find_associations_semantic(
+        semantic: &SemanticEngine,
+        hebbian: &HebbianMemory,
+        memories: &[MemoryAtom],
+        query_text: &str,
+        k: usize,
+        max_hops: usize,
+    ) -> Vec<ReasoningResult> {
+        let multihop = semantic.search_multihop(query_text, k, max_hops, hebbian, memories);
+        multihop
+            .into_iter()
+            .map(|r| ReasoningResult {
+                result_type: if r.hop == 0 {
+                    ReasoningType::Analogy
+                } else {
+                    ReasoningType::Association
+                },
+                source: query_text.to_string(),
+                targets: vec![format_key(&r.atom_key, memories)],
+                confidence: r.similarity,
+                hops: r.hop,
+            })
+            .collect()
+    }
+
+    pub fn find_analogies_hybrid(
+        universe: &DarkUniverse,
+        semantic: &SemanticEngine,
+        memories: &[MemoryAtom],
+        threshold: f64,
+    ) -> Vec<ReasoningResult> {
+        let mut energy_results = Self::find_analogies(universe, memories, threshold);
+        let mut semantic_results = Self::find_analogies_semantic(semantic, memories, threshold);
+
+        for sr in &mut semantic_results {
+            let existing = energy_results
+                .iter()
+                .any(|er| er.source == sr.source && er.targets == sr.targets);
+            if !existing {
+                energy_results.push(sr.clone());
+            }
+        }
+
+        energy_results.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        energy_results
+    }
+}
+
+fn format_key(key: &AtomKey, memories: &[MemoryAtom]) -> String {
+    memories
+        .iter()
+        .find(|m| {
+            let mk = AtomKey::from_atom(m);
+            mk == *key
+        })
+        .map(|m| format!("{}", m.anchor()))
+        .unwrap_or_else(|| "?".to_string())
 }
 
 #[cfg(test)]

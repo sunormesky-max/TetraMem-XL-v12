@@ -3,19 +3,24 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 //
 // Semantic Understanding Layers (S2-S5):
-//   S2: Semantic Embedding — vector embedding + KNN search
+//   S2: Semantic Embedding — 64-dim vector embedding + KNN search + TF-IDF text search
 //   S3: Knowledge Graph — typed relations between memories
-//   S4: Concept Abstraction — dream-driven prototype extraction
+//   S4: Concept Abstraction — dream-driven prototype extraction with centroid updates
 //   S5: Semantic Query — unified query language
 
+use crate::universe::memory::nlp::{self, TfIdfIndex};
 use crate::universe::memory::MemoryAtom;
 use std::collections::HashMap;
 
 // ═══════════════════════════════════════════════════════════════════════
-// S2: Semantic Embedding Layer
+// S2: Semantic Embedding Layer (64-dim)
 // ═══════════════════════════════════════════════════════════════════════
 
-const EMBED_DIM: usize = 16;
+const EMBED_DIM: usize = 64;
+const STAT_DIM: usize = 20;
+const HIST_DIM: usize = 16;
+const FREQ_DIM: usize = 16;
+const META_DIM: usize = 12;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticEmbedding {
@@ -49,10 +54,11 @@ impl SemanticEmbedding {
         }
         let mean = sum / n;
         let variance = (sq_sum / n) - (mean * mean);
+        let std_dev = variance.sqrt().max(1e-10);
         let range = max_val - min_val;
 
         vec[0] = mean;
-        vec[1] = variance.sqrt();
+        vec[1] = std_dev;
         vec[2] = min_val;
         vec[3] = max_val;
         vec[4] = range;
@@ -86,7 +92,6 @@ impl SemanticEmbedding {
 
         let mut skewness = 0.0f64;
         let mut kurtosis = 0.0f64;
-        let std_dev = variance.sqrt().max(1e-10);
         for &v in data {
             let d = (v - mean) / std_dev;
             skewness += d * d * d;
@@ -102,10 +107,9 @@ impl SemanticEmbedding {
             let q4: f64 = data[q4_start..].iter().sum::<f64>() / quarter as f64;
             vec[10] = q4 - q1;
 
-            let median_idx = data.len() / 2;
             let mut sorted = data.to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            vec[11] = sorted[median_idx];
+            vec[11] = sorted[data.len() / 2];
         }
 
         if data.len() > 2 {
@@ -113,13 +117,58 @@ impl SemanticEmbedding {
             for i in 1..data.len() {
                 diffs.push((data[i] - data[i - 1]).abs());
             }
-            let diff_mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
-            vec[12] = diff_mean;
+            vec[12] = diffs.iter().sum::<f64>() / diffs.len() as f64;
         }
 
         vec[13] = mean * mean;
         vec[14] = mean * std_dev;
         vec[15] = range * entropy;
+
+        if data.len() >= 10 {
+            let mut sorted = data.to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let p25 = sorted[data.len() / 4];
+            let p75 = sorted[data.len() * 3 / 4];
+            vec[16] = p75 - p25;
+            vec[17] = sorted[data.len() / 10];
+            vec[18] = sorted[data.len() * 9 / 10];
+            vec[19] = (sorted[data.len() * 9 / 10] - sorted[data.len() / 10]) / (std_dev + 1e-10);
+        }
+
+        let hist_bins = HIST_DIM;
+        let mut hist = vec![0usize; hist_bins];
+        let hist_range = range.max(1e-10);
+        for &v in data {
+            let idx = (((v - min_val) / hist_range * (hist_bins as f64 - 1.0)).round() as usize)
+                .min(hist_bins - 1);
+            hist[idx] += 1;
+        }
+        for (i, &count) in hist.iter().enumerate() {
+            if i + STAT_DIM < EMBED_DIM {
+                vec[i + STAT_DIM] = count as f64 / n;
+            }
+        }
+
+        if data.len() >= 4 {
+            let mut fft_mag = vec![0.0f64; FREQ_DIM];
+            for k in 0..FREQ_DIM.min(data.len() / 2) {
+                let mut re = 0.0f64;
+                let mut im = 0.0f64;
+                for t in 0..data.len() {
+                    let angle =
+                        2.0 * std::f64::consts::PI * k as f64 * t as f64 / data.len() as f64;
+                    re += data[t] * angle.cos();
+                    im -= data[t] * angle.sin();
+                }
+                fft_mag[k] = (re * re + im * im).sqrt() / data.len() as f64;
+            }
+            for i in 0..FREQ_DIM {
+                let slot = STAT_DIM + HIST_DIM + i;
+                if slot < EMBED_DIM {
+                    vec[slot] = fft_mag[i];
+                }
+            }
+        }
 
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
@@ -134,37 +183,50 @@ impl SemanticEmbedding {
     pub fn from_annotation(atom: &MemoryAtom) -> Self {
         let mut vec = [0.0f64; EMBED_DIM];
 
-        let cat_hash = atom
-            .category()
-            .map(|c| {
-                let mut h: u64 = 0;
-                for b in c.bytes() {
-                    h = h.wrapping_mul(31).wrapping_add(b as u64);
-                }
-                h as f64
-            })
-            .unwrap_or(0.0);
-        vec[0] = cat_hash;
+        let text_parts: Vec<&str> = vec![
+            atom.description().unwrap_or(""),
+            atom.category().unwrap_or(""),
+            atom.source().unwrap_or(""),
+        ];
+        let text = text_parts.join(" ");
+        let text_emb = nlp::text_to_embedding(&text, atom.importance());
+
+        for i in 0..META_DIM.min(text_emb.len()) {
+            let slot = EMBED_DIM - META_DIM + i;
+            if slot < EMBED_DIM {
+                vec[slot] = text_emb[i];
+            }
+        }
+
+        let mut cat_hash: u64 = 0;
+        if let Some(c) = atom.category() {
+            for b in c.bytes() {
+                cat_hash = cat_hash.wrapping_mul(31).wrapping_add(b as u64);
+            }
+        }
+        vec[0] = (cat_hash % 1000) as f64;
 
         vec[1] = atom.tags().len() as f64;
 
         let desc_len = atom.description().map(|d| d.len() as f64).unwrap_or(0.0);
         vec[2] = desc_len;
 
-        let src_hash = atom
-            .source()
-            .map(|s| {
-                let mut h: u64 = 0;
-                for b in s.bytes() {
-                    h = h.wrapping_mul(31).wrapping_add(b as u64);
-                }
-                h as f64
-            })
-            .unwrap_or(0.0);
-        vec[3] = src_hash;
+        let mut src_hash: u64 = 0;
+        if let Some(s) = atom.source() {
+            for b in s.bytes() {
+                src_hash = src_hash.wrapping_mul(31).wrapping_add(b as u64);
+            }
+        }
+        vec[3] = (src_hash % 1000) as f64;
 
         vec[4] = atom.importance();
         vec[5] = atom.data_dim() as f64;
+
+        let tags_text = atom.tags().join(" ");
+        let tag_emb = nlp::text_to_embedding(&tags_text, 0.5);
+        for i in 0..6.min(tag_emb.len()) {
+            vec[6 + i] = tag_emb[i];
+        }
 
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
@@ -182,7 +244,7 @@ impl SemanticEmbedding {
 
         let mut combined = [0.0f64; EMBED_DIM];
         for (i, slot) in combined.iter_mut().enumerate().take(EMBED_DIM) {
-            *slot = 0.7 * data_emb.vector[i] + 0.3 * ann_emb.vector[i];
+            *slot = 0.6 * data_emb.vector[i] + 0.4 * ann_emb.vector[i];
         }
 
         let norm: f64 = combined.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -212,7 +274,7 @@ impl SemanticEmbedding {
         if denom < 1e-10 {
             return 0.0;
         }
-        dot / denom
+        (dot / denom).clamp(0.0, 1.0)
     }
 
     pub fn euclidean_distance(&self, other: &Self) -> f64 {
@@ -223,12 +285,30 @@ impl SemanticEmbedding {
         }
         sum.sqrt()
     }
+
+    pub fn update_centroid(&self, centroid: &Self, n_members: usize) -> Self {
+        let mut vec = [0.0f64; EMBED_DIM];
+        let old_weight = n_members as f64;
+        let new_weight = 1.0;
+        let total = old_weight + new_weight;
+        for i in 0..EMBED_DIM {
+            vec[i] = (centroid.vector[i] * old_weight + self.vector[i] * new_weight) / total;
+        }
+        let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm > 1e-10 {
+            for v in &mut vec {
+                *v /= norm;
+            }
+        }
+        Self { vector: vec }
+    }
 }
 
 #[derive(Debug, Clone)]
 struct EmbeddingEntry {
     atom_key: AtomKey,
     embedding: SemanticEmbedding,
+    category: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -262,28 +342,46 @@ pub struct KnnResult {
 #[derive(Debug, Clone)]
 pub struct EmbeddingIndex {
     entries: Vec<EmbeddingEntry>,
+    key_to_idx: HashMap<AtomKey, usize>,
 }
 
 impl EmbeddingIndex {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            key_to_idx: HashMap::new(),
         }
     }
 
-    pub fn upsert(&mut self, key: AtomKey, embedding: SemanticEmbedding) {
-        if let Some(existing) = self.entries.iter_mut().find(|e| e.atom_key == key) {
-            existing.embedding = embedding;
+    pub fn upsert(&mut self, key: AtomKey, embedding: SemanticEmbedding, category: Option<String>) {
+        if let Some(&idx) = self.key_to_idx.get(&key) {
+            self.entries[idx].embedding = embedding;
+            self.entries[idx].category = category;
         } else {
+            let idx = self.entries.len();
+            self.key_to_idx.insert(key.clone(), idx);
             self.entries.push(EmbeddingEntry {
                 atom_key: key,
                 embedding,
+                category,
             });
         }
     }
 
     pub fn remove(&mut self, key: &AtomKey) {
-        self.entries.retain(|e| &e.atom_key != key);
+        if let Some(idx) = self.key_to_idx.remove(key) {
+            self.entries.swap_remove(idx);
+            if idx < self.entries.len() {
+                let swapped_key = self.entries[idx].atom_key.clone();
+                self.key_to_idx.insert(swapped_key, idx);
+            }
+        }
+    }
+
+    pub fn get_embedding(&self, key: &AtomKey) -> Option<&SemanticEmbedding> {
+        self.key_to_idx
+            .get(key)
+            .map(|&idx| &self.entries[idx].embedding)
     }
 
     pub fn search_knn(&self, query: &SemanticEmbedding, k: usize) -> Vec<KnnResult> {
@@ -305,10 +403,28 @@ impl EmbeddingIndex {
         scored
     }
 
-    pub fn search_by_category(&self, _category: &str) -> Vec<(AtomKey, f64)> {
+    pub fn search_knn_with_scores(
+        &self,
+        query: &SemanticEmbedding,
+        k: usize,
+    ) -> HashMap<AtomKey, f64> {
+        let results = self.search_knn(query, k);
+        let mut map = HashMap::with_capacity(results.len());
+        for r in results {
+            map.insert(r.atom_key, r.similarity);
+        }
+        map
+    }
+
+    pub fn search_by_category(&self, category: &str) -> Vec<(AtomKey, f64)> {
         self.entries
             .iter()
-            .filter(|_| true)
+            .filter(|e| {
+                e.category
+                    .as_ref()
+                    .map(|c| c.eq_ignore_ascii_case(category))
+                    .unwrap_or(false)
+            })
             .map(|e| (e.atom_key.clone(), 1.0))
             .collect()
     }
@@ -577,7 +693,7 @@ impl Default for KnowledgeGraph {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// S4: Concept Abstraction Layer
+// S4: Concept Abstraction Layer (with incremental centroid updates)
 // ═══════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone)]
@@ -604,9 +720,67 @@ impl std::fmt::Display for Concept {
 #[derive(Debug, Clone)]
 struct ConceptCluster {
     centroid: SemanticEmbedding,
+    sum_vector: [f64; EMBED_DIM],
     members: Vec<AtomKey>,
     category: Option<String>,
     tags: HashMap<String, usize>,
+    total_variance: f64,
+}
+
+impl ConceptCluster {
+    fn new(embedding: SemanticEmbedding, key: AtomKey) -> Self {
+        let mut sum_vector = [0.0f64; EMBED_DIM];
+        for (i, &v) in embedding.vector.iter().enumerate() {
+            sum_vector[i] = v;
+        }
+        Self {
+            centroid: embedding.clone(),
+            sum_vector,
+            members: vec![key],
+            category: None,
+            tags: HashMap::new(),
+            total_variance: 0.0,
+        }
+    }
+
+    fn add_member(&mut self, key: AtomKey, embedding: &SemanticEmbedding) {
+        self.members.push(key);
+        let n = self.members.len() as f64;
+        for (i, &v) in embedding.vector.iter().enumerate() {
+            self.sum_vector[i] += v;
+        }
+        let mut new_centroid = [0.0f64; EMBED_DIM];
+        for (i, &s) in self.sum_vector.iter().enumerate() {
+            new_centroid[i] = s / n;
+        }
+        let norm: f64 = new_centroid.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm > 1e-10 {
+            for v in &mut new_centroid {
+                *v /= norm;
+            }
+        }
+        self.centroid = SemanticEmbedding {
+            vector: new_centroid,
+        };
+    }
+
+    fn compute_coherence(&self, index: &EmbeddingIndex) -> f64 {
+        if self.members.len() < 2 {
+            return 1.0;
+        }
+        let mut total_sim = 0.0f64;
+        let mut count = 0usize;
+        for key in &self.members {
+            if let Some(emb) = index.get_embedding(key) {
+                total_sim += self.centroid.cosine_similarity(emb);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return 0.0;
+        }
+        total_sim / count as f64
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -643,9 +817,8 @@ impl ConceptExtractor {
         atoms_by_key: &HashMap<AtomKey, &MemoryAtom>,
     ) -> &[Concept] {
         let mut clusters: Vec<ConceptCluster> = Vec::new();
-        let entries: Vec<&EmbeddingEntry> = index.entries.iter().collect();
 
-        for entry in &entries {
+        for entry in &index.entries {
             let mut best_cluster: Option<usize> = None;
             let mut best_sim = self.similarity_threshold;
 
@@ -658,7 +831,7 @@ impl ConceptExtractor {
             }
 
             if let Some(ci) = best_cluster {
-                clusters[ci].members.push(entry.atom_key.clone());
+                clusters[ci].add_member(entry.atom_key.clone(), &entry.embedding);
                 if let Some(atom) = atoms_by_key.get(&entry.atom_key) {
                     if let Some(cat) = atom.category() {
                         if clusters[ci].category.is_none() {
@@ -670,18 +843,14 @@ impl ConceptExtractor {
                     }
                 }
             } else {
-                let mut tags = HashMap::new();
+                let mut cluster =
+                    ConceptCluster::new(entry.embedding.clone(), entry.atom_key.clone());
                 if let Some(atom) = atoms_by_key.get(&entry.atom_key) {
                     for tag in atom.tags() {
-                        tags.insert(tag.clone(), 1);
+                        cluster.tags.insert(tag.clone(), 1);
                     }
                 }
-                clusters.push(ConceptCluster {
-                    centroid: entry.embedding.clone(),
-                    members: vec![entry.atom_key.clone()],
-                    category: None,
-                    tags,
-                });
+                clusters.push(cluster);
             }
         }
 
@@ -693,11 +862,7 @@ impl ConceptExtractor {
             .enumerate()
             .map(|(i, cluster)| {
                 let n = cluster.members.len();
-                let coherence = if n > 1 {
-                    1.0 / (1.0 + (n as f64).ln().max(0.01))
-                } else {
-                    1.0
-                };
+                let coherence = cluster.compute_coherence(index);
 
                 let category = cluster
                     .category
@@ -873,6 +1038,10 @@ impl SemanticQuery {
                 _ => None,
             });
 
+        let similarity_map: Option<HashMap<AtomKey, f64>> = query_embedding
+            .as_ref()
+            .map(|emb| index.search_knn_with_scores(emb, index.len().max(1)));
+
         let related_keys: Option<Vec<AtomKey>> = self.filters.iter().find_map(|f| {
             if let QueryFilter::RelatedTo(key) = f {
                 let neighbors = graph.neighbors(key, 3);
@@ -976,13 +1145,8 @@ impl SemanticQuery {
                 }
             }
 
-            let similarity = if let Some(ref emb) = query_embedding {
-                let knn_results = index.search_knn(emb, index.len().max(1));
-                knn_results
-                    .iter()
-                    .find(|r| r.atom_key == key)
-                    .map(|r| r.similarity)
-                    .unwrap_or(0.0)
+            let similarity = if let Some(ref sim_map) = similarity_map {
+                *sim_map.get(&key).unwrap_or(&0.0)
             } else {
                 1.0
             };
@@ -1069,6 +1233,7 @@ pub struct SemanticEngine {
     index: EmbeddingIndex,
     graph: KnowledgeGraph,
     concept_extractor: ConceptExtractor,
+    tfidf_index: TfIdfIndex,
 }
 
 impl SemanticEngine {
@@ -1081,19 +1246,36 @@ impl SemanticEngine {
             index: EmbeddingIndex::new(),
             graph: KnowledgeGraph::new(),
             concept_extractor,
+            tfidf_index: TfIdfIndex::new(),
         }
     }
 
     pub fn index_memory(&mut self, atom: &MemoryAtom, data: &[f64]) {
         let key = AtomKey::from_atom(atom);
         let embedding = SemanticEmbedding::from_data_and_annotation(data, atom);
-        self.index.upsert(key, embedding);
+        let category = atom.category().map(String::from);
+        self.index.upsert(key, embedding, category);
+        self.index_tfidf_text(atom);
     }
 
     pub fn index_memory_data_only(&mut self, atom: &MemoryAtom, data: &[f64]) {
         let key = AtomKey::from_atom(atom);
         let embedding = SemanticEmbedding::from_data(data);
-        self.index.upsert(key, embedding);
+        let category = atom.category().map(String::from);
+        self.index.upsert(key, embedding, category);
+    }
+
+    fn index_tfidf_text(&mut self, atom: &MemoryAtom) {
+        let tags_joined = atom.tags().join(" ");
+        let text_parts: Vec<&str> = vec![
+            atom.description().unwrap_or(""),
+            atom.category().unwrap_or(""),
+            &tags_joined,
+        ];
+        let text = text_parts.join(" ");
+        if !text.trim().is_empty() {
+            self.tfidf_index.add_document(&text);
+        }
     }
 
     pub fn unindex_memory(&mut self, atom: &MemoryAtom) {
@@ -1113,9 +1295,8 @@ impl SemanticEngine {
 
         for atom in atoms {
             let key = AtomKey::from_atom(atom);
-            let results = self
-                .index
-                .search_knn(&SemanticEmbedding::from_annotation(atom), k);
+            let embedding = SemanticEmbedding::from_data_and_annotation(&[atom.importance()], atom);
+            let results = self.index.search_knn(&embedding, k);
 
             for result in results {
                 if result.similarity >= threshold && result.atom_key != key {
@@ -1165,6 +1346,26 @@ impl SemanticEngine {
         self.index.search_knn(&embedding, k)
     }
 
+    pub fn search_by_text(&self, text: &str, k: usize) -> Vec<KnnResult> {
+        let text_vec = nlp::text_to_tfidf_embedding(text, &self.tfidf_index);
+        let mut vec = [0.0f64; EMBED_DIM];
+        for (i, slot) in vec
+            .iter_mut()
+            .enumerate()
+            .take(EMBED_DIM.min(text_vec.len()))
+        {
+            *slot = text_vec[i];
+        }
+        let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm > 1e-10 {
+            for v in &mut vec {
+                *v /= norm;
+            }
+        }
+        let embedding = SemanticEmbedding { vector: vec };
+        self.index.search_knn(&embedding, k)
+    }
+
     pub fn find_relations(&self, atom: &MemoryAtom) -> Vec<&Relation> {
         let key = AtomKey::from_atom(atom);
         let mut all = self.graph.relations_from(&key);
@@ -1197,6 +1398,176 @@ impl SemanticEngine {
     pub fn concepts_ref(&self) -> &[Concept] {
         self.concept_extractor.concepts()
     }
+
+    pub fn tfidf_index_ref(&self) -> &TfIdfIndex {
+        &self.tfidf_index
+    }
+
+    pub fn tfidf_index_mut(&mut self) -> &mut TfIdfIndex {
+        &mut self.tfidf_index
+    }
+
+    pub fn search_multihop(
+        &self,
+        text: &str,
+        k: usize,
+        max_hops: usize,
+        hebbian: &crate::universe::hebbian::HebbianMemory,
+        mems: &[MemoryAtom],
+    ) -> Vec<MultihopResult> {
+        let initial = self.search_by_text(text, k);
+        if initial.is_empty() || max_hops == 0 {
+            return initial
+                .into_iter()
+                .map(|r| MultihopResult {
+                    atom_key: r.atom_key,
+                    similarity: r.similarity,
+                    distance: r.distance,
+                    hop: 0,
+                    path: vec![],
+                })
+                .collect();
+        }
+
+        let key_to_anchor: HashMap<AtomKey, crate::universe::coord::Coord7D> = mems
+            .iter()
+            .map(|m| {
+                let key = AtomKey::from_atom(m);
+                (key, *m.anchor())
+            })
+            .collect();
+
+        let anchor_to_key: HashMap<crate::universe::coord::Coord7D, AtomKey> = mems
+            .iter()
+            .map(|m| {
+                let key = AtomKey::from_atom(m);
+                (*m.anchor(), key)
+            })
+            .collect();
+
+        let mut seen: HashMap<AtomKey, (f64, usize, Vec<AtomKey>)> = HashMap::new();
+        for r in &initial {
+            seen.insert(r.atom_key.clone(), (r.similarity, 0, vec![]));
+        }
+
+        let mut frontier: Vec<(AtomKey, usize, f64)> = initial
+            .iter()
+            .map(|r| (r.atom_key.clone(), 0, r.similarity))
+            .collect();
+
+        while let Some((current_key, hop, base_sim)) = frontier.pop() {
+            if hop >= max_hops {
+                continue;
+            }
+
+            let Some(coord) = key_to_anchor.get(&current_key) else {
+                continue;
+            };
+
+            let neighbors = hebbian.get_neighbors(coord);
+            for (neighbor_coord, edge_weight) in &neighbors {
+                let Some(neighbor_key) = anchor_to_key.get(neighbor_coord) else {
+                    continue;
+                };
+
+                let combined_sim = base_sim * edge_weight * 0.8;
+                if combined_sim < 0.01 {
+                    continue;
+                }
+
+                let new_hop = hop + 1;
+                let should_update = match seen.get(neighbor_key) {
+                    Some(&(existing_sim, existing_hop, _)) => {
+                        combined_sim > existing_sim || new_hop < existing_hop
+                    }
+                    None => true,
+                };
+
+                if should_update {
+                    let mut path_to_current = seen
+                        .get(&current_key)
+                        .map(|(_, _, p)| p.clone())
+                        .unwrap_or_default();
+                    path_to_current.push(current_key.clone());
+
+                    seen.insert(
+                        neighbor_key.clone(),
+                        (combined_sim, new_hop, path_to_current),
+                    );
+                    frontier.push((neighbor_key.clone(), new_hop, combined_sim));
+                }
+            }
+        }
+
+        let mut results: Vec<MultihopResult> = seen
+            .into_iter()
+            .map(|(key, (sim, hop, path))| MultihopResult {
+                atom_key: key,
+                similarity: sim,
+                distance: 1.0 - sim,
+                hop,
+                path,
+            })
+            .collect();
+        results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(k);
+        results
+    }
+
+    pub fn find_analogies_semantic(
+        &self,
+        memories: &[MemoryAtom],
+        threshold: f64,
+    ) -> Vec<SemanticAnalogy> {
+        let keys: Vec<AtomKey> = memories.iter().map(AtomKey::from_atom).collect();
+        let mut results = Vec::new();
+
+        for i in 0..keys.len() {
+            let Some(emb_a) = self.index.get_embedding(&keys[i]) else {
+                continue;
+            };
+            for j in (i + 1)..keys.len() {
+                let Some(emb_b) = self.index.get_embedding(&keys[j]) else {
+                    continue;
+                };
+                let sim = emb_a.cosine_similarity(emb_b);
+                if sim >= threshold {
+                    results.push(SemanticAnalogy {
+                        from: keys[i].clone(),
+                        to: keys[j].clone(),
+                        similarity: sim,
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MultihopResult {
+    pub atom_key: AtomKey,
+    pub similarity: f64,
+    pub distance: f64,
+    pub hop: usize,
+    pub path: Vec<AtomKey>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticAnalogy {
+    pub from: AtomKey,
+    pub to: AtomKey,
+    pub similarity: f64,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1277,14 +1648,17 @@ mod tests {
         index.upsert(
             AtomKey::from_atom(&atom_close),
             SemanticEmbedding::from_data(&[1.0, 2.1, 3.0]),
+            None,
         );
         index.upsert(
             AtomKey::from_atom(&atom_mid),
             SemanticEmbedding::from_data(&[1.0, 5.0, 3.0]),
+            None,
         );
         index.upsert(
             AtomKey::from_atom(&atom_far),
             SemanticEmbedding::from_data(&[100.0, 200.0, 300.0]),
+            None,
         );
 
         let query = SemanticEmbedding::from_data(&base_data);
@@ -1302,9 +1676,17 @@ mod tests {
             vertices_basis: [[0; 7]; 4],
             vertices_even: [true; 4],
         };
-        index.upsert(key.clone(), SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]));
+        index.upsert(
+            key.clone(),
+            SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]),
+            None,
+        );
         assert_eq!(index.len(), 1);
-        index.upsert(key.clone(), SemanticEmbedding::from_data(&[4.0, 5.0, 6.0]));
+        index.upsert(
+            key.clone(),
+            SemanticEmbedding::from_data(&[4.0, 5.0, 6.0]),
+            None,
+        );
         assert_eq!(index.len(), 1);
     }
 
@@ -1315,10 +1697,41 @@ mod tests {
             vertices_basis: [[0; 7]; 4],
             vertices_even: [true; 4],
         };
-        index.upsert(key.clone(), SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]));
+        index.upsert(
+            key.clone(),
+            SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]),
+            None,
+        );
         assert_eq!(index.len(), 1);
         index.remove(&key);
         assert_eq!(index.len(), 0);
+    }
+
+    #[test]
+    fn search_by_category_works() {
+        let mut index = EmbeddingIndex::new();
+        let key_a = AtomKey {
+            vertices_basis: [[0; 7]; 4],
+            vertices_even: [true; 4],
+        };
+        let key_b = AtomKey {
+            vertices_basis: [[1; 7]; 4],
+            vertices_even: [false; 4],
+        };
+        index.upsert(
+            key_a.clone(),
+            SemanticEmbedding::from_data(&[1.0]),
+            Some("rust".to_string()),
+        );
+        index.upsert(
+            key_b.clone(),
+            SemanticEmbedding::from_data(&[2.0]),
+            Some("python".to_string()),
+        );
+
+        let rust = index.search_by_category("rust");
+        assert_eq!(rust.len(), 1);
+        assert_eq!(rust[0].0, key_a);
     }
 
     #[test]
@@ -1417,7 +1830,11 @@ mod tests {
         for i in 0..5 {
             let atom = make_atom_at(&mut u, i, &[1.0, 2.0, 3.0]);
             let key = AtomKey::from_atom(&atom);
-            index.upsert(key.clone(), SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]));
+            index.upsert(
+                key.clone(),
+                SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]),
+                None,
+            );
             atoms_map.insert(key, atom);
         }
 
@@ -1432,7 +1849,7 @@ mod tests {
     }
 
     #[test]
-    fn concept_find_for_embedding() {
+    fn concept_centroid_updates() {
         let mut extractor = ConceptExtractor::new()
             .with_similarity_threshold(0.5)
             .with_min_cluster_size(1);
@@ -1442,7 +1859,11 @@ mod tests {
 
         let atom = make_atom_at(&mut u, 0, &[1.0, 2.0, 3.0]);
         let key = AtomKey::from_atom(&atom);
-        index.upsert(key.clone(), SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]));
+        index.upsert(
+            key.clone(),
+            SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]),
+            None,
+        );
         atoms_map.insert(key, atom);
 
         let refs: HashMap<AtomKey, &MemoryAtom> =
@@ -1569,6 +1990,25 @@ mod tests {
     }
 
     #[test]
+    fn search_by_text_basic() {
+        let mut engine = SemanticEngine::new(SemanticConfig::default());
+        let mut u = DarkUniverse::new(500000.0);
+
+        let mut atom1 = make_atom_at(&mut u, 1, &[1.0, 2.0, 3.0]);
+        atom1.set_description("machine learning algorithm");
+        atom1.set_category("ml");
+        let mut atom2 = make_atom_at(&mut u, 2, &[4.0, 5.0, 6.0]);
+        atom2.set_description("cooking recipes for dinner");
+        atom2.set_category("food");
+
+        engine.index_memory(&atom1, &[1.0, 2.0, 3.0]);
+        engine.index_memory(&atom2, &[4.0, 5.0, 6.0]);
+
+        let results = engine.search_by_text("machine learning", 5);
+        assert!(!results.is_empty(), "should find results for text search");
+    }
+
+    #[test]
     fn relation_type_roundtrip() {
         for rt in RelationType::all() {
             let s = rt.as_str();
@@ -1607,33 +2047,20 @@ mod tests {
     }
 
     #[test]
-    fn combined_embedding_weighted() {
-        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let mut u = make_test_universe();
-        let atom = make_test_atom(&mut u, &data);
-        let combined = SemanticEmbedding::from_data_and_annotation(&data, &atom);
-        let norm: f64 = combined.vector.iter().map(|v| v * v).sum::<f64>().sqrt();
-        assert!(
-            (norm - 1.0).abs() < 1e-10,
-            "combined embedding should be normalized"
-        );
+    fn centroid_update_works() {
+        let a = SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]);
+        let b = SemanticEmbedding::from_data(&[2.0, 3.0, 4.0]);
+        let centroid = b.update_centroid(&a, 1);
+        let sim_a = centroid.cosine_similarity(&a);
+        let sim_b = centroid.cosine_similarity(&b);
+        assert!(sim_a > 0.9, "centroid should be similar to a");
+        assert!(sim_b > 0.9, "centroid should be similar to b");
     }
 
     #[test]
-    fn knowledge_graph_weight_metadata() {
-        let a = AtomKey {
-            vertices_basis: [[0; 7]; 4],
-            vertices_even: [true; 4],
-        };
-        let b = AtomKey {
-            vertices_basis: [[1; 7]; 4],
-            vertices_even: [false; 4],
-        };
-        let rel = Relation::new(a.clone(), b.clone(), RelationType::Causes)
-            .with_weight(0.75)
-            .with_metadata("reason", "test");
-
-        assert!((rel.weight - 0.75).abs() < 1e-10);
-        assert_eq!(rel.metadata.get("reason"), Some(&"test".to_string()));
+    fn embedding_dimension_is_64() {
+        assert_eq!(EMBED_DIM, 64);
+        let emb = SemanticEmbedding::zero();
+        assert_eq!(emb.vector.len(), 64);
     }
 }

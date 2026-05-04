@@ -382,83 +382,33 @@ pub async fn semantic_text_query(
     State(state): State<SharedState>,
     Json(req): Json<SemanticTextQueryRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
+    let sem = state.semantic.read().await;
     let mems = state.memories.read().await;
-    let idx = state.memory_index.read().await;
     let k = req.k.clamp(1, 100);
 
-    let text_lower = req.text.to_lowercase();
-    let mut hits = Vec::new();
+    let knn_results = sem.search_by_text(&req.text, k);
 
-    for (key_str, &i) in idx.iter() {
-        if let Some(mem) = mems.get(i) {
-            let desc = mem.description().unwrap_or("").to_lowercase();
-            let cat = mem.category().unwrap_or("").to_lowercase();
-            let tags_str = mem.tags().join(" ").to_lowercase();
-            let combined = format!("{} {} {}", desc, cat, tags_str);
+    let hits: Vec<SemanticHit> = knn_results
+        .into_iter()
+        .filter_map(|r| {
+            let mem = mems.iter().find(|m| {
+                let mk = crate::universe::memory::AtomKey::from_atom(m);
+                mk == r.atom_key
+            })?;
+            let anchor_str = format!("{}", mem.anchor());
+            Some(SemanticHit {
+                anchor: anchor_str,
+                similarity: r.similarity,
+                distance: r.distance,
+                tags: mem.tags().to_vec(),
+                category: mem.category().map(String::from),
+                description: mem.description().map(String::from),
+                importance: mem.importance(),
+            })
+        })
+        .collect();
 
-            if combined.contains(&text_lower) {
-                if hits.len() >= k {
-                    break;
-                }
-                hits.push(SemanticHit {
-                    anchor: key_str.clone(),
-                    similarity: 1.0,
-                    distance: 0.0,
-                    tags: mem.tags().to_vec(),
-                    category: mem.category().map(String::from),
-                    description: mem.description().map(String::from),
-                    importance: mem.importance(),
-                });
-            }
-        }
-    }
-
-    if hits.len() < k {
-        let words: Vec<&str> = text_lower
-            .split_whitespace()
-            .filter(|w| w.len() > 2)
-            .collect();
-        if !words.is_empty() {
-            for (key_str, &i) in idx.iter() {
-                if hits.len() >= k {
-                    break;
-                }
-                if hits.iter().any(|h| h.anchor == *key_str) {
-                    continue;
-                }
-                if let Some(mem) = mems.get(i) {
-                    let desc = mem.description().unwrap_or("").to_lowercase();
-                    let cat = mem.category().unwrap_or("").to_lowercase();
-                    let tags_str = mem.tags().join(" ").to_lowercase();
-                    let combined = format!("{} {} {}", desc, cat, tags_str);
-
-                    let match_count = words.iter().filter(|w| combined.contains(*w)).count();
-                    if match_count > 0 {
-                        let similarity = match_count as f64 / words.len() as f64;
-                        hits.push(SemanticHit {
-                            anchor: key_str.clone(),
-                            similarity,
-                            distance: 1.0 - similarity,
-                            tags: mem.tags().to_vec(),
-                            category: mem.category().map(String::from),
-                            description: mem.description().map(String::from),
-                            importance: mem.importance(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    hits.sort_by(|a, b| {
-        b.similarity
-            .partial_cmp(&a.similarity)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    Json(ApiResponse::ok(SemanticSearchResponse {
-        results: hits.into_iter().take(k).collect(),
-    }))
+    Json(ApiResponse::ok(SemanticSearchResponse { results: hits }))
 }
 
 pub async fn semantic_relations(
