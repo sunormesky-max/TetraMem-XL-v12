@@ -471,7 +471,7 @@ impl ResonanceTunnel {
                     continue;
                 }
 
-                if hebbian.get_bias(a, b) > 0.1 {
+                if hebbian.get_bias_max(a, b) > 0.1 {
                     continue;
                 }
 
@@ -664,7 +664,7 @@ impl TopologyBridge {
             for j in (i + 1)..memories.len() {
                 let a = memories[i].anchor();
                 let b = memories[j].anchor();
-                if hebbian.get_bias(a, b) > 0.1 {
+                if hebbian.get_bias_max(a, b) > 0.1 {
                     union(&mut parent, *a, *b);
                 }
             }
@@ -707,7 +707,7 @@ impl TopologyBridge {
             let a = memories[i].anchor();
             let b = memories[j].anchor();
 
-            if hebbian.get_bias(a, b) > 0.1 {
+            if hebbian.get_bias_max(a, b) > 0.1 {
                 continue;
             }
 
@@ -1059,7 +1059,7 @@ mod tests {
             "should create bridge between disconnected components",
         );
         assert!(
-            hebbian.get_bias(mem_a.anchor(), mem_b.anchor()) > 0.0,
+            hebbian.get_bias_max(mem_a.anchor(), mem_b.anchor()) > 0.0,
             "bridge should create Hebbian edge",
         );
     }

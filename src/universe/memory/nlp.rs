@@ -763,7 +763,7 @@ pub fn detect_contradictions(
         }
 
         if has_opposite && !has_same {
-            let edge_w = hebbian.get_bias(new_anchor, mem.anchor());
+            let edge_w = hebbian.get_bias_max(new_anchor, mem.anchor());
             contradictions.push(json!({
                 "conflict_with": desc,
                 "anchor": format!("{}", mem.anchor()),

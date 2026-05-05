@@ -449,7 +449,7 @@ impl DreamEngine {
             for j in (i + 1)..memories.len() {
                 let ai = memories[i].anchor();
                 let aj = memories[j].anchor();
-                let bias = hebbian.get_bias(ai, aj);
+                let bias = hebbian.get_bias_max(ai, aj);
                 if bias >= self.config.consolidation_hebbian_threshold {
                     let path = vec![*ai, *aj];
                     hebbian.record_path(&path, bias * 1.5);
@@ -584,7 +584,7 @@ impl DreamEngine {
             for j in (i + 1)..memories.len() {
                 let ai = memories[i].anchor();
                 let aj = memories[j].anchor();
-                let bias = hebbian.get_bias(ai, aj);
+                let bias = hebbian.get_bias_max(ai, aj);
                 if bias >= threshold {
                     let path = vec![*ai, *aj];
                     hebbian.record_path_emotion(&path, bias * emotion_weight, emotion_source);
