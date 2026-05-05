@@ -195,6 +195,68 @@ pub async fn perception_replenish(
     })))
 }
 
+pub async fn assess_novelty(
+    State(state): State<SharedState>,
+    Json(req): Json<NoveltyAssessRequest>,
+) -> Result<Json<ApiResponse<NoveltyAssessResponse>>, AppError> {
+    if req.data.is_empty() || req.data.len() > 64 {
+        return Err(AppError::BadRequest(format!(
+            "data length must be between 1 and 64, got {}",
+            req.data.len()
+        )));
+    }
+    for &v in &req.data {
+        if !v.is_finite() {
+            return Err(AppError::BadRequest(
+                "data values must be finite".to_string(),
+            ));
+        }
+    }
+
+    let anchor = crate::universe::coord::Coord7D::new_even(
+        req.anchor
+            .unwrap_or([0, 0, 0])
+            .into_iter()
+            .chain(std::iter::repeat(0))
+            .take(7)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or([0i32; 7]),
+    );
+
+    let (report, should_store) = {
+        let sem = state.semantic.read().await;
+        let mems = state.memories.read().await;
+        let h = state.hebbian.read().await;
+        let knn = sem.search_similar(&req.data, 5);
+        let knn_distances: Vec<(f64, usize)> = knn
+            .iter()
+            .filter_map(|r| {
+                mems.iter()
+                    .position(|m| {
+                        let mk = crate::universe::memory::AtomKey::from_atom(m);
+                        mk == r.atom_key
+                    })
+                    .map(|idx| (r.distance, idx))
+            })
+            .collect();
+        let detector = crate::universe::memory::NoveltyDetector::default();
+        let nr = detector.assess(&req.data, &knn_distances, &anchor, &h, &mems);
+        let ss = detector.should_store(&nr);
+        (nr, ss)
+    };
+
+    Ok(Json(ApiResponse::ok(NoveltyAssessResponse {
+        score: report.score,
+        level: format!("{}", report.level),
+        suggested_importance: report.suggested_importance,
+        wavelet_energy: report.wavelet_energy,
+        detail_energy: report.detail_energy,
+        anomaly_score: report.anomaly_score,
+        should_store,
+    })))
+}
+
 pub async fn semantic_status(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<SemanticStatusResponse>> {

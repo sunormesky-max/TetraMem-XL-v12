@@ -108,6 +108,12 @@ impl PersistSqlite {
         )
         .ok();
 
+        conn.execute_batch(
+            "ALTER TABLE hebbian_edges ADD COLUMN avg_delay_ms REAL NOT NULL DEFAULT 0.0;
+             ALTER TABLE hebbian_edges ADD COLUMN temporal_strength REAL NOT NULL DEFAULT 0.0;",
+        )
+        .ok();
+
         Ok(())
     }
 
@@ -181,10 +187,11 @@ impl PersistSqlite {
             let bb = edge.key.1.basis();
             let et: Option<String> = edge.emotion_tag.map(|s| format!("{:?}", s));
             tx.execute(
-                "INSERT INTO hebbian_edges (a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count,emotion_tag,emotion_weight) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+                "INSERT INTO hebbian_edges (a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count,emotion_tag,emotion_weight,avg_delay_ms,temporal_strength) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
                 params![ab[0], ab[1], ab[2], ab[3], ab[4], ab[5], ab[6], edge.key.0.is_even() as i32,
                          bb[0], bb[1], bb[2], bb[3], bb[4], bb[5], bb[6], edge.key.1.is_even() as i32,
-                         edge.weight, edge.traversal_count as i32, et, edge.emotion_weight],
+                         edge.weight, edge.traversal_count as i32, et, edge.emotion_weight,
+                         edge.avg_delay_ms, edge.temporal_strength],
             ).map_err(|e| SqliteError::Insert(e.to_string()))?;
         }
 
@@ -303,7 +310,7 @@ impl PersistSqlite {
         let mut hebbian = HebbianMemory::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count,emotion_tag,emotion_weight FROM hebbian_edges"
+                "SELECT a0,a1,a2,a3,a4,a5,a6,a_even,b0,b1,b2,b3,b4,b5,b6,b_even,weight,traversal_count,emotion_tag,emotion_weight,avg_delay_ms,temporal_strength FROM hebbian_edges"
             ).map_err(|e| SqliteError::Query(e.to_string()))?;
 
             #[allow(clippy::type_complexity)]
@@ -334,14 +341,36 @@ impl PersistSqlite {
                         row.get::<_, i32>(17)?,
                         row.get::<_, Option<String>>(18)?,
                         row.get::<_, f64>(19)?,
+                        row.get::<_, f64>(20)?,
+                        row.get::<_, f64>(21)?,
                     ))
                 })
                 .map_err(|e| SqliteError::Query(e.to_string()))?;
 
             for row in rows {
                 #[allow(clippy::type_complexity)]
-                let (ab, a_even, bb, b_even, weight, count, emotion_tag_str, emotion_weight): (
-                    [i32; 7], i32, [i32; 7], i32, f64, i32, Option<String>, f64,
+                let (
+                    ab,
+                    a_even,
+                    bb,
+                    b_even,
+                    weight,
+                    count,
+                    emotion_tag_str,
+                    emotion_weight,
+                    avg_delay_ms,
+                    temporal_strength,
+                ): (
+                    [i32; 7],
+                    i32,
+                    [i32; 7],
+                    i32,
+                    f64,
+                    i32,
+                    Option<String>,
+                    f64,
+                    f64,
+                    f64,
                 ) = row.map_err(|e| SqliteError::Query(e.to_string()))?;
                 let a = if a_even != 0 {
                     Coord7D::new_even(ab)
@@ -358,13 +387,15 @@ impl PersistSqlite {
                     "Functional" => Some(EmotionSource::Functional),
                     _ => None,
                 });
-                hebbian.restore_edge(
+                hebbian.restore_edge_full(
                     a,
                     b,
                     weight,
                     count.max(1) as usize,
                     emotion_tag,
                     emotion_weight,
+                    avg_delay_ms,
+                    temporal_strength,
                 );
             }
         }

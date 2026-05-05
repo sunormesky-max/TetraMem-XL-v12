@@ -35,6 +35,32 @@ pub async fn remember(
         cl.compute_ideal_anchor(&data, &u)
     };
 
+    let novelty_report = {
+        let sem = state.semantic.read().await;
+        let mems = state.memories.read().await;
+        let h = state.hebbian.read().await;
+        let knn = sem.search_similar(&data, 5);
+        let knn_distances: Vec<(f64, usize)> = knn
+            .iter()
+            .filter_map(|r| {
+                mems.iter()
+                    .position(|m| {
+                        let mk = crate::universe::memory::AtomKey::from_atom(m);
+                        mk == r.atom_key
+                    })
+                    .map(|idx| (r.distance, idx))
+            })
+            .collect();
+        let detector = crate::universe::memory::NoveltyDetector::default();
+        detector.assess(&data, &knn_distances, &anchor, &h, &mems)
+    };
+
+    let adjusted_importance = if importance < 0.01 {
+        novelty_report.suggested_importance
+    } else {
+        importance * 0.7 + novelty_report.suggested_importance * 0.3
+    };
+
     let mut u = state.universe.write().await;
     let mut mems = state.memories.write().await;
     let mut idx = state.memory_index.write().await;
@@ -66,7 +92,7 @@ pub async fn remember(
     atom.set_category(&category);
     atom.set_description(&content);
     atom.set_source(&source);
-    atom.set_importance(importance);
+    atom.set_importance(adjusted_importance);
 
     let anchor_str = format!("{}", atom.anchor());
     let created_at = atom.created_at();
@@ -100,6 +126,15 @@ pub async fn remember(
             "manifested": manifested,
             "created_at": created_at,
             "conservation_ok": conservation_ok,
+            "novelty": {
+                "score": novelty_report.score,
+                "level": format!("{}", novelty_report.level),
+                "suggested_importance": novelty_report.suggested_importance,
+                "adjusted_importance": adjusted_importance,
+                "wavelet_energy": novelty_report.wavelet_energy,
+                "detail_energy": novelty_report.detail_energy,
+                "anomaly_score": novelty_report.anomaly_score,
+            },
         }))),
     ))
 }

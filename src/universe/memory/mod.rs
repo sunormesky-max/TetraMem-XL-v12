@@ -7,6 +7,7 @@ pub mod hebbian;
 #[allow(clippy::module_inception)]
 pub mod memory;
 pub mod nlp;
+pub mod perception;
 pub mod pulse;
 pub mod semantic;
 
@@ -17,6 +18,10 @@ pub use clustering::{
 };
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
 pub use nlp::{detect_contradictions, synonym_bucket, text_to_anchor, text_to_embedding};
+pub use perception::{
+    wavelet_decompose, wavelet_features, NoveltyConfig, NoveltyDetector, NoveltyLevel,
+    NoveltyReport,
+};
 pub use semantic::{
     AtomKey, Concept, DreamSyncReport, EmbeddingIndex, InferenceReport, KnnResult, KnowledgeGraph,
     MultihopResult, QueryFilter, QueryHit, Relation, RelationType, SemanticAnalogy, SemanticConfig,

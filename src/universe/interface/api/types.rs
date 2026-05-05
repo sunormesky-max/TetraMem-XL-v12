@@ -89,6 +89,36 @@ pub struct EncodeResponse {
     pub data_dim: usize,
     pub manifested: bool,
     pub created_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub novelty: Option<NoveltyInfo>,
+}
+
+#[derive(Serialize)]
+pub struct NoveltyInfo {
+    pub score: f64,
+    pub level: String,
+    pub suggested_importance: f64,
+    pub adjusted_importance: f64,
+    pub wavelet_energy: f64,
+    pub detail_energy: f64,
+    pub anomaly_score: f64,
+}
+
+#[derive(Deserialize)]
+pub struct NoveltyAssessRequest {
+    pub data: Vec<f64>,
+    pub anchor: Option<[i32; 3]>,
+}
+
+#[derive(Serialize)]
+pub struct NoveltyAssessResponse {
+    pub score: f64,
+    pub level: String,
+    pub suggested_importance: f64,
+    pub wavelet_energy: f64,
+    pub detail_energy: f64,
+    pub anomaly_score: f64,
+    pub should_store: bool,
 }
 
 #[derive(Deserialize)]

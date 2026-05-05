@@ -28,10 +28,10 @@ use super::cluster_ops::{
     cluster_add_node, cluster_init, cluster_propose, cluster_remove_node, cluster_status,
 };
 use super::cognitive::{
-    agent_execute_crystal, agent_execute_emotion, agent_execute_observer, clustering_maintenance,
-    clustering_status, constitution_status, events_status, fire_pulse, perception_replenish,
-    perception_status, regulate, run_dream, semantic_extract_concepts, semantic_index_all,
-    semantic_status, watchdog_checkup, watchdog_status,
+    agent_execute_crystal, agent_execute_emotion, agent_execute_observer, assess_novelty,
+    clustering_maintenance, clustering_status, constitution_status, events_status, fire_pulse,
+    perception_replenish, perception_status, regulate, run_dream, semantic_extract_concepts,
+    semantic_index_all, semantic_status, watchdog_checkup, watchdog_status,
 };
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
@@ -334,6 +334,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/emotion/dream", post(emotion_dream))
         .route("/emotion/status", get(emotion_status))
         .route("/perception/status", get(perception_status))
+        .route("/perception/assess", post(assess_novelty))
         .route("/semantic/status", get(semantic_status))
         .route("/clustering/status", get(clustering_status))
         .route("/constitution/status", get(constitution_status))

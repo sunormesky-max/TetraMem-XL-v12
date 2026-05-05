@@ -42,6 +42,10 @@ pub struct EdgeSnapshot {
     pub emotion_tag: Option<String>,
     #[serde(default)]
     pub emotion_weight: f64,
+    #[serde(default)]
+    pub avg_delay_ms: f64,
+    #[serde(default)]
+    pub temporal_strength: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -155,6 +159,8 @@ impl PersistEngine {
                 traversal_count: e.traversal_count,
                 emotion_tag: e.emotion_tag.map(|s| format!("{:?}", s)),
                 emotion_weight: e.emotion_weight,
+                avg_delay_ms: e.avg_delay_ms,
+                temporal_strength: e.temporal_strength,
             })
             .collect();
         edges.sort_by(|a, b| {
@@ -409,13 +415,15 @@ impl PersistEngine {
                 "Functional" => Some(EmotionSource::Functional),
                 _ => None,
             });
-            hebbian.restore_edge(
+            hebbian.restore_edge_full(
                 a,
                 b,
                 es.weight,
                 es.traversal_count,
                 emotion_tag,
                 es.emotion_weight,
+                es.avg_delay_ms,
+                es.temporal_strength,
             );
         }
 
