@@ -14,7 +14,7 @@ use crate::universe::crystal::CrystalEngine;
 use crate::universe::events::EventBus;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
-use crate::universe::memory::{ClusteringEngine, SemanticEngine};
+use crate::universe::memory::{ClusteringEngine, InterestProfile, SemanticEngine, SurfacedMemory};
 use crate::universe::node::DarkUniverse;
 use crate::universe::perception::PerceptionBudget;
 use crate::universe::watchdog::Watchdog;
@@ -34,6 +34,8 @@ pub struct AppState {
     pub watchdog: RwLock<Watchdog>,
     pub backup: RwLock<BackupScheduler>,
     pub cluster: Mutex<ClusterManager>,
+    pub interests: RwLock<HashMap<String, InterestProfile>>,
+    pub memory_stream: tokio::sync::broadcast::Sender<SurfacedMemory>,
     pub config: AppConfig,
     pub jwt: JwtConfig,
     pub users: UserStore,

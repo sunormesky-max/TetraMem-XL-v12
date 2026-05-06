@@ -168,6 +168,20 @@ pub async fn encode_memory(
                 data_dim,
                 importance,
             });
+
+            {
+                let interests = state.interests.read().await;
+                let h_surf = state.hebbian.read().await;
+                let surfacer = crate::universe::memory::MemorySurfacer::default();
+                let surfaced =
+                    surfacer.surface(&anchor, &h_surf, &mems, &interests, novelty_report.score);
+                drop(interests);
+                drop(h_surf);
+                for sm in surfaced {
+                    let _ = state.memory_stream.send(sm);
+                }
+            }
+
             Ok((
                 StatusCode::OK,
                 Json(ApiResponse::ok(EncodeResponse {

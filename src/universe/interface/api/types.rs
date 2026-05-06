@@ -530,3 +530,8 @@ pub fn validate_data_dim(data: &[f64]) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[derive(Deserialize)]
+pub struct UnregisterInterestRequest {
+    pub agent_id: String,
+}

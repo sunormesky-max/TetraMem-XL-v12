@@ -10,6 +10,7 @@ pub mod nlp;
 pub mod perception;
 pub mod pulse;
 pub mod semantic;
+pub mod surfacing;
 
 pub use clustering::{
     dark_coords_from_data, semantic_distance, BridgeEdge, BridgeType, ClusteringConfig,
@@ -26,4 +27,8 @@ pub use semantic::{
     AtomKey, Concept, DreamSyncReport, EmbeddingIndex, InferenceReport, KnnResult, KnowledgeGraph,
     MultihopResult, QueryFilter, QueryHit, Relation, RelationType, SemanticAnalogy, SemanticConfig,
     SemanticEmbedding, SemanticEngine, SemanticQuery, SemanticReport,
+};
+pub use surfacing::{
+    create_broadcast_channel, matches_interest, ActivationEngine, InterestProfile, MemorySurfacer,
+    SurfacedMemory, SurfacedReason,
 };

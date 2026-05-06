@@ -50,6 +50,8 @@ fn build_state() -> Arc<AppState> {
         ),
         backup: tokio::sync::RwLock::new(BackupScheduler::with_defaults()),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
+        interests: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        memory_stream: tetramem_v12::universe::memory::create_broadcast_channel(),
         config,
         jwt: JwtConfig::new("test-secret".to_string(), 3600),
         users: UserStore::new(

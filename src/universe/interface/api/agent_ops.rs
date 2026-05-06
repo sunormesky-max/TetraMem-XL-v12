@@ -118,6 +118,16 @@ pub async fn remember(
 
     let conservation_ok = u.verify_conservation();
 
+    {
+        let interests = state.interests.read().await;
+        let surfacer = crate::universe::memory::MemorySurfacer::default();
+        let surfaced = surfacer.surface(&anchor, &h, &mems, &interests, novelty_report.score);
+        drop(interests);
+        for sm in surfaced {
+            let _ = state.memory_stream.send(sm);
+        }
+    }
+
     Ok((
         StatusCode::OK,
         Json(ApiResponse::ok(json!({

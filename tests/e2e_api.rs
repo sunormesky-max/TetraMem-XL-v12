@@ -47,6 +47,8 @@ fn make_test_state() -> Arc<AppState> {
         watchdog: tokio::sync::RwLock::new(Watchdog::with_defaults(10000.0)),
         backup: tokio::sync::RwLock::new(BackupScheduler::new(BackupConfig::default())),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
+        interests: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        memory_stream: tetramem_v12::universe::memory::create_broadcast_channel(),
         jwt: JwtConfig::new("test-secret".to_string(), 86400),
         users: UserStore::new(&[], "test-secret"),
         config,

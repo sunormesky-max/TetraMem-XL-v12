@@ -16,6 +16,7 @@ pub mod router;
 pub mod scale;
 pub mod server;
 pub mod state;
+pub mod streaming_ops;
 pub mod types;
 
 pub use router::create_router;

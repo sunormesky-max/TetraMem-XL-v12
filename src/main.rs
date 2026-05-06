@@ -191,6 +191,8 @@ fn main() {
                         config.server.addr.clone(),
                     ),
                 ),
+                interests: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+                memory_stream: tetramem_v12::universe::memory::create_broadcast_channel(),
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
                 users: UserStore::new(&config.auth.users, &config.auth.jwt_secret),
