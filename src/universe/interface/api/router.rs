@@ -29,9 +29,10 @@ use super::cluster_ops::{
 };
 use super::cognitive::{
     agent_execute_crystal, agent_execute_emotion, agent_execute_observer, assess_novelty,
-    clustering_maintenance, clustering_status, constitution_status, events_status, fire_pulse,
-    perception_replenish, perception_status, regulate, run_dream, semantic_extract_concepts,
-    semantic_index_all, semantic_status, watchdog_checkup, watchdog_status,
+    clustering_maintenance, clustering_status, constitution_status, detect_contradictions,
+    events_status, fire_pulse, memory_aging, perception_replenish, perception_status, regulate,
+    run_dream, semantic_extract_concepts, semantic_index_all, semantic_status, watchdog_checkup,
+    watchdog_status,
 };
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
@@ -41,7 +42,7 @@ use super::emotion_ops::{emotion_crystallize, emotion_dream, emotion_pulse, emot
 use super::health::{get_health, get_metrics, get_openapi, get_stats};
 use super::memory_ops::{
     annotate_memory, decode_memory, encode_memory, list_memories, memory_timeline, memory_trace,
-    semantic_relations, semantic_search, semantic_text_query,
+    reconstruct, semantic_relations, semantic_search, semantic_text_query, temporal_predict,
 };
 use super::phase::{
     detect_phase_transition, phase_consensus, quorum_confirm, quorum_execute, quorum_start,
@@ -322,6 +323,10 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/memory/timeline", get(memory_timeline))
         .route("/memory/trace", post(memory_trace))
         .route("/memory/annotate", post(annotate_memory))
+        .route("/memory/predict", post(temporal_predict))
+        .route("/memory/reconstruct", post(reconstruct))
+        .route("/memory/aging", post(memory_aging))
+        .route("/memory/contradictions", get(detect_contradictions))
         .route("/memory/remember", post(remember))
         .route("/memory/recall", post(recall))
         .route("/memory/associate", post(associate))

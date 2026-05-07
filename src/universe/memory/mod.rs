@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+pub mod aging;
 pub mod clustering;
+pub mod contradiction;
 pub mod dream;
 pub mod hebbian;
 #[allow(clippy::module_inception)]
@@ -12,10 +14,14 @@ pub mod pulse;
 pub mod semantic;
 pub mod surfacing;
 
+pub use aging::{AgingConfig, AgingEngine, AgingReport};
 pub use clustering::{
     dark_coords_from_data, semantic_distance, BridgeEdge, BridgeType, ClusteringConfig,
     ClusteringEngine, ClusteringReport, DarkGravityField, ResonanceTunnel, SemanticAnchorPlacer,
     TopologyBridge, TunnelEdge,
+};
+pub use contradiction::{
+    ContradictionDetector, ContradictionPair, ContradictionReport, MergeCandidate,
 };
 pub use memory::{MemoryAtom, MemoryCodec, MemoryError};
 pub use nlp::{detect_contradictions, synonym_bucket, text_to_anchor, text_to_embedding};

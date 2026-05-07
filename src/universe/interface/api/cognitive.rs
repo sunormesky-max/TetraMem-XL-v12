@@ -466,3 +466,40 @@ pub async fn agent_execute_crystal(
         details: report.details,
     }))
 }
+
+pub async fn memory_aging(
+    State(state): State<SharedState>,
+    Json(req): Json<super::types::AgingRequest>,
+) -> Result<Json<ApiResponse<super::types::AgingResponse>>, AppError> {
+    let accessed = req.accessed_anchors.unwrap_or_default();
+    let mut mems = state.memories.write().await;
+    let engine = crate::universe::memory::AgingEngine::default();
+    let report = engine.age(&mut mems, &accessed);
+    let flagged = engine
+        .flagged_memories(&mems)
+        .iter()
+        .map(|(_, m)| format!("{}", m.anchor()))
+        .collect();
+    Ok(Json(ApiResponse::ok(super::types::AgingResponse {
+        aged_count: report.aged_count,
+        flagged_for_forget: report.flagged_for_forget,
+        boosted_count: report.boosted_count,
+        min_importance: report.min_importance,
+        avg_importance: report.avg_importance,
+        flagged_anchors: flagged,
+    })))
+}
+
+pub async fn detect_contradictions(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let mems = state.memories.read().await;
+    let detector = crate::universe::memory::ContradictionDetector::default();
+    let report = detector.detect(&mems);
+    Json(ApiResponse::ok(serde_json::json!({
+        "contradictions": report.contradictions.len(),
+        "merge_candidates": report.merge_candidates.len(),
+        "contradiction_details": report.contradictions,
+        "merge_details": report.merge_candidates,
+    })))
+}

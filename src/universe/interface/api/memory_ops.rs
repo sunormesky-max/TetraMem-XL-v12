@@ -552,3 +552,74 @@ pub async fn semantic_relations(
         relations: vec![],
     })))
 }
+
+pub async fn temporal_predict(
+    State(state): State<SharedState>,
+    Json(req): Json<PredictRequest>,
+) -> Result<Json<ApiResponse<PredictResponse>>, AppError> {
+    validate_coord_3(&req.anchor)?;
+    let max_steps = req.max_steps.unwrap_or(5).min(20);
+    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let sequence = h.get_temporal_sequence(&anchor, max_steps);
+
+    let predictions: Vec<PredictedMemory> = sequence
+        .into_iter()
+        .enumerate()
+        .filter_map(|(step, (coord, strength))| {
+            let mem = mems.iter().find(|m| m.anchor() == &coord)?;
+            Some(PredictedMemory {
+                anchor: format!("{}", mem.anchor()),
+                step: step + 1,
+                temporal_strength: strength,
+                avg_delay_ms: 0.0,
+                description: mem.description().map(String::from),
+            })
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::ok(PredictResponse { predictions })))
+}
+
+pub async fn reconstruct(
+    State(state): State<SharedState>,
+    Json(req): Json<ReconstructRequest>,
+) -> Result<Json<ApiResponse<ReconstructResponse>>, AppError> {
+    validate_coord_3(&req.anchor)?;
+    let max_hops = req.max_hops.unwrap_or(5).min(20);
+    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor_str = format!("{}", &anchor);
+
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let idx = state.memory_index.read().await;
+
+    let reconstructed =
+        crate::universe::HebbianMemory::reconstruct_from_cue(&h, &anchor, &mems, &idx, max_hops);
+
+    let results: Vec<ReconstructedMemory> = match reconstructed {
+        Some(items) => items
+            .into_iter()
+            .enumerate()
+            .map(|(hop, (coord, weight, _data))| {
+                let mem = mems.iter().find(|m| m.anchor() == &coord);
+                ReconstructedMemory {
+                    anchor: format!("{}", coord),
+                    hop: hop + 1,
+                    edge_weight: weight,
+                    description: mem.and_then(|m| m.description().map(String::from)),
+                    tags: mem.map(|m| m.tags().to_vec()).unwrap_or_default(),
+                    importance: mem.map(|m| m.importance()).unwrap_or(0.0),
+                }
+            })
+            .collect(),
+        None => vec![],
+    };
+
+    Ok(Json(ApiResponse::ok(ReconstructResponse {
+        seed_anchor: anchor_str,
+        reconstructed: results,
+    })))
+}

@@ -535,3 +535,60 @@ pub fn validate_data_dim(data: &[f64]) -> Result<(), String> {
 pub struct UnregisterInterestRequest {
     pub agent_id: String,
 }
+
+#[derive(Deserialize)]
+pub struct PredictRequest {
+    pub anchor: [i32; 3],
+    pub max_steps: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct ReconstructRequest {
+    pub anchor: [i32; 3],
+    pub max_hops: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct PredictResponse {
+    pub predictions: Vec<PredictedMemory>,
+}
+
+#[derive(Serialize)]
+pub struct PredictedMemory {
+    pub anchor: String,
+    pub step: usize,
+    pub temporal_strength: f64,
+    pub avg_delay_ms: f64,
+    pub description: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ReconstructResponse {
+    pub seed_anchor: String,
+    pub reconstructed: Vec<ReconstructedMemory>,
+}
+
+#[derive(Serialize)]
+pub struct ReconstructedMemory {
+    pub anchor: String,
+    pub hop: usize,
+    pub edge_weight: f64,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub importance: f64,
+}
+
+#[derive(Deserialize)]
+pub struct AgingRequest {
+    pub accessed_anchors: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub struct AgingResponse {
+    pub aged_count: usize,
+    pub flagged_for_forget: usize,
+    pub boosted_count: usize,
+    pub min_importance: f64,
+    pub avg_importance: f64,
+    pub flagged_anchors: Vec<String>,
+}
