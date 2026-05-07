@@ -76,3 +76,77 @@ impl Default for SkillRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::skills::types::{Skill, SkillContext, SkillError, SkillSignature};
+    use serde_json::{json, Value};
+
+    struct DummySkill;
+    impl Skill for DummySkill {
+        fn signature(&self) -> SkillSignature {
+            SkillSignature {
+                name: "dummy".into(),
+                version: "1.0".into(),
+                description: "test".into(),
+                input_schema: json!({}),
+                output_schema: json!({}),
+            }
+        }
+        fn execute(&self, _ctx: &mut SkillContext, _args: &Value) -> Result<Value, SkillError> {
+            Ok(json!({"ok": true}))
+        }
+    }
+
+    #[test]
+    fn new_registry_is_empty() {
+        let r = SkillRegistry::new();
+        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
+    }
+
+    #[test]
+    fn register_and_get() {
+        let mut r = SkillRegistry::new();
+        r.register(DummySkill);
+        assert_eq!(r.len(), 1);
+        assert!(r.contains("dummy"));
+        assert!(!r.contains("nonexistent"));
+        let skill = r.get("dummy").unwrap();
+        let sig = skill.signature();
+        assert_eq!(sig.name, "dummy");
+    }
+
+    #[test]
+    fn list_returns_descriptors() {
+        let mut r = SkillRegistry::new();
+        r.register(DummySkill);
+        let list = r.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "dummy");
+    }
+
+    #[test]
+    fn signatures_returns_all() {
+        let mut r = SkillRegistry::new();
+        r.register(DummySkill);
+        let sigs = r.signatures();
+        assert_eq!(sigs.len(), 1);
+    }
+
+    #[test]
+    fn builtin_register_all() {
+        let mut r = SkillRegistry::new();
+        crate::skills::builtin::register_all(&mut r);
+        assert!(r.len() >= 8);
+        assert!(r.contains("encode_memory"));
+        assert!(r.contains("decode_memory"));
+        assert!(r.contains("fire_pulse"));
+        assert!(r.contains("run_dream"));
+        assert!(r.contains("analyze_topology"));
+        assert!(r.contains("regulate_dimensions"));
+        assert!(r.contains("trace_associations"));
+        assert!(r.contains("check_conservation"));
+    }
+}

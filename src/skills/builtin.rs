@@ -259,3 +259,211 @@ pub fn register_all(registry: &mut super::registry::SkillRegistry) {
     registry.register(trace_associations::Skill);
     registry.register(check_conservation::Skill);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::skills::types::{Skill, SkillContext, SkillError};
+    use crate::universe::crystal::CrystalEngine;
+    use crate::universe::hebbian::HebbianMemory;
+    use crate::universe::memory::MemoryAtom;
+    use crate::universe::node::DarkUniverse;
+    use serde_json::json;
+
+    fn make_context() -> SkillContext<'static> {
+        let u = Box::new(DarkUniverse::new(10000.0));
+        let h = Box::new(HebbianMemory::new());
+        let m = Box::new(Vec::<MemoryAtom>::new());
+        let c = Box::new(CrystalEngine::new());
+        SkillContext {
+            universe: Box::leak(u),
+            hebbian: Box::leak(h),
+            memories: Box::leak(m),
+            crystal: Box::leak(c),
+        }
+    }
+
+    #[test]
+    fn skill_signatures() {
+        assert_eq!(encode_memory::Skill.signature().name, "encode_memory");
+        assert_eq!(decode_memory::Skill.signature().name, "decode_memory");
+        assert_eq!(fire_pulse::Skill.signature().name, "fire_pulse");
+        assert_eq!(run_dream::Skill.signature().name, "run_dream");
+        assert_eq!(analyze_topology::Skill.signature().name, "analyze_topology");
+        assert_eq!(
+            regulate_dimensions::Skill.signature().name,
+            "regulate_dimensions"
+        );
+        assert_eq!(
+            trace_associations::Skill.signature().name,
+            "trace_associations"
+        );
+        assert_eq!(
+            check_conservation::Skill.signature().name,
+            "check_conservation"
+        );
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let mut ctx = make_context();
+        let enc = encode_memory::Skill
+            .execute(
+                &mut ctx,
+                &json!({"anchor": [3, 5, 7], "data": [1.0, 2.0, 3.0]}),
+            )
+            .unwrap();
+        assert_eq!(enc["dimensions"], 3);
+        assert_eq!(enc["conservation_ok"], true);
+
+        let dec = decode_memory::Skill
+            .execute(&mut ctx, &json!({"anchor": [3, 5, 7]}))
+            .unwrap();
+        assert_eq!(dec["dimensions"], 3);
+    }
+
+    #[test]
+    fn encode_invalid_anchor() {
+        let mut ctx = make_context();
+        let result = encode_memory::Skill.execute(&mut ctx, &json!({"anchor": [1], "data": [1.0]}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn encode_empty_data() {
+        let mut ctx = make_context();
+        let result =
+            encode_memory::Skill.execute(&mut ctx, &json!({"anchor": [1, 2, 3], "data": []}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_missing() {
+        let mut ctx = make_context();
+        let result = decode_memory::Skill.execute(&mut ctx, &json!({"anchor": [99, 99, 99]}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fire_pulse_skill() {
+        let mut ctx = make_context();
+        encode_memory::Skill
+            .execute(&mut ctx, &json!({"anchor": [0, 0, 0], "data": [1.0]}))
+            .unwrap();
+        let result = fire_pulse::Skill
+            .execute(
+                &mut ctx,
+                &json!({"source": [0, 0, 0], "pulse_type": "reinforcing"}),
+            )
+            .unwrap();
+        assert!(result["visited"].is_number());
+    }
+
+    #[test]
+    fn fire_pulse_invalid_type() {
+        let mut ctx = make_context();
+        let result =
+            fire_pulse::Skill.execute(&mut ctx, &json!({"source": [0, 0, 0], "pulse_type": "bad"}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_dream_skill() {
+        let mut ctx = make_context();
+        let result = run_dream::Skill.execute(&mut ctx, &json!({})).unwrap();
+        assert!(result["edges_before"].is_number());
+        assert!(result["edges_after"].is_number());
+    }
+
+    #[test]
+    fn analyze_topology_skill() {
+        let mut ctx = make_context();
+        let result = analyze_topology::Skill
+            .execute(&mut ctx, &json!({}))
+            .unwrap();
+        assert!(result["betti"].is_string());
+        assert!(result["components"].is_number());
+    }
+
+    #[test]
+    fn regulate_dimensions_skill() {
+        let mut ctx = make_context();
+        let result = regulate_dimensions::Skill
+            .execute(&mut ctx, &json!({}))
+            .unwrap();
+        assert!(result["stress"].is_number());
+    }
+
+    #[test]
+    fn trace_associations_skill() {
+        let mut ctx = make_context();
+        let result = trace_associations::Skill
+            .execute(&mut ctx, &json!({"anchor": [0, 0, 0], "max_hops": 3}))
+            .unwrap();
+        assert!(result["total"].is_number());
+    }
+
+    #[test]
+    fn check_conservation_skill() {
+        let mut ctx = make_context();
+        let result = check_conservation::Skill
+            .execute(&mut ctx, &json!({}))
+            .unwrap();
+        assert_eq!(result["conserved"], true);
+    }
+
+    #[test]
+    fn parse_anchor_valid() {
+        let args = json!({"anchor": [1, 2, 3]});
+        let c = parse_anchor(&args).unwrap();
+        assert_eq!(c.basis(), [1, 2, 3, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn parse_coord_missing() {
+        let args = json!({});
+        let result = parse_coord(&args, "source");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_data_valid() {
+        let args = json!({"data": [1.0, 2.0, 3.0]});
+        let d = parse_data(&args).unwrap();
+        assert_eq!(d.len(), 3);
+    }
+
+    #[test]
+    fn parse_data_empty_fails() {
+        let args = json!({"data": []});
+        assert!(parse_data(&args).is_err());
+    }
+
+    #[test]
+    fn parse_data_missing_fails() {
+        let args = json!({});
+        assert!(parse_data(&args).is_err());
+    }
+
+    #[test]
+    fn parse_pulse_type_valid() {
+        let args = json!({"pulse_type": "reinforcing"});
+        assert_eq!(parse_pulse_type(&args).unwrap(), PulseType::Reinforcing);
+        let args = json!({"pulse_type": "exploratory"});
+        assert_eq!(parse_pulse_type(&args).unwrap(), PulseType::Exploratory);
+        let args = json!({"pulse_type": "cascade"});
+        assert_eq!(parse_pulse_type(&args).unwrap(), PulseType::Cascade);
+    }
+
+    #[test]
+    fn parse_pulse_type_invalid() {
+        let args = json!({"pulse_type": "teleport"});
+        assert!(parse_pulse_type(&args).is_err());
+    }
+
+    #[test]
+    fn skill_error_display() {
+        let e = SkillError::new("test_skill", "something broke");
+        assert_eq!(format!("{}", e), "SkillError[test_skill]: something broke");
+    }
+}

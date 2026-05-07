@@ -68,7 +68,8 @@ impl TetraMemCore {
         importance: f64,
         source: &str,
     ) -> Value {
-        let data = nlp::text_to_embedding(content, importance);
+        let full_embedding = nlp::text_to_embedding(content, importance);
+        let data: Vec<f64> = full_embedding.into_iter().take(28).collect();
         let anchor = self.clustering.compute_ideal_anchor(&data, &self.universe);
 
         let result =
@@ -258,5 +259,117 @@ impl TetraMemCore {
             "available_energy": stats.available_energy,
             "violation": (stats.total_energy - stats.allocated_energy - stats.available_energy).abs(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_core_has_empty_state() {
+        let core = TetraMemCore::new(500.0);
+        assert!(core.memories.is_empty());
+        assert!(core.context_window.is_empty());
+        assert_eq!(core.context_max_tokens, 4096);
+        assert_eq!(core.hebbian.edge_count(), 0);
+    }
+
+    #[test]
+    fn stats_reflects_initial_state() {
+        let core = TetraMemCore::new(1000.0);
+        let stats = core.stats();
+        assert_eq!(stats["memory_count"], 0);
+        assert_eq!(stats["conservation_ok"], true);
+    }
+
+    #[test]
+    fn remember_creates_memory() {
+        let mut core = TetraMemCore::new(1_000_000.0);
+        let result = core.remember(
+            "test content",
+            &["tag1".to_string()],
+            "test_category",
+            0.7,
+            "test_source",
+        );
+        assert_eq!(result["success"], true, "remember failed: {:?}", result);
+        assert_eq!(core.memories.len(), 1);
+        let mem = &core.memories[0];
+        assert_eq!(mem.description(), Some("test content"));
+        assert_eq!(mem.category(), Some("test_category"));
+        assert!((mem.importance() - 0.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn remember_with_tags() {
+        let mut core = TetraMemCore::new(1_000_000.0);
+        let result = core.remember(
+            "tagged",
+            &["a".to_string(), "b".to_string()],
+            "general",
+            0.5,
+            "agent",
+        );
+        assert_eq!(result["success"], true, "remember failed: {:?}", result);
+        assert_eq!(core.memories[0].tags().len(), 2);
+    }
+
+    #[test]
+    fn remember_decision_category() {
+        let mut core = TetraMemCore::new(1_000_000.0);
+        let result = core.remember("a decision", &[], "decision", 0.9, "user");
+        assert_eq!(result["success"], true, "remember failed: {:?}", result);
+        assert_eq!(result["decision_logged"], true);
+    }
+
+    #[test]
+    fn forget_removes_memory() {
+        let mut core = TetraMemCore::new(1_000_000.0);
+        let r = core.remember("to be forgotten", &[], "general", 0.5, "agent");
+        assert_eq!(r["success"], true, "remember failed: {:?}", r);
+        assert_eq!(core.memories.len(), 1);
+        let anchor = *core.memories[0].anchor();
+        let result = core.forget(&anchor).unwrap();
+        assert_eq!(result["success"], true);
+        assert!(core.memories.is_empty());
+    }
+
+    #[test]
+    fn forget_nonexistent_fails() {
+        let mut core = TetraMemCore::new(1000.0);
+        let anchor = Coord7D::new_even([99, 99, 99, 0, 0, 0, 0]);
+        assert!(core.forget(&anchor).is_err());
+    }
+
+    #[test]
+    fn find_memory_by_basis() {
+        let mut core = TetraMemCore::new(1_000_000.0);
+        let r = core.remember("findable", &[], "general", 0.5, "agent");
+        assert_eq!(r["success"], true, "remember failed: {:?}", r);
+        let basis = core.memories[0].anchor().basis();
+        assert!(core.find_memory_by_basis(&basis).is_some());
+        assert!(core.find_memory_by_basis(&[99; 7]).is_none());
+    }
+
+    #[test]
+    fn conservation_check_initial() {
+        let core = TetraMemCore::new(1_000_000.0);
+        let check = core.conservation_check();
+        assert_eq!(check["conservation_ok"], true);
+        assert_eq!(check["total_energy"], 1_000_000.0);
+    }
+
+    #[test]
+    fn multiple_remembers_preserve_conservation() {
+        let mut core = TetraMemCore::new(10_000_000.0);
+        for i in 0..20 {
+            let r = core.remember(&format!("memory number {}", i), &[], "general", 0.5, "test");
+            if r["success"] != true {
+                break;
+            }
+        }
+        assert!(!core.memories.is_empty());
+        assert!(core.universe.verify_conservation());
     }
 }

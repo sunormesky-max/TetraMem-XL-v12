@@ -1674,3 +1674,600 @@ fn handle_forget(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
         Err(e) => super::protocol::ToolCallResult::err(e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcp::core::TetraMemCore;
+
+    fn make_core() -> TetraMemCore {
+        TetraMemCore::new(1_000_000.0)
+    }
+
+    fn ok_text(result: &super::super::protocol::ToolCallResult) -> &str {
+        assert!(result.is_error.is_none(), "expected ok, got error");
+        &result.content[0].text
+    }
+
+    fn err_text(result: &super::super::protocol::ToolCallResult) -> &str {
+        assert_eq!(result.is_error, Some(true), "expected error");
+        &result.content[0].text
+    }
+
+    fn parse_json(result: &super::super::protocol::ToolCallResult) -> Value {
+        serde_json::from_str(ok_text(result)).expect("valid json")
+    }
+
+    #[test]
+    fn definitions_count() {
+        let defs = TetraMemTools::definitions();
+        assert!(defs.len() >= 22, "should have at least 22 tools");
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"tetramem_stats"));
+        assert!(names.contains(&"tetramem_encode"));
+        assert!(names.contains(&"tetramem_remember"));
+        assert!(names.contains(&"tetramem_forget"));
+    }
+
+    #[test]
+    fn resources_count() {
+        let res = TetraMemTools::resources();
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0].uri, "tetramem://stats");
+        assert_eq!(res[1].uri, "tetramem://health");
+    }
+
+    #[test]
+    fn read_resource_stats() {
+        let core = make_core();
+        let content = TetraMemTools::read_resource("tetramem://stats", &core);
+        assert!(content.is_some());
+        let c = content.unwrap();
+        assert!(c.text.contains("active_nodes"));
+    }
+
+    #[test]
+    fn read_resource_health() {
+        let core = make_core();
+        let content = TetraMemTools::read_resource("tetramem://health", &core);
+        assert!(content.is_some());
+        let c = content.unwrap();
+        assert!(c.text.contains("health_level"));
+    }
+
+    #[test]
+    fn read_resource_unknown() {
+        let core = make_core();
+        assert!(TetraMemTools::read_resource("tetramem://nonexistent", &core).is_none());
+    }
+
+    #[test]
+    fn parse_3d_coord_valid() {
+        let args = json!({"anchor": [1, 2, 3]});
+        let c = parse_3d_coord(&args, "anchor").unwrap();
+        assert_eq!(c.basis(), [1, 2, 3, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn parse_3d_coord_missing() {
+        let args = json!({});
+        assert!(parse_3d_coord(&args, "anchor").is_err());
+    }
+
+    #[test]
+    fn parse_3d_coord_wrong_len() {
+        let args = json!({"anchor": [1, 2]});
+        assert!(parse_3d_coord(&args, "anchor").is_err());
+    }
+
+    #[test]
+    fn parse_3d_coord_non_integer() {
+        let args = json!({"anchor": [1.5, 2.0, 3.0]});
+        assert!(parse_3d_coord(&args, "anchor").is_err());
+    }
+
+    #[test]
+    fn handle_stats() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_stats", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["conservation_ok"], true);
+        assert_eq!(v["memory_count"], 0);
+    }
+
+    #[test]
+    fn handle_health() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_health", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["health_level"].is_string());
+    }
+
+    #[test]
+    fn handle_encode_decode_roundtrip() {
+        let mut core = make_core();
+        let enc_result = TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [0, 0, 0], "data": [1.0, 2.0, 3.0]}),
+            &mut core,
+        );
+        let enc = parse_json(&enc_result);
+        assert_eq!(enc["success"], true);
+        assert_eq!(enc["dimensions"], 3);
+
+        let dec_result =
+            TetraMemTools::handle_tool("tetramem_decode", &json!({"anchor": [0, 0, 0]}), &mut core);
+        let dec = parse_json(&dec_result);
+        assert_eq!(dec["dimensions"], 3);
+    }
+
+    #[test]
+    fn handle_encode_empty_data() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [1, 2, 3], "data": []}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_encode_too_many_dims() {
+        let mut core = make_core();
+        let data: Vec<f64> = (0..30).map(|i| i as f64).collect();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [1, 2, 3], "data": data}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_decode_missing() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_decode",
+            &json!({"anchor": [99, 99, 99]}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_list_memories_empty() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_list_memories", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["count"], 0);
+    }
+
+    #[test]
+    fn handle_pulse() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [0, 0, 0], "data": [1.0, 2.0]}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_pulse",
+            &json!({"source": [0, 0, 0], "pulse_type": "reinforcing"}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert!(v["visited_nodes"].is_number());
+    }
+
+    #[test]
+    fn handle_pulse_invalid_type() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_pulse",
+            &json!({"source": [0, 0, 0], "pulse_type": "invalid"}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_dream() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [1, 2, 3], "data": [1.0]}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool("tetramem_dream", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["edges_before"].is_number());
+        assert!(v["conservation_ok"].is_boolean());
+    }
+
+    #[test]
+    fn handle_topology() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_topology", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["betti"].is_string());
+        assert!(v["euler_characteristic"].is_number());
+    }
+
+    #[test]
+    fn handle_regulate() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_regulate", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["stress_level"].is_number());
+        assert!(v["conservation_ok"].is_boolean());
+    }
+
+    #[test]
+    fn handle_trace() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_trace",
+            &json!({"anchor": [0, 0, 0], "max_hops": 5}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert!(v["total"].is_number());
+    }
+
+    #[test]
+    fn handle_phase_detect() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_phase_detect", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["phase_coherent"].is_boolean());
+    }
+
+    #[test]
+    fn handle_materialize() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_materialize",
+            &json!({"coord": [10, 20, 30], "energy": 5.0, "physical_ratio": 0.6}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    fn handle_materialize_negative_energy() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_materialize",
+            &json!({"coord": [10, 20, 30], "energy": -1.0, "physical_ratio": 0.5}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_materialize_bad_ratio() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_materialize",
+            &json!({"coord": [10, 20, 30], "energy": 5.0, "physical_ratio": 2.0}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_conservation_check() {
+        let mut core = make_core();
+        let result =
+            TetraMemTools::handle_tool("tetramem_conservation_check", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["conservation_ok"], true);
+        assert!(v["energy_drift"].is_number());
+    }
+
+    #[test]
+    fn handle_remember_and_recall() {
+        let mut core = make_core();
+        let rem = TetraMemTools::handle_tool(
+            "tetramem_remember",
+            &json!({"content": "Rust is a systems language", "tags": ["programming"], "category": "technical", "importance": 0.8}),
+            &mut core,
+        );
+        let rv = parse_json(&rem);
+        assert_eq!(rv["success"], true);
+
+        let rec = TetraMemTools::handle_tool(
+            "tetramem_recall",
+            &json!({"query": "Rust programming", "limit": 5}),
+            &mut core,
+        );
+        let rec_v = parse_json(&rec);
+        assert!(rec_v["returned"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn handle_remember_missing_content() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_remember", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_recall_missing_query() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_recall", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_associate() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_remember",
+            &json!({"content": "test memory alpha"}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_associate",
+            &json!({"topic": "test", "depth": 2, "limit": 5}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert!(v["topic"].is_string());
+    }
+
+    #[test]
+    fn handle_associate_missing_topic() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_associate", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_consolidate() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_remember",
+            &json!({"content": "consolidation test"}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_consolidate",
+            &json!({"importance_threshold": 0.5}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert!(v["conservation_ok"].is_boolean());
+        assert!(v["fermentation_report"].is_object());
+        assert!(v["self_model"].is_object());
+    }
+
+    #[test]
+    fn handle_context_add_and_status() {
+        let mut core = make_core();
+        let add = TetraMemTools::handle_tool(
+            "tetramem_context",
+            &json!({"action": "add", "role": "user", "content": "hello world"}),
+            &mut core,
+        );
+        let av = parse_json(&add);
+        assert_eq!(av["action"], "add");
+        assert_eq!(av["context_entries"], 1);
+
+        let status =
+            TetraMemTools::handle_tool("tetramem_context", &json!({"action": "status"}), &mut core);
+        let sv = parse_json(&status);
+        assert!(sv["total_tokens"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn handle_context_clear() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_context",
+            &json!({"action": "add", "role": "user", "content": "test"}),
+            &mut core,
+        );
+        let result =
+            TetraMemTools::handle_tool("tetramem_context", &json!({"action": "clear"}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["cleared_entries"], 1);
+    }
+
+    #[test]
+    fn handle_context_reconstruct() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_remember",
+            &json!({"content": "reconstruct test content"}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_context",
+            &json!({"action": "reconstruct", "content": "reconstruct test"}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert!(v["reconstructed_context"].is_array());
+    }
+
+    #[test]
+    fn handle_context_pre_work() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_remember",
+            &json!({"content": "prework content for activation"}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_context",
+            &json!({"action": "pre_work", "content": "prework"}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["action"], "pre_work");
+    }
+
+    #[test]
+    fn handle_context_unknown_action() {
+        let mut core = make_core();
+        let result =
+            TetraMemTools::handle_tool("tetramem_context", &json!({"action": "bogus"}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_context_missing_action() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_context", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_reason_analogies() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [1, 2, 3], "data": [1.0, 2.0]}),
+            &mut core,
+        );
+        let result = TetraMemTools::handle_tool(
+            "tetramem_reason",
+            &json!({"method": "analogies", "threshold": 0.5}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["method"], "analogies");
+    }
+
+    #[test]
+    fn handle_reason_infer_chain() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_reason",
+            &json!({"method": "infer_chain", "from_anchor": [0, 0, 0], "to_anchor": [10, 10, 10]}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["method"], "infer_chain");
+    }
+
+    #[test]
+    fn handle_reason_discover() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_reason",
+            &json!({"method": "discover", "seed_anchor": [0, 0, 0]}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["method"], "discover");
+    }
+
+    #[test]
+    fn handle_reason_missing_method() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_reason", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_reason_unknown_method() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_reason",
+            &json!({"method": "teleport"}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_emotion() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_emotion", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["pad"].is_object());
+        assert!(v["functional_emotion"].is_object());
+        assert!(v["recommendations"].is_object());
+    }
+
+    #[test]
+    fn handle_scale_auto() {
+        let mut core = make_core();
+        let result =
+            TetraMemTools::handle_tool("tetramem_scale", &json!({"action": "auto"}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["action"], "auto_scale");
+    }
+
+    #[test]
+    fn handle_scale_frontier() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_scale",
+            &json!({"action": "frontier", "max_new_nodes": 10}),
+            &mut core,
+        );
+        let v = parse_json(&result);
+        assert_eq!(v["action"], "frontier_expansion");
+    }
+
+    #[test]
+    fn handle_scale_missing_action() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_scale", &json!({}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_scale_invalid_action() {
+        let mut core = make_core();
+        let result =
+            TetraMemTools::handle_tool("tetramem_scale", &json!({"action": "shrink"}), &mut core);
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_watchdog() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_watchdog", &json!({}), &mut core);
+        let v = parse_json(&result);
+        assert!(v["level"].is_string());
+        assert!(v["conservation_ok"].is_boolean());
+    }
+
+    #[test]
+    fn handle_forget_existing() {
+        let mut core = make_core();
+        TetraMemTools::handle_tool(
+            "tetramem_encode",
+            &json!({"anchor": [0, 0, 0], "data": [1.0]}),
+            &mut core,
+        );
+        let result =
+            TetraMemTools::handle_tool("tetramem_forget", &json!({"anchor": [0, 0, 0]}), &mut core);
+        let v = parse_json(&result);
+        assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    fn handle_forget_nonexistent() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool(
+            "tetramem_forget",
+            &json!({"anchor": [99, 99, 99]}),
+            &mut core,
+        );
+        err_text(&result);
+    }
+
+    #[test]
+    fn handle_unknown_tool() {
+        let mut core = make_core();
+        let result = TetraMemTools::handle_tool("tetramem_nonexistent", &json!({}), &mut core);
+        err_text(&result);
+    }
+}

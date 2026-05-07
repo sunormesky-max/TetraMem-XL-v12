@@ -152,6 +152,96 @@ impl ToolCallResult {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn json_rpc_request_parse() {
+        let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let req: JsonRpcRequest = serde_json::from_str(raw).unwrap();
+        assert_eq!(req.jsonrpc, "2.0");
+        assert_eq!(req.method, "tools/list");
+    }
+
+    #[test]
+    fn json_rpc_response_success() {
+        let resp = JsonRpcResponse::success(Some(json!(1)), json!({"ok": true}));
+        assert!(resp.result.is_some());
+        assert!(resp.error.is_none());
+        let serialized = serde_json::to_string(&resp).unwrap();
+        assert!(serialized.contains("\"result\""));
+    }
+
+    #[test]
+    fn json_rpc_response_error() {
+        let resp = JsonRpcResponse::error(Some(json!(1)), JsonRpcError::parse_error());
+        assert!(resp.result.is_none());
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, -32700);
+    }
+
+    #[test]
+    fn error_codes() {
+        assert_eq!(JsonRpcError::parse_error().code, -32700);
+        assert_eq!(JsonRpcError::invalid_request().code, -32600);
+        assert_eq!(JsonRpcError::method_not_found("x").code, -32601);
+        assert_eq!(JsonRpcError::invalid_params("x").code, -32602);
+        assert_eq!(JsonRpcError::internal_error("x").code, -32603);
+    }
+
+    #[test]
+    fn tool_call_result_ok() {
+        let r = ToolCallResult::ok("hello");
+        assert!(r.is_error.is_none());
+        assert_eq!(r.content.len(), 1);
+        assert_eq!(r.content[0].content_type, "text");
+        assert_eq!(r.content[0].text, "hello");
+    }
+
+    #[test]
+    fn tool_call_result_err() {
+        let r = ToolCallResult::err("fail");
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[test]
+    fn tool_definition_serde() {
+        let def = ToolDefinition {
+            name: "test".into(),
+            description: "desc".into(),
+            input_schema: json!({}),
+        };
+        let s = serde_json::to_string(&def).unwrap();
+        let back: ToolDefinition = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.name, "test");
+    }
+
+    #[test]
+    fn server_info_serde() {
+        let info = ServerInfo {
+            name: "TetraMem".into(),
+            version: "12.0".into(),
+        };
+        let s = serde_json::to_string(&info).unwrap();
+        assert!(s.contains("TetraMem"));
+    }
+
+    #[test]
+    fn resource_definition_roundtrip() {
+        let def = ResourceDefinition {
+            uri: "tetramem://stats".into(),
+            name: "Stats".into(),
+            description: "desc".into(),
+            mime_type: Some("application/json".into()),
+        };
+        let s = serde_json::to_string(&def).unwrap();
+        let back: ResourceDefinition = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.uri, "tetramem://stats");
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceDefinition {
     pub uri: String,
