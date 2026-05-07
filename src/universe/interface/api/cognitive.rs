@@ -574,3 +574,34 @@ pub async fn reflect(
         total_insights: insights.total_insights,
     })))
 }
+
+pub async fn identity_profile(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let mems = state.memories.read().await;
+    let guard = state.identity_guard.read().await;
+    let profile = guard.profile(&mems);
+    drop(guard);
+    drop(mems);
+    match serde_json::to_value(profile) {
+        Ok(v) => Json(ApiResponse::ok(v)),
+        Err(e) => Json(ApiResponse::err(e.to_string())),
+    }
+}
+
+pub async fn meta_cognitive_state(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let model =
+        crate::universe::cognitive::meta_cognitive::MetaCognitiveEngine::assess(&u, &h, &mems);
+    drop(mems);
+    drop(h);
+    drop(u);
+    match serde_json::to_value(model) {
+        Ok(v) => Json(ApiResponse::ok(v)),
+        Err(e) => Json(ApiResponse::err(e.to_string())),
+    }
+}

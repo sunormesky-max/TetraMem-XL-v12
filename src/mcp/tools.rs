@@ -350,6 +350,21 @@ impl TetraMemTools {
                     "required": ["anchor"]
                 }),
             },
+            ToolDefinition {
+                name: "tetramem_cognitive_state".into(),
+                description: "Assess the system's cognitive state: emotion, attention, topology, memory health, dream readiness, and overall vigor.".into(),
+                input_schema: json!({"type": "object", "properties": {}, "required": []}),
+            },
+            ToolDefinition {
+                name: "tetramem_insights".into(),
+                description: "Generate dream insights: contradictions, forgotten-important memories, emerging clusters, and weak connections.".into(),
+                input_schema: json!({"type": "object", "properties": {}, "required": []}),
+            },
+            ToolDefinition {
+                name: "tetramem_meta_cognitive".into(),
+                description: "Assess meta-cognitive self-model: knowledge domains, confidence distribution, identity coherence, blind spots, and self-awareness score.".into(),
+                input_schema: json!({"type": "object", "properties": {}, "required": []}),
+            },
         ]
     }
 
@@ -384,6 +399,9 @@ impl TetraMemTools {
             "tetramem_scale" => handle_scale(args, core),
             "tetramem_watchdog" => handle_watchdog(core),
             "tetramem_forget" => handle_forget(args, core),
+            "tetramem_cognitive_state" => handle_cognitive_state(core),
+            "tetramem_insights" => handle_insights(core),
+            "tetramem_meta_cognitive" => handle_meta_cognitive(core),
             _ => super::protocol::ToolCallResult::err(format!("unknown tool: {}", name)),
         }
     }
@@ -1672,6 +1690,38 @@ fn handle_forget(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
     match core.forget(&anchor) {
         Ok(result) => super::protocol::ToolCallResult::ok(result.to_string()),
         Err(e) => super::protocol::ToolCallResult::err(e),
+    }
+}
+
+fn handle_cognitive_state(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
+    use crate::universe::cognitive::cognitive_state::CognitiveStateEngine;
+    let state = CognitiveStateEngine::assess(&core.universe, &core.hebbian, &core.memories);
+    match serde_json::to_string_pretty(&state) {
+        Ok(s) => super::protocol::ToolCallResult::ok(s),
+        Err(e) => super::protocol::ToolCallResult::err(format!("serialize error: {}", e)),
+    }
+}
+
+fn handle_insights(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
+    use crate::universe::cognitive::dream_insight::DreamInsightEngine;
+    let insights = DreamInsightEngine::new().generate_insights(
+        &core.universe,
+        &core.hebbian,
+        &core.memories,
+        &core.semantic,
+    );
+    match serde_json::to_string_pretty(&insights) {
+        Ok(s) => super::protocol::ToolCallResult::ok(s),
+        Err(e) => super::protocol::ToolCallResult::err(format!("serialize error: {}", e)),
+    }
+}
+
+fn handle_meta_cognitive(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
+    use crate::universe::cognitive::meta_cognitive::MetaCognitiveEngine;
+    let model = MetaCognitiveEngine::assess(&core.universe, &core.hebbian, &core.memories);
+    match serde_json::to_string_pretty(&model) {
+        Ok(s) => super::protocol::ToolCallResult::ok(s),
+        Err(e) => super::protocol::ToolCallResult::err(format!("serialize error: {}", e)),
     }
 }
 

@@ -31,9 +31,9 @@ use super::cognitive::{
     agent_execute_crystal, agent_execute_emotion, agent_execute_observer, assess_novelty,
     clustering_maintenance, clustering_status, constitution_status, detect_contradictions,
     events_status, fire_pulse, get_attention_map, get_cognitive_state, get_dream_insights,
-    memory_aging, perception_replenish, perception_status, reflect, regulate, run_dream,
-    semantic_extract_concepts, semantic_index_all, semantic_status, watchdog_checkup,
-    watchdog_status,
+    identity_profile, memory_aging, meta_cognitive_state, perception_replenish, perception_status,
+    reflect, regulate, run_dream, semantic_extract_concepts, semantic_index_all, semantic_status,
+    watchdog_checkup, watchdog_status,
 };
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
@@ -360,6 +360,8 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/cognitive/attention", get(get_attention_map))
         .route("/cognitive/insights", get(get_dream_insights))
         .route("/cognitive/reflect", post(reflect))
+        .route("/cognitive/identity", get(identity_profile))
+        .route("/cognitive/meta", get(meta_cognitive_state))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(

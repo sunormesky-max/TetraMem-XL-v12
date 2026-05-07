@@ -63,6 +63,9 @@ fn build_state() -> Arc<AppState> {
             }],
             "test-secret",
         ),
+        identity_guard: tokio::sync::RwLock::new(
+            tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
+        ),
     })
 }
 

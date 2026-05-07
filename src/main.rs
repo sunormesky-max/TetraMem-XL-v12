@@ -167,7 +167,38 @@ fn main() {
             );
             let constitution =
                 tetramem_v12::universe::constitution::Constitution::tetramem_default();
-            let event_bus = tetramem_v12::universe::events::EventBus::new();
+            let mut event_bus = tetramem_v12::universe::events::EventBus::new();
+            event_bus.subscribe(|event| match event {
+                tetramem_v12::universe::events::UniverseEvent::MemoryEncoded {
+                    anchor,
+                    data_dim,
+                    importance,
+                } => {
+                    tracing::debug!(?anchor, data_dim, importance, "event: memory encoded");
+                }
+                tetramem_v12::universe::events::UniverseEvent::ConservationViolation {
+                    drift,
+                    active_nodes,
+                } => {
+                    tracing::error!(
+                        drift,
+                        active_nodes,
+                        "event: conservation violation detected by subscriber"
+                    );
+                }
+                tetramem_v12::universe::events::UniverseEvent::DreamCompleted {
+                    edges_before,
+                    edges_after,
+                    ..
+                } => {
+                    tracing::info!(
+                        edges_before,
+                        edges_after,
+                        "event: dream completed (subscriber)"
+                    );
+                }
+                _ => {}
+            });
             let event_sender = event_bus.sender();
             let watchdog =
                 tetramem_v12::universe::watchdog::Watchdog::with_defaults(universe.total_energy());
@@ -196,6 +227,9 @@ fn main() {
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
                 users: UserStore::new(&config.auth.users, &config.auth.jwt_secret),
+                identity_guard: tokio::sync::RwLock::new(
+                    tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
+                ),
             });
 
             let auto_persist = config.backup.auto_persist;

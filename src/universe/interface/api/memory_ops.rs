@@ -405,7 +405,24 @@ pub async fn annotate_memory(
             if let Some(ref src) = req.source {
                 mem.set_source(src);
             }
-            mem.set_importance(req.importance);
+            {
+                let mut guard = state.identity_guard.write().await;
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let report = guard.check_importance_change(mem, req.importance, now_ms);
+                mem.set_importance(report.allowed_importance);
+                if report.protected {
+                    tracing::warn!(
+                        anchor = %anchor_str,
+                        requested = req.importance,
+                        allowed = report.allowed_importance,
+                        reason = %report.reason,
+                        "identity guard: importance change protected"
+                    );
+                }
+            }
 
             let resp = AnnotateResponse {
                 anchor: anchor_str,

@@ -3,4 +3,5 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 pub mod constitution;
 pub mod events;
+pub mod identity_guard;
 pub mod integrity;

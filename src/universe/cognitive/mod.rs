@@ -8,6 +8,7 @@ pub mod crystal;
 pub mod dream_insight;
 pub mod emotion;
 pub mod functional_emotion;
+pub mod meta_cognitive;
 pub mod perception;
 pub mod reasoning;
 pub mod topology;

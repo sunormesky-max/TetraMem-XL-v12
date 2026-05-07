@@ -52,6 +52,9 @@ fn make_test_state() -> Arc<AppState> {
         jwt: JwtConfig::new("test-secret".to_string(), 86400),
         users: UserStore::new(&[], "test-secret"),
         config,
+        identity_guard: tokio::sync::RwLock::new(
+            tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
+        ),
     })
 }
 

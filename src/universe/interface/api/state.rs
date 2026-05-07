@@ -17,6 +17,7 @@ use crate::universe::memory::MemoryAtom;
 use crate::universe::memory::{ClusteringEngine, InterestProfile, SemanticEngine, SurfacedMemory};
 use crate::universe::node::DarkUniverse;
 use crate::universe::perception::PerceptionBudget;
+use crate::universe::safety::identity_guard::IdentityGuard;
 use crate::universe::watchdog::Watchdog;
 
 pub struct AppState {
@@ -39,6 +40,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub jwt: JwtConfig,
     pub users: UserStore,
+    pub identity_guard: RwLock<IdentityGuard>,
 }
 
 pub type SharedState = Arc<AppState>;
