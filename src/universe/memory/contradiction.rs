@@ -130,7 +130,7 @@ impl ContradictionDetector {
     }
 }
 
-fn descriptions_conflict(a: Option<&str>, b: Option<&str>) -> bool {
+pub fn descriptions_conflict(a: Option<&str>, b: Option<&str>) -> bool {
     let (Some(da), Some(db)) = (a, b) else {
         return false;
     };
@@ -169,7 +169,7 @@ fn descriptions_conflict(a: Option<&str>, b: Option<&str>) -> bool {
     false
 }
 
-fn tags_conflict(a: &[String], b: &[String]) -> bool {
+pub fn tags_conflict(a: &[String], b: &[String]) -> bool {
     let opposite_pairs = [
         ("positive", "negative"),
         ("true", "false"),

@@ -592,3 +592,11 @@ pub struct AgingResponse {
     pub avg_importance: f64,
     pub flagged_anchors: Vec<String>,
 }
+
+#[derive(Serialize)]
+pub struct ReflectResponse {
+    pub dream_insights: serde_json::Value,
+    pub cognitive_state: serde_json::Value,
+    pub conservation_ok: bool,
+    pub total_insights: usize,
+}

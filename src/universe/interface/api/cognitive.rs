@@ -503,3 +503,74 @@ pub async fn detect_contradictions(
         "merge_details": report.merge_candidates,
     })))
 }
+
+pub async fn get_cognitive_state(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let cs =
+        crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(&u, &h, &mems);
+    let json =
+        serde_json::to_value(&cs).unwrap_or(serde_json::json!({"error": "serialize failed"}));
+    Json(ApiResponse::ok(json))
+}
+
+pub async fn get_attention_map(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let map = crate::universe::cognitive::attention::AttentionEngine::new().compute(&u, &h, &mems);
+    let json =
+        serde_json::to_value(&map).unwrap_or(serde_json::json!({"error": "serialize failed"}));
+    Json(ApiResponse::ok(json))
+}
+
+pub async fn get_dream_insights(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let sem = state.semantic.read().await;
+    let report = crate::universe::cognitive::dream_insight::DreamInsightEngine::new()
+        .generate_insights(&u, &h, &mems, &sem);
+    let json =
+        serde_json::to_value(&report).unwrap_or(serde_json::json!({"error": "serialize failed"}));
+    Json(ApiResponse::ok(json))
+}
+
+pub async fn reflect(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<super::types::ReflectResponse>>, AppError> {
+    let u = state.universe.read().await;
+    let h = state.hebbian.read().await;
+    let mems = state.memories.read().await;
+    let sem = state.semantic.read().await;
+
+    let insights = crate::universe::cognitive::dream_insight::DreamInsightEngine::new()
+        .generate_insights(&u, &h, &mems, &sem);
+
+    let cs =
+        crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(&u, &h, &mems);
+
+    let conservation_ok = u.verify_conservation();
+
+    drop(u);
+    drop(h);
+    drop(mems);
+    drop(sem);
+
+    let insights_json = serde_json::to_value(&insights).unwrap_or(serde_json::json!({}));
+    let cs_json = serde_json::to_value(&cs).unwrap_or(serde_json::json!({}));
+
+    Ok(Json(ApiResponse::ok(super::types::ReflectResponse {
+        dream_insights: insights_json,
+        cognitive_state: cs_json,
+        conservation_ok,
+        total_insights: insights.total_insights,
+    })))
+}

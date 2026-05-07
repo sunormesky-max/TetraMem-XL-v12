@@ -30,8 +30,9 @@ use super::cluster_ops::{
 use super::cognitive::{
     agent_execute_crystal, agent_execute_emotion, agent_execute_observer, assess_novelty,
     clustering_maintenance, clustering_status, constitution_status, detect_contradictions,
-    events_status, fire_pulse, memory_aging, perception_replenish, perception_status, regulate,
-    run_dream, semantic_extract_concepts, semantic_index_all, semantic_status, watchdog_checkup,
+    events_status, fire_pulse, get_attention_map, get_cognitive_state, get_dream_insights,
+    memory_aging, perception_replenish, perception_status, reflect, regulate, run_dream,
+    semantic_extract_concepts, semantic_index_all, semantic_status, watchdog_checkup,
     watchdog_status,
 };
 use super::dark_dimension::{
@@ -355,6 +356,10 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/interest/unregister", post(unregister_interest))
         .route("/interest/list", get(list_interests))
         .route("/surface/status", get(surface_status))
+        .route("/cognitive/state", get(get_cognitive_state))
+        .route("/cognitive/attention", get(get_attention_map))
+        .route("/cognitive/insights", get(get_dream_insights))
+        .route("/cognitive/reflect", post(reflect))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
