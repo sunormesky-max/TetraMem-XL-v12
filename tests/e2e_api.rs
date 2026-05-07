@@ -687,6 +687,168 @@ async fn main() {
     );
     results.push(("conservation_check", ok));
 
+    // ── 21. NOVELTY ASSESSMENT ──
+    println!("── 21. 新颖性评估 ──");
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/perception/assess",
+        json!({"data": [1.0, 2.0, 3.0]}),
+    )
+    .await;
+    let has_score = body["data"]["score"].is_number();
+    let ok = status == StatusCode::OK && has_score;
+    println!(
+        "  {} POST /api/perception/assess → {} score={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["score"]
+    );
+    results.push(("POST /api/perception/assess", ok));
+
+    // ── 22. INTEREST MANAGEMENT ──
+    println!("── 22. 兴趣管理 ──");
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/interest/register",
+        json!({"agent_id": "test-bot", "tags": ["science", "ai"], "min_importance": 0.3}),
+    )
+    .await;
+    let registered = body["data"]["registered"].as_bool().unwrap_or(false);
+    let ok = status == StatusCode::OK && registered;
+    println!(
+        "  {} POST /api/interest/register → {} registered={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        registered
+    );
+    results.push(("POST /api/interest/register", ok));
+
+    let (status, body) = get(&client, addr, "/api/interest/list").await;
+    let has_list = body["data"]
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let ok = status == StatusCode::OK && has_list;
+    println!(
+        "  {} GET /api/interest/list → {} agents={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"].as_array().map(|a| a.len()).unwrap_or(0)
+    );
+    results.push(("GET /api/interest/list", ok));
+
+    let (status, body) = get(&client, addr, "/api/surface/status").await;
+    let has_agents = body["data"]["registered_agents"].is_number();
+    let ok = status == StatusCode::OK && has_agents;
+    println!(
+        "  {} GET /api/surface/status → {} agents={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["registered_agents"]
+    );
+    results.push(("GET /api/surface/status", ok));
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/interest/unregister",
+        json!({"agent_id": "test-bot"}),
+    )
+    .await;
+    let unregistered = body["data"]["unregistered"].as_bool().unwrap_or(false);
+    let ok = status == StatusCode::OK && unregistered;
+    println!(
+        "  {} POST /api/interest/unregister → {} unregistered={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        unregistered
+    );
+    results.push(("POST /api/interest/unregister", ok));
+
+    // ── 23. MEMORY AGING ──
+    println!("── 23. 记忆老化 ──");
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/memory/aging",
+        json!({"accessed_anchors": []}),
+    )
+    .await;
+    let has_aged = body["data"]["aged_count"].is_number();
+    let ok = status == StatusCode::OK && has_aged;
+    println!(
+        "  {} POST /api/memory/aging → {} aged={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["aged_count"]
+    );
+    results.push(("POST /api/memory/aging", ok));
+
+    // ── 24. CONTRADICTION DETECTION ──
+    println!("── 24. 矛盾检测 ──");
+
+    let (status, body) = get(&client, addr, "/api/memory/contradictions").await;
+    let has_contra = body["data"]["contradictions"].is_number();
+    let ok = status == StatusCode::OK && has_contra;
+    println!(
+        "  {} GET /api/memory/contradictions → {} contradictions={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["contradictions"]
+    );
+    results.push(("GET /api/memory/contradictions", ok));
+
+    // ── 25. TEMPORAL PREDICTION ──
+    println!("── 25. 时序预测 ──");
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/memory/predict",
+        json!({"anchor": [10, 20, 30], "max_steps": 3}),
+    )
+    .await;
+    let has_pred = body["data"]["predictions"].is_array();
+    let ok = status == StatusCode::OK && has_pred;
+    println!(
+        "  {} POST /api/memory/predict → {} predictions={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["predictions"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0)
+    );
+    results.push(("POST /api/memory/predict", ok));
+
+    // ── 26. MEMORY RECONSTRUCTION ──
+    println!("── 26. 记忆重建 ──");
+
+    let (status, body) = post(
+        &client,
+        addr,
+        "/api/memory/reconstruct",
+        json!({"anchor": [10, 20, 30], "max_hops": 3}),
+    )
+    .await;
+    let has_recon = body["data"]["reconstructed"].is_array();
+    let ok = status == StatusCode::OK && has_recon;
+    println!(
+        "  {} POST /api/memory/reconstruct → {} reconstructed={}",
+        if ok { "✓" } else { "✗" },
+        status,
+        body["data"]["reconstructed"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0)
+    );
+    results.push(("POST /api/memory/reconstruct", ok));
+
     // ── 20. STATIC FRONTEND ──
     println!("── 20. 静态前端 ──");
 
