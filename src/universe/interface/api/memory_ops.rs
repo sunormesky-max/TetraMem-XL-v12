@@ -463,6 +463,11 @@ pub async fn semantic_search(
                 let mk = crate::universe::memory::AtomKey::from_atom(m);
                 mk == r.atom_key
             })?;
+            if let Some(ref src) = req.source {
+                if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
+                    return None;
+                }
+            }
             let anchor_str = format!("{}", mem.anchor());
             Some(SemanticHit {
                 anchor: anchor_str,

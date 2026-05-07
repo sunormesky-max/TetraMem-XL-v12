@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,12 +12,18 @@ use crate::universe::config::MaintenanceConfig;
 use crate::universe::dream::DreamEngine;
 use crate::universe::events::UniverseEvent;
 use crate::universe::memory::aging::AgingEngine;
+use crate::universe::memory::MemoryCodec;
 use crate::universe::regulation::RegulationEngine;
 use crate::universe::watchdog::WatchdogLevel;
 
 const WEAK_EDGE_THRESHOLD: f64 = 0.15;
 const WEAK_EDGE_BOOST: f64 = 0.05;
 const MAX_WEAK_REINFORCE: usize = 20;
+const FORGET_THRESHOLD: f64 = 0.05;
+
+struct ControllerState {
+    forget_tracker: HashMap<String, u32>,
+}
 
 pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
     let cfg = state.config.maintenance.clone();
@@ -27,26 +34,36 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
 
     let interval_secs = cfg.interval_secs.max(30);
     tracing::info!(
-        "cognitive controller: spawning (interval={}s, dream_urgency>={:.2})",
+        "cognitive controller: spawning (interval={}s, dream_urgency>={:.2}, auto_forget={}, max_memories={})",
         interval_secs,
         cfg.dream_min_urgency,
+        cfg.auto_forget_enabled,
+        cfg.max_memories,
     );
 
     let handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
         interval.tick().await;
         let mut cycle: u64 = 0;
+        let mut ctrl = ControllerState {
+            forget_tracker: HashMap::new(),
+        };
         loop {
             interval.tick().await;
             cycle += 1;
-            run_maintenance_cycle(&state, &cfg, cycle).await;
+            run_maintenance_cycle(&state, &cfg, cycle, &mut ctrl).await;
         }
     });
 
     Some(handle)
 }
 
-async fn run_maintenance_cycle(state: &Arc<AppState>, cfg: &MaintenanceConfig, cycle: u64) {
+async fn run_maintenance_cycle(
+    state: &Arc<AppState>,
+    cfg: &MaintenanceConfig,
+    cycle: u64,
+    ctrl: &mut ControllerState,
+) {
     let start = std::time::Instant::now();
 
     let cognitive_state = {
@@ -153,6 +170,81 @@ async fn run_maintenance_cycle(state: &Arc<AppState>, cfg: &MaintenanceConfig, c
                 "cognitive controller: aging flagged memories for potential forget"
             );
         }
+    }
+
+    if cfg.aging_enabled && cfg.auto_forget_enabled && cycle > 2 {
+        let guard = state.identity_guard.read().await;
+        let mut mems = state.memories.write().await;
+        let mut idx = state.memory_index.write().await;
+        let mut u = state.universe.write().await;
+
+        let mut to_erase: Vec<usize> = Vec::new();
+        let mut over_limit_count: usize = 0;
+
+        for (i, mem) in mems.iter().enumerate() {
+            let anchor_str = format!("{}", mem.anchor());
+
+            if mem.importance() < FORGET_THRESHOLD {
+                if guard.is_identity_memory(mem) {
+                    continue;
+                }
+                let count = ctrl.forget_tracker.entry(anchor_str.clone()).or_insert(0);
+                *count += 1;
+                if *count >= cfg.auto_forget_grace_cycles {
+                    to_erase.push(i);
+                }
+            } else {
+                ctrl.forget_tracker.remove(&anchor_str);
+            }
+        }
+
+        if mems.len() > cfg.max_memories {
+            let excess = mems.len() - cfg.max_memories;
+            let mut candidates: Vec<(usize, f64)> = mems
+                .iter()
+                .enumerate()
+                .filter(|(i, m)| !to_erase.contains(i) && !guard.is_identity_memory(m))
+                .map(|(i, m)| (i, m.importance()))
+                .collect();
+            candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            for (i, _) in candidates.into_iter().take(excess) {
+                to_erase.push(i);
+            }
+            over_limit_count = excess;
+        }
+        drop(guard);
+
+        if !to_erase.is_empty() {
+            to_erase.sort_unstable();
+            to_erase.dedup();
+
+            for &i in to_erase.iter().rev() {
+                if i < mems.len() {
+                    MemoryCodec::erase(&mut u, &mems[i]);
+                    let anchor_str = format!("{}", mems[i].anchor());
+                    idx.remove(&anchor_str);
+                    for val in idx.values_mut() {
+                        if *val > i {
+                            *val -= 1;
+                        }
+                    }
+                    ctrl.forget_tracker.remove(&anchor_str);
+                    mems.remove(i);
+                }
+            }
+
+            tracing::info!(
+                cycle,
+                erased = to_erase.len(),
+                remaining = mems.len(),
+                over_limit = over_limit_count,
+                "cognitive controller: auto-forget erased decayed memories"
+            );
+        }
+
+        drop(mems);
+        drop(idx);
+        drop(u);
     }
 
     if cfg.clustering_enabled {

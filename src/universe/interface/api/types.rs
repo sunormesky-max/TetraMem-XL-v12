@@ -151,6 +151,8 @@ pub struct SemanticSearchRequest {
     pub data: Vec<f64>,
     #[serde(default = "default_k")]
     pub k: usize,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -456,6 +458,8 @@ pub struct RecallRequest {
     pub query: String,
     #[serde(default = "default_k")]
     pub limit: usize,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Deserialize)]

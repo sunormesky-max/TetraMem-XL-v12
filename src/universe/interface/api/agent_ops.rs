@@ -169,6 +169,11 @@ pub async fn recall(
 
     let mut spatial_hits: Vec<(usize, f64)> = Vec::new();
     for (i, mem) in mems.iter().enumerate() {
+        if let Some(ref src) = req.source {
+            if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
+                continue;
+            }
+        }
         let mp = mem.anchor().physical();
         let dx = (ideal_phys[0] - mp[0]).abs();
         let dy = (ideal_phys[1] - mp[1]).abs();
@@ -225,6 +230,11 @@ pub async fn recall(
                 .iter()
                 .find(|m| m.anchor().basis() == k.atom_key.vertices_basis[0])
             {
+                if let Some(ref src) = req.source {
+                    if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
+                        continue;
+                    }
+                }
                 hits.push(json!({
                     "anchor": format!("{}", mem.anchor()),
                     "similarity": k.similarity,

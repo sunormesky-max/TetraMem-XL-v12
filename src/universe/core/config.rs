@@ -129,6 +129,12 @@ pub struct MaintenanceConfig {
     pub regulation_enabled: bool,
     #[serde(default = "default_event_drain_enabled")]
     pub event_drain_enabled: bool,
+    #[serde(default = "default_auto_forget_enabled")]
+    pub auto_forget_enabled: bool,
+    #[serde(default = "default_auto_forget_grace_cycles")]
+    pub auto_forget_grace_cycles: u32,
+    #[serde(default = "default_max_memories")]
+    pub max_memories: usize,
 }
 
 fn default_server() -> ServerConfig {
@@ -204,6 +210,9 @@ fn default_maintenance() -> MaintenanceConfig {
         crystal_decay_enabled: default_crystal_decay_enabled(),
         regulation_enabled: default_regulation_enabled(),
         event_drain_enabled: default_event_drain_enabled(),
+        auto_forget_enabled: default_auto_forget_enabled(),
+        auto_forget_grace_cycles: default_auto_forget_grace_cycles(),
+        max_memories: default_max_memories(),
     }
 }
 
@@ -299,6 +308,15 @@ fn default_regulation_enabled() -> bool {
 }
 fn default_event_drain_enabled() -> bool {
     true
+}
+fn default_auto_forget_enabled() -> bool {
+    true
+}
+fn default_auto_forget_grace_cycles() -> u32 {
+    3
+}
+fn default_max_memories() -> usize {
+    100_000
 }
 
 impl Default for AppConfig {
