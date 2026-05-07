@@ -327,6 +327,10 @@ fn main() {
                     });
                 }
 
+                {
+                    let _controller_handle = tetramem_v12::universe::adaptive::cognitive_controller::spawn_cognitive_controller(state.clone());
+                }
+
                 if auto_persist && persist_interval > 0 {
                     let use_sqlite_clone = use_sqlite;
                     let handle = tokio::spawn(async move {

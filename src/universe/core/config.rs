@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub backup: BackupFileConfig,
     #[serde(default = "default_rate_limit")]
     pub rate_limit: RateLimitConfig,
+    #[serde(default = "default_maintenance")]
+    pub maintenance: MaintenanceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +109,28 @@ pub struct RateLimitConfig {
     pub burst: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintenanceConfig {
+    #[serde(default = "default_maintenance_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_maintenance_interval_secs")]
+    pub interval_secs: u64,
+    #[serde(default = "default_dream_min_urgency")]
+    pub dream_min_urgency: f64,
+    #[serde(default = "default_aging_enabled")]
+    pub aging_enabled: bool,
+    #[serde(default = "default_clustering_enabled")]
+    pub clustering_enabled: bool,
+    #[serde(default = "default_watchdog_enabled")]
+    pub watchdog_enabled: bool,
+    #[serde(default = "default_crystal_decay_enabled")]
+    pub crystal_decay_enabled: bool,
+    #[serde(default = "default_regulation_enabled")]
+    pub regulation_enabled: bool,
+    #[serde(default = "default_event_drain_enabled")]
+    pub event_drain_enabled: bool,
+}
+
 fn default_server() -> ServerConfig {
     ServerConfig {
         addr: default_addr(),
@@ -166,6 +190,20 @@ fn default_rate_limit() -> RateLimitConfig {
     RateLimitConfig {
         requests_per_minute: default_rpm(),
         burst: default_burst(),
+    }
+}
+
+fn default_maintenance() -> MaintenanceConfig {
+    MaintenanceConfig {
+        enabled: default_maintenance_enabled(),
+        interval_secs: default_maintenance_interval_secs(),
+        dream_min_urgency: default_dream_min_urgency(),
+        aging_enabled: default_aging_enabled(),
+        clustering_enabled: default_clustering_enabled(),
+        watchdog_enabled: default_watchdog_enabled(),
+        crystal_decay_enabled: default_crystal_decay_enabled(),
+        regulation_enabled: default_regulation_enabled(),
+        event_drain_enabled: default_event_drain_enabled(),
     }
 }
 
@@ -235,6 +273,33 @@ fn default_rpm() -> u64 {
 fn default_burst() -> u64 {
     50
 }
+fn default_maintenance_enabled() -> bool {
+    true
+}
+fn default_maintenance_interval_secs() -> u64 {
+    120
+}
+fn default_dream_min_urgency() -> f64 {
+    0.4
+}
+fn default_aging_enabled() -> bool {
+    true
+}
+fn default_clustering_enabled() -> bool {
+    true
+}
+fn default_watchdog_enabled() -> bool {
+    true
+}
+fn default_crystal_decay_enabled() -> bool {
+    true
+}
+fn default_regulation_enabled() -> bool {
+    true
+}
+fn default_event_drain_enabled() -> bool {
+    true
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -245,6 +310,7 @@ impl Default for AppConfig {
             logging: default_logging(),
             backup: default_backup(),
             rate_limit: default_rate_limit(),
+            maintenance: default_maintenance(),
         }
     }
 }
