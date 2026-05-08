@@ -48,16 +48,38 @@ impl Claims {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JwtConfig {
-    secret: String,
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey,
+    validation: Validation,
+    header: Header,
     expiry_secs: u64,
+}
+
+impl std::fmt::Debug for JwtConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JwtConfig")
+            .field("expiry_secs", &self.expiry_secs)
+            .finish_non_exhaustive()
+    }
 }
 
 impl JwtConfig {
     pub fn new(secret: String, expiry_secs: u64) -> Self {
+        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.set_required_spec_claims(&["exp", "iat", "nbf", "sub", "jti", "iss", "aud"]);
+        validation.leeway = 60;
+        validation.set_issuer(&["tetramem-v12"]);
+        validation.set_audience(&["tetramem-api"]);
         Self {
-            secret,
+            encoding_key: EncodingKey::from_secret(secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+            header: Header {
+                kid: Some("tetramem-v12".to_string()),
+                ..Default::default()
+            },
+            validation,
             expiry_secs,
         }
     }
@@ -74,30 +96,13 @@ impl JwtConfig {
             iss: "tetramem-v12".to_string(),
             aud: "tetramem-api".to_string(),
         };
-        let header = Header {
-            kid: Some("tetramem-v12".to_string()),
-            ..Default::default()
-        };
-        encode(
-            &header,
-            &claims,
-            &EncodingKey::from_secret(self.secret.as_bytes()),
-        )
-        .map_err(|e| AppError::Internal(format!("jwt encode: {}", e)))
+        encode(&self.header, &claims, &self.encoding_key)
+            .map_err(|e| AppError::Internal(format!("jwt encode: {}", e)))
     }
 
     pub fn validate_token(&self, token: &str) -> Result<Claims, AppError> {
-        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.set_required_spec_claims(&["exp", "iat", "nbf", "sub", "jti", "iss", "aud"]);
-        validation.leeway = 60;
-        validation.set_issuer(&["tetramem-v12"]);
-        validation.set_audience(&["tetramem-api"]);
-        let data = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(self.secret.as_bytes()),
-            &validation,
-        )
-        .map_err(|e| AppError::Unauthorized(format!("invalid token: {}", e)))?;
+        let data = decode::<Claims>(token, &self.decoding_key, &self.validation)
+            .map_err(|e| AppError::Unauthorized(format!("invalid token: {}", e)))?;
         Ok(data.claims)
     }
 }
