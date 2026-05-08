@@ -73,7 +73,13 @@ fn main() {
             });
             metrics::init_metrics();
 
-            let effective_addr = addr.unwrap_or_else(|| config.server.addr.clone());
+            let effective_addr = addr.unwrap_or_else(|| {
+                if let Ok(port) = std::env::var("PORT") {
+                    format!("0.0.0.0:{}", port)
+                } else {
+                    config.server.addr.clone()
+                }
+            });
             let persist_path = PathBuf::from(&config.backup.persist_path);
             let use_sqlite = config.backup.persist_backend == "sqlite";
 
