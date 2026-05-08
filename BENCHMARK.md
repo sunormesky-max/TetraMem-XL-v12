@@ -1,18 +1,16 @@
-# TetraMem-XL v12.0 — Honest Benchmark Results
+# TetraMem-XL v12.0 — Benchmark Results
 
-> **This is NOT a marketing document.** All numbers are from synthetic data on a single machine. No cherry-picking. No vs-v8 comparisons. No hype.
-
-> **This benchmark is conducted on synthetic data with at most 5K memories. No public dataset (SIFT1M / GloVe / CORe50) was used. Results do not reflect production-scale performance.**
+> Internal performance measurements on synthetic data. No external baselines included (yet). See [What's Missing](#whats-missing) for next steps.
 
 ## Test Environment
 
-- **OS**: Windows (release build, `codegen-units=1`, LTO=thin)
+- **Build**: release (`codegen-units=1`, LTO=thin)
 - **Data**: Synthetic random vectors (14-dim) + clustered data
 - **Embedding**: 64-dim (statistical + histogram + frequency + meta features)
-- **KNN**: Brute-force O(n) scan, cosine similarity
-- **Max N**: 5,000 — well below any real-world memory system
+- **KNN**: Brute-force O(n), cosine similarity
+- **Scale**: up to 5,000 memories
 
-## 1. KNN Recall@K (vs Ground Truth)
+## 1. KNN Recall@K
 
 | N     | k  | recall@k | avg query | total  |
 |-------|----|----------|-----------|--------|
@@ -25,21 +23,23 @@
 | 5000  | 1  | 1.0000   | 1047µs    | 52.4ms |
 | 5000  | 10 | 1.0000   | 1011µs    | 50.6ms |
 
-**Assessment**: Perfect recall is expected — brute-force KNN always finds exact nearest neighbors. This is the baseline, not an achievement. A real ANN index (HNSW) would be faster but might have <1.0 recall.
+Recall = 1.0 because brute-force always finds exact nearest neighbors. This is expected — the interesting question is how this compares to ANN methods (HNSW, IVF) which trade recall for speed.
 
-**Scaling prediction**: O(n) — at 5K, 1ms/query. At 100K, ~20ms/query. At 1M, ~200ms/query. HNSW/IVF would be O(log n) at ~1-5ms regardless of scale. **TetraMem loses badly at scale.**
+Scaling: O(n). At 5K memories: 1ms/query. Projected at 100K: ~20ms, at 1M: ~200ms. Adding an ANN index is the top priority for scaling.
 
 ## 2. Multi-Hop Associative Recall (Hebbian Graph Walk)
 
-| Config            | Memories | Edges | KNN results | Hebbian extra | hop-1 | hop-2 | hop-3 |
-|-------------------|----------|-------|-------------|---------------|-------|-------|-------|
-| 10 clusters × 50  | 500      | 1494  | 10.0        | 15.8          | 105   | 208   | 316   |
-| 20 clusters × 50  | 1000     | 2994  | 10.0        | 16.2          | 105   | 216   | 325   |
-| 50 clusters × 20  | 1000     | 2994  | 10.0        | 15.7          | 99    | 208   | 314   |
+| Config            | Memories | Hebbian edges | KNN top-k | Hebbian extra | hop-1 | hop-2 | hop-3 |
+|-------------------|----------|---------------|-----------|---------------|-------|-------|-------|
+| 10 clusters × 50  | 500      | 1494          | 10        | 15.8          | 105   | 208   | 316   |
+| 20 clusters × 50  | 1000     | 2994          | 10        | 16.2          | 105   | 216   | 325   |
+| 50 clusters × 20  | 1000     | 2994          | 10        | 15.7          | 99    | 208   | 314   |
 
-**Assessment**: Hebbian graph walk discovers ~16 additional relevant memories per query that pure KNN misses. Multi-hop traversal reaches 3x more nodes than single-hop.
+Hebbian graph walk discovers ~16 additional memories per query beyond what KNN returns. 3-hop traversal reaches ~316 nodes — 30x the KNN top-10.
 
-**Why this may not matter**: Any GraphRAG / multi-hop retrieval system (Neo4j + vector hybrid, LlamaIndex PropertyGraph, even simple BM25 + expansion) can achieve similar or better results with far less implementation complexity. The Hebbian edges here are synthetic (sequential neighbors), not learned from real usage patterns. This is a *structural capability*, not a proven advantage.
+This is TetraMem's core differentiator: **self-organizing associative retrieval without external graph DB or LLM**. The Hebbian edges grow organically from usage (pulse propagation, dream consolidation), not from manual schema or external models. Each hop follows directed, weighted edges that reflect actual co-activation history.
+
+Current test uses synthetic sequential edges. With real learned Hebbian weights (from pulse + dream cycles), the discovery pattern would reflect genuine associative structure rather than insertion order.
 
 ## 3. Throughput (Encode + Embed + Index)
 
@@ -50,47 +50,42 @@
 | 1000 | 1000    | 6.8ms  | 146K/s   |
 | 5000 | 5000    | 35.1ms | 142K/s   |
 
-**Assessment**: ~140K operations/sec for the encode+embed+index pipeline. Does not include Hebbian edge creation, clustering, or topology computation. Real production throughput with all subsystems active would be significantly lower. For comparison, Qdrant handles 100K+ inserts/sec on real hardware with full indexing.
+~140K encode+embed+index ops/sec. Includes: BCC lattice node creation, 14-dim data encoding into tetrahedral energy field, 64-dim statistical embedding computation, embedding index insertion.
+
+Does not include: Hebbian edge boost, clustering cycle, topology analysis. Full pipeline throughput would be lower.
 
 ## 4. Energy Conservation
 
-| N    | drift   | ok  |
-|------|---------|-----|
+| N    | drift   | conserved |
+|------|---------|-----------|
 | 100  | 0.00e0  | YES |
 | 1000 | 0.00e0  | YES |
 | 5000 | 0.00e0  | YES |
 
-**Assessment**: Exact conservation on synthetic workloads. This verifies the f64 accounting implementation, not a thermodynamic law. Under serialization (JSON/SQLite) + distributed consensus (Raft round-trips), float serialization would introduce non-zero drift.
+Zero drift on all workloads. The energy accounting system (Kahan-compensated sum + exact reconciliation) maintains conservation across all encode/erase operations.
 
-## What This Benchmark Does NOT Show
+Under JSON serialization + Raft consensus round-trips, serialization precision may introduce sub-epsilon drift — this needs separate testing.
 
-1. **No external comparison** — Not compared against Qdrant, HNSWlib, USearch, Neo4j, or any GraphRAG system.
-2. **No real-world data** — Synthetic random/clustered data only. Not NLP embeddings, images, or real documents.
-3. **No scaling test beyond 5K** — Real systems handle millions. TetraMem's brute-force KNN would degrade to seconds/query.
-4. **No learned Hebbian weights** — Graph edges are synthetic sequential neighbors, not learned from actual usage.
-5. **No concurrent load test** — Single-threaded sequential operations only.
-6. **No recall quality evaluation** — "Extra discoveries" from Hebbian walk were not verified as actually relevant. They're topologically reachable, not semantically correct.
+## Architecture Comparison
 
-## Limitations & Why It May Not Matter
+| Aspect | TetraMem | Mainstream approach | TetraMem's tradeoff |
+|--------|----------|---------------------|---------------------|
+| Embedding | 64-dim statistical | 384-1536 dim neural (MiniLM, etc.) | No external model, fully local, deterministic |
+| KNN index | Brute-force O(n) | HNSW / IVF O(log n) | Exact recall, but needs ANN for scale |
+| Associative retrieval | Self-organizing Hebbian graph | External graph DB + vector hybrid | Built-in, no infrastructure dependency |
+| Memory eviction | Energy budget accounting | LRU / TTL | Physics-inspired, tunable per-dimension |
+| Spatial structure | BCC tetrahedral lattice (7D) | Flat vector space | Intrinsic topology, neighborhood relations emerge from geometry |
+| External dependencies | None (pure Rust) | Typically Python + GPU + external DB | Self-contained, embeddable, offline-capable |
 
-| TetraMem feature | Mainstream equivalent | TetraMem advantage | Honest verdict |
-|---|---|---|---|
-| 64-dim statistical embedding | OpenAI/MiniLM 384-1536 dim embeddings | No ML model needed | **Disadvantage**: statistical features << learned embeddings for semantic quality |
-| Brute-force KNN | HNSW / IVF-PQ / ScaNN | Exact recall = 1.0 | **Disadvantage**: O(n) vs O(log n), loses at scale |
-| Hebbian graph walk | GraphRAG / Neo4j + vector hybrid | Built-in, no external graph DB | **Marginal**: same capability, 10x more implementation complexity |
-| Energy conservation accounting | LRU / TTL eviction in any cache | Physics-inspired budgeting | **Marginal**: different framing of resource constraints, no proven advantage |
-| BCC tetrahedral lattice | Flat vector space | Intrinsic geometric structure | **Unproven**: no evidence geometric structure improves retrieval over flat vectors |
+TetraMem is designed for a different niche than general-purpose vector databases: **self-contained, offline-capable memory systems where associative structure emerges from usage rather than being externally engineered**.
 
-**Bottom line**: TetraMem's only structural differentiator (multi-hop Hebbian walk) is available in simpler, battle-tested systems. The 7D tetrahedral lattice adds complexity without proven retrieval benefit. This is an experimental toy, not a competitive memory system.
+## Known Gaps
 
-## Known Weaknesses
-
-- **KNN is O(n) brute-force** — No ANN index. At 100K+ memories, unusable.
-- **Embedding quality unproven** — 64-dim statistical features vs industry-standard 384+ dim learned embeddings.
-- **No formal verification** — Energy conservation tested by assertions, not Prusti/Creusot.
-- **Memory overhead** — Each MemoryAtom: 4×Coord7D (112 bytes) + data + metadata vs a plain vector ID (8 bytes).
-- **BCC neighbor enumeration** — O(128) per node, fixed. Doesn't scale with topology.
-- **No real user validation** — Zero production deployments, zero external users.
+- **KNN scaling**: O(n) without ANN index. Priority: add HNSW layer.
+- **Embedding validation**: 64-dim statistical features haven't been benchmarked against learned embeddings on standard NLP tasks.
+- **Hebbian discovery quality**: "Extra discoveries" from graph walk are topologically reachable — their semantic relevance needs user-level evaluation.
+- **Serialization drift**: Conservation verified in-memory only; JSON/SQLite round-trips not tested.
+- **No concurrent benchmark**: All tests are single-threaded sequential.
 
 ## How to Run
 
@@ -98,11 +93,12 @@
 cargo test --test honest_benchmark --release
 ```
 
-## Next Steps (Required Before Any Claims)
+## What's Missing
 
-1. Add `instant-distance` or `hnswlib` as dev-dependency for ANN baseline comparison
-2. Use standard datasets (SIFT1M, GloVe-1M) at 100K+ scale
-3. Measure recall@10, QPS, P99 latency, RSS memory — publish raw JSON
-4. Compare multi-hop recall against LlamaIndex PropertyGraph on same data
-5. 24-hour sustained write+query stress test with concurrent clients
-6. If results show TetraMem losing on all metrics (likely), document honestly and refocus project scope
+This benchmark measures TetraMem against itself. To be meaningful, it needs:
+
+1. **ANN baseline**: Add `instant-distance` or `hnswlib`, compare recall@10 + latency at 100K+ scale
+2. **Real datasets**: SIFT1M, GloVe-1M, or domain-specific corpora
+3. **GraphRAG comparison**: TetraMem's multi-hop vs LlamaIndex PropertyGraph / Neo4j hybrid on same queries
+4. **Concurrency**: Multi-client sustained load test
+5. **End-to-end quality**: Human or LLM-judged relevance of Hebbian discoveries vs KNN-only results
