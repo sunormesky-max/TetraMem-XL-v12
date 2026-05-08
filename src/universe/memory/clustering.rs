@@ -798,6 +798,20 @@ impl ClusteringEngine {
         self.placer.register_memory(anchor, data);
     }
 
+    pub fn report(&self) -> ClusteringReport {
+        ClusteringReport {
+            cycle: self.cycle_count,
+            attractors: self.gravity.attractor_count(),
+            memories_in_attractors: self.gravity.total_memories_in_attractors(),
+            tunnels_discovered: 0,
+            tunnels_applied: 0,
+            total_tunnels: self.tunnels.tunnel_count(),
+            bridges_created: 0,
+            total_bridges: self.bridges.bridge_count(),
+            total_memories: 0,
+        }
+    }
+
     pub fn run_maintenance_cycle(
         &mut self,
         memories: &[MemoryAtom],

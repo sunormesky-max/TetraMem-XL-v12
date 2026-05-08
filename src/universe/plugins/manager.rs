@@ -9,6 +9,8 @@ use crate::universe::plugins::sandbox::WasmSandbox;
 use std::collections::HashMap;
 use std::time::Instant;
 
+const MAX_PLUGINS: usize = 64;
+
 pub struct PluginManager {
     sandbox: WasmSandbox,
     plugins: HashMap<String, PluginEntry>,
@@ -65,6 +67,12 @@ impl PluginManager {
             return Err(AppError::BadRequest(format!(
                 "plugin '{}' already installed",
                 manifest.name
+            )));
+        }
+        if self.plugins.len() >= MAX_PLUGINS {
+            return Err(AppError::BadRequest(format!(
+                "maximum plugin count reached ({})",
+                MAX_PLUGINS
             )));
         }
         const MAX_WASM_SIZE: usize = 1024 * 1024;
@@ -260,6 +268,56 @@ impl PluginManager {
             total_executions,
             global_energy_budget: self.global_energy_budget,
         }
+    }
+
+    pub fn get_entry(&self, name: &str) -> Option<PluginEntryView<'_>> {
+        self.plugins.get(name).map(|e| PluginEntryView {
+            wasm_bytes: &e.wasm_bytes,
+            info: &e.info,
+        })
+    }
+
+    pub fn record_execution(
+        &mut self,
+        name: &str,
+        consumed: u64,
+        energy_budget: u64,
+        previous_consumed: u64,
+    ) -> Result<(), AppError> {
+        let entry = self
+            .plugins
+            .get_mut(name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
+        entry.info.executions += 1;
+        entry.info.energy_consumed += consumed;
+        entry.info.last_execution = Some(chrono::Utc::now().to_rfc3339());
+        if previous_consumed + consumed >= energy_budget {
+            entry.info.status = PluginStatus::SuspendedEnergyBudgetExceeded;
+        }
+        Ok(())
+    }
+}
+
+pub struct PluginEntryView<'a> {
+    wasm_bytes: &'a [u8],
+    info: &'a PluginInfo,
+}
+
+impl<'a> PluginEntryView<'a> {
+    pub fn wasm_bytes(&self) -> &[u8] {
+        self.wasm_bytes
+    }
+
+    pub fn manifest(&self) -> &PluginManifest {
+        &self.info.manifest
+    }
+
+    pub fn energy_consumed(&self) -> u64 {
+        self.info.energy_consumed
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        matches!(self.info.status, PluginStatus::Enabled)
     }
 }
 

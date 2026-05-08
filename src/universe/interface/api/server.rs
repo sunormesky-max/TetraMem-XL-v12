@@ -64,6 +64,8 @@ pub async fn login(
 ) -> Result<(StatusCode, Json<ApiResponse<LoginResponse>>), AppError> {
     if let Some(ConnectInfo(addr)) = addr {
         check_login_rate(&addr.ip().to_string())?;
+    } else {
+        check_login_rate("unknown")?;
     }
 
     if req.username.is_empty() || req.password.is_empty() {

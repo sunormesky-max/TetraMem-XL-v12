@@ -116,11 +116,41 @@ pub async fn plugin_execute(
     Path(name): Path<String>,
     Json(req): Json<PluginExecutionRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let mut plugins = state.plugins.write().await;
-    let result = plugins.execute(&name, req)?;
-    drop(plugins);
+    let (wasm_bytes, permissions, energy_limit, energy_budget, current_consumed) = {
+        let plugins = state.plugins.read().await;
+        let entry = plugins.get_entry(&name).ok_or_else(|| {
+            AppError::NotFound(format!("plugin '{}' not found", name))
+        })?;
+        if !entry.is_enabled() {
+            return Err(AppError::BadRequest(format!(
+                "plugin '{}' is not enabled",
+                name
+            )));
+        }
+        let energy_limit = req.energy_limit.unwrap_or(entry.manifest().energy_budget);
+        (
+            entry.wasm_bytes().to_vec(),
+            entry.manifest().permissions.clone(),
+            energy_limit,
+            entry.manifest().energy_budget,
+            entry.energy_consumed(),
+        )
+    };
 
-    let val = serde_json::to_value(result).unwrap_or_default();
+    let sandbox = crate::universe::plugins::sandbox::WasmSandbox::new();
+    let req_clone = req.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        sandbox.execute(&wasm_bytes, &req_clone, &permissions, energy_limit)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("plugin execution task failed: {}", e)))?;
+
+    {
+        let mut plugins = state.plugins.write().await;
+        plugins.record_execution(&name, result.energy_consumed, energy_budget, current_consumed)?;
+    }
+
+    let val = serde_json::to_value(&result).unwrap_or_default();
     Ok(Json(ApiResponse::ok(val)))
 }
 

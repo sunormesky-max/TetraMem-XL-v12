@@ -45,6 +45,20 @@ impl WasmSandbox {
     ) -> PluginExecutionResult {
         let start = std::time::Instant::now();
 
+        if request.input.len() > MAX_INPUT_BYTES {
+            return PluginExecutionResult {
+                output: Vec::new(),
+                energy_consumed: 0,
+                execution_time_us: start.elapsed().as_micros() as u64,
+                success: false,
+                error: Some(format!(
+                    "input too large: {} bytes (max {} bytes)",
+                    request.input.len(),
+                    MAX_INPUT_BYTES
+                )),
+            };
+        }
+
         let module = match Module::new(&self.engine, wasm_bytes) {
             Ok(m) => m,
             Err(e) => {
@@ -289,16 +303,19 @@ impl WasmSandbox {
             "env",
             "tetramem_output_append",
             |mut caller: wasmi::Caller<'_, HostState>, value: u32| {
-                caller
-                    .data_mut()
-                    .output_data
-                    .extend_from_slice(&value.to_le_bytes());
+                let state = caller.data_mut();
+                if state.output_data.len() + 4 <= MAX_OUTPUT_BYTES {
+                    state.output_data.extend_from_slice(&value.to_le_bytes());
+                }
             },
         )?;
 
         Ok(())
     }
 }
+
+const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+const MAX_INPUT_BYTES: usize = 1024 * 1024;
 
 pub struct HostState {
     pub limits: wasmi::StoreLimits,
@@ -320,7 +337,7 @@ impl HostState {
             energy_consumed: 0,
             permissions,
             input_data,
-            output_data: Vec::new(),
+            output_data: Vec::with_capacity(4096),
             log_messages: Vec::new(),
         }
     }

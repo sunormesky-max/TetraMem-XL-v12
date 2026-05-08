@@ -315,12 +315,13 @@ pub async fn semantic_extract_concepts(
 pub async fn clustering_status(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<ClusteringStatusResponse>> {
-    let _cl = state.clustering.read().await;
+    let cl = state.clustering.read().await;
+    let report = cl.report();
     Json(ApiResponse::ok(ClusteringStatusResponse {
-        memories_clustered: 0,
-        attractors_found: 0,
-        tunnels_active: 0,
-        bridges_active: 0,
+        memories_clustered: report.memories_in_attractors,
+        attractors_found: report.attractors,
+        tunnels_active: report.total_tunnels,
+        bridges_active: report.total_bridges,
     }))
 }
 

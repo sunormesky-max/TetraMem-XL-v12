@@ -2,7 +2,6 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -70,12 +69,6 @@ impl PluginInfo {
             manifest,
         }
     }
-}
-
-pub struct PluginSandbox {
-    pub wasm_bytes: Vec<u8>,
-    pub info: PluginInfo,
-    pub installed_at: Instant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

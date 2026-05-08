@@ -59,8 +59,7 @@ impl ContradictionDetector {
             .enumerate()
             .filter_map(|(i, m)| {
                 if m.data_dim() > 0 {
-                    let data = vec![0.5; m.data_dim()];
-                    let emb = SemanticEmbedding::from_data_and_annotation(&data, m);
+                    let emb = SemanticEmbedding::from_annotation(m);
                     Some((i, emb))
                 } else {
                     None
