@@ -5,4 +5,5 @@ pub mod autoscale;
 pub mod cognitive_controller;
 pub mod observer;
 pub mod regulation;
+pub mod spontaneous_drive;
 pub mod watchdog;

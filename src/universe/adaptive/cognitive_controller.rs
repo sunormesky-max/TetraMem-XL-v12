@@ -6,9 +6,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::universe::adaptive::spontaneous_drive::SpontaneousDrive;
 use crate::universe::api::AppState;
 use crate::universe::cognitive::cognitive_state::CognitiveStateEngine;
 use crate::universe::config::MaintenanceConfig;
+use crate::universe::config::SpontaneousConfig;
 use crate::universe::dream::DreamEngine;
 use crate::universe::events::UniverseEvent;
 use crate::universe::memory::aging::AgingEngine;
@@ -28,6 +30,7 @@ struct ControllerState {
     forget_tracker: HashMap<String, u32>,
     last_elapsed_ms: f64,
     consecutive_failures: u32,
+    spontaneous: Option<SpontaneousDrive>,
 }
 
 pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
@@ -37,13 +40,16 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
         return None;
     }
 
+    let spontaneous_cfg = state.config.spontaneous.clone();
+
     let base_interval = cfg.interval_secs.max(MIN_INTERVAL_SECS);
     tracing::info!(
-        "cognitive controller: spawning (base_interval={}s, dream_urgency>={:.2}, auto_forget={}, max_memories={})",
+        "cognitive controller: spawning (base_interval={}s, dream_urgency>={:.2}, auto_forget={}, max_memories={}, spontaneous={})",
         base_interval,
         cfg.dream_min_urgency,
         cfg.auto_forget_enabled,
         cfg.max_memories,
+        spontaneous_cfg.enabled,
     );
 
     let handle = tokio::spawn(async move {
@@ -52,6 +58,11 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
             forget_tracker: HashMap::new(),
             last_elapsed_ms: 0.0,
             consecutive_failures: 0,
+            spontaneous: if spontaneous_cfg.enabled {
+                Some(SpontaneousDrive::new(&spontaneous_cfg))
+            } else {
+                None
+            },
         };
 
         loop {
@@ -61,7 +72,7 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
             interval.tick().await;
             cycle += 1;
 
-            run_maintenance_cycle(&state, &cfg, cycle, &mut ctrl).await;
+            run_maintenance_cycle(&state, &cfg, &spontaneous_cfg, cycle, &mut ctrl).await;
         }
     });
 
@@ -85,6 +96,7 @@ fn compute_adaptive_interval(base: u64, ctrl: &ControllerState) -> u64 {
 async fn run_maintenance_cycle(
     state: &Arc<AppState>,
     cfg: &MaintenanceConfig,
+    spontaneous_cfg: &SpontaneousConfig,
     cycle: u64,
     ctrl: &mut ControllerState,
 ) {
@@ -305,6 +317,10 @@ async fn run_maintenance_cycle(
         if drained > 0 {
             tracing::debug!(cycle, drained, "cognitive controller: events drained");
         }
+    }
+
+    if let Some(ref mut drive) = ctrl.spontaneous {
+        drive.run_cycle(state, spontaneous_cfg).await;
     }
 
     ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;

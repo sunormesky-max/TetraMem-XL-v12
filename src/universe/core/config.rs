@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub rate_limit: RateLimitConfig,
     #[serde(default = "default_maintenance")]
     pub maintenance: MaintenanceConfig,
+    #[serde(default = "default_spontaneous")]
+    pub spontaneous: SpontaneousConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +137,32 @@ pub struct MaintenanceConfig {
     pub auto_forget_grace_cycles: u32,
     #[serde(default = "default_max_memories")]
     pub max_memories: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpontaneousConfig {
+    #[serde(default = "default_spontaneous_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_pulse_enabled")]
+    pub pulse_enabled: bool,
+    #[serde(default = "default_recall_enabled")]
+    pub recall_enabled: bool,
+    #[serde(default = "default_curiosity_enabled")]
+    pub curiosity_enabled: bool,
+    #[serde(default = "default_event_reaction_enabled")]
+    pub event_reaction_enabled: bool,
+    #[serde(default = "default_base_curiosity")]
+    pub base_curiosity: f64,
+    #[serde(default = "default_base_reflection")]
+    pub base_reflection: f64,
+    #[serde(default = "default_base_exploration")]
+    pub base_exploration: f64,
+}
+
+impl Default for SpontaneousConfig {
+    fn default() -> Self {
+        default_spontaneous()
+    }
 }
 
 fn default_server() -> ServerConfig {
@@ -318,6 +346,43 @@ fn default_auto_forget_grace_cycles() -> u32 {
 fn default_max_memories() -> usize {
     100_000
 }
+fn default_spontaneous_enabled() -> bool {
+    true
+}
+fn default_pulse_enabled() -> bool {
+    true
+}
+fn default_recall_enabled() -> bool {
+    true
+}
+fn default_curiosity_enabled() -> bool {
+    true
+}
+fn default_event_reaction_enabled() -> bool {
+    true
+}
+fn default_base_curiosity() -> f64 {
+    0.5
+}
+fn default_base_reflection() -> f64 {
+    0.3
+}
+fn default_base_exploration() -> f64 {
+    0.4
+}
+
+fn default_spontaneous() -> SpontaneousConfig {
+    SpontaneousConfig {
+        enabled: default_spontaneous_enabled(),
+        pulse_enabled: default_pulse_enabled(),
+        recall_enabled: default_recall_enabled(),
+        curiosity_enabled: default_curiosity_enabled(),
+        event_reaction_enabled: default_event_reaction_enabled(),
+        base_curiosity: default_base_curiosity(),
+        base_reflection: default_base_reflection(),
+        base_exploration: default_base_exploration(),
+    }
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -329,6 +394,7 @@ impl Default for AppConfig {
             backup: default_backup(),
             rate_limit: default_rate_limit(),
             maintenance: default_maintenance(),
+            spontaneous: default_spontaneous(),
         }
     }
 }
