@@ -150,9 +150,9 @@ async fn run_maintenance_inner(
     let (cognitive_state, mem_count) = {
         let u = state.universe.read().await;
         let h = state.hebbian.read().await;
-        let mems = state.memories.read().await;
-        let cs = CognitiveStateEngine::assess(&u, &h, &mems);
-        let mc = mems.len();
+        let store = state.memory_store.read().await;
+        let cs = CognitiveStateEngine::assess(&u, &h, &store.memories);
+        let mc = store.memories.len();
         (cs, mc)
     };
 
@@ -168,10 +168,10 @@ async fn run_maintenance_inner(
 
     if should_dream {
         let mut h = state.hebbian.write().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
 
         let mut reinforced = 0usize;
-        for mem in mems.iter() {
+        for mem in store.memories.iter() {
             if reinforced >= MAX_WEAK_REINFORCE {
                 break;
             }
@@ -187,7 +187,7 @@ async fn run_maintenance_inner(
                 }
             }
         }
-        drop(mems);
+        drop(store);
         drop(h);
 
         if reinforced > 0 {
@@ -201,12 +201,12 @@ async fn run_maintenance_inner(
 
     if should_dream {
         let u = state.universe.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let mut h = state.hebbian.write().await;
 
         let dream = DreamEngine::new();
-        let report = dream.dream(&u, &mut h, &mems);
-        drop(mems);
+        let report = dream.dream(&u, &mut h, &store.memories);
+        drop(store);
         drop(u);
         drop(h);
 
@@ -233,15 +233,17 @@ async fn run_maintenance_inner(
 
     if cfg.aging_enabled {
         let accessed: Vec<String> = {
-            let mems = state.memories.read().await;
-            mems.iter()
+            let store = state.memory_store.read().await;
+            store
+                .memories
+                .iter()
                 .filter(|m| m.importance() > 0.5)
                 .map(|m| format!("{}", m.anchor()))
                 .collect()
         };
-        let mut mems = state.memories.write().await;
-        let report = AgingEngine::default().age(&mut mems, &accessed);
-        drop(mems);
+        let mut store = state.memory_store.write().await;
+        let report = AgingEngine::default().age(&mut store.memories, &accessed);
+        drop(store);
 
         if report.flagged_for_forget > 0 {
             tracing::warn!(
@@ -258,14 +260,14 @@ async fn run_maintenance_inner(
 
     if cfg.clustering_enabled {
         let u = state.universe.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let mut clustering = state.clustering.write().await;
         let mut h = state.hebbian.write().await;
 
-        let report = clustering.run_maintenance_cycle(&mems, &mut h, &u);
+        let report = clustering.run_maintenance_cycle(&store.memories, &mut h, &u);
         drop(h);
         drop(clustering);
-        drop(mems);
+        drop(store);
         drop(u);
 
         tracing::info!(
@@ -299,10 +301,11 @@ async fn run_maintenance_inner(
         let mut u = state.universe.write().await;
         let mut h = state.hebbian.write().await;
         let mut crystal = state.crystal.write().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
 
-        let report = RegulationEngine::new().regulate(&mut u, &mut h, &mut crystal, &mems);
-        drop(mems);
+        let report =
+            RegulationEngine::new().regulate(&mut u, &mut h, &mut crystal, &store.memories);
+        drop(store);
         drop(crystal);
         drop(h);
         drop(u);
@@ -327,14 +330,20 @@ async fn run_maintenance_inner(
         let mut u = state.universe.write().await;
         let mut h = state.hebbian.write().await;
         let mut crystal = state.crystal.write().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let mut watchdog = state.watchdog.write().await;
         let mut backup = state.backup.write().await;
 
-        let report = watchdog.checkup_with_backup(&mut u, &mut h, &mut crystal, &mems, &mut backup);
+        let report = watchdog.checkup_with_backup(
+            &mut u,
+            &mut h,
+            &mut crystal,
+            &store.memories,
+            &mut backup,
+        );
         drop(backup);
         drop(watchdog);
-        drop(mems);
+        drop(store);
         drop(crystal);
         drop(h);
         drop(u);
@@ -379,8 +388,8 @@ async fn run_maintenance_inner(
 
 async fn restore_identity_importance(state: &Arc<AppState>) {
     let guard = state.identity_guard.read().await;
-    let mut mems = state.memories.write().await;
-    for mem in mems.iter_mut() {
+    let mut store = state.memory_store.write().await;
+    for mem in store.memories.iter_mut() {
         if guard.is_identity_memory(mem) && mem.importance() < IDENTITY_RESTORE_MIN {
             mem.set_importance(IDENTITY_RESTORE_MIN);
             tracing::debug!(
@@ -390,7 +399,7 @@ async fn restore_identity_importance(state: &Arc<AppState>) {
             );
         }
     }
-    drop(mems);
+    drop(store);
     drop(guard);
 }
 
@@ -401,14 +410,13 @@ async fn auto_forget_step(
     ctrl: &mut ControllerState,
 ) {
     let guard = state.identity_guard.read().await;
-    let mut mems = state.memories.write().await;
-    let mut idx = state.memory_index.write().await;
+    let mut store = state.memory_store.write().await;
     let mut u = state.universe.write().await;
 
     let mut to_erase: Vec<usize> = Vec::new();
     let mut over_limit_count: usize = 0;
 
-    for (i, mem) in mems.iter().enumerate() {
+    for (i, mem) in store.memories.iter().enumerate() {
         let anchor_str = format!("{}", mem.anchor());
 
         if mem.importance() < FORGET_THRESHOLD {
@@ -425,9 +433,10 @@ async fn auto_forget_step(
         }
     }
 
-    if mems.len() > cfg.max_memories {
-        let excess = mems.len() - cfg.max_memories;
-        let mut candidates: Vec<(usize, f64)> = mems
+    if store.memories.len() > cfg.max_memories {
+        let excess = store.memories.len() - cfg.max_memories;
+        let mut candidates: Vec<(usize, f64)> = store
+            .memories
             .iter()
             .enumerate()
             .filter(|(i, m)| !to_erase.contains(i) && !guard.is_identity_memory(m))
@@ -446,30 +455,23 @@ async fn auto_forget_step(
         to_erase.dedup();
 
         for &i in to_erase.iter().rev() {
-            if i < mems.len() {
-                MemoryCodec::erase(&mut u, &mems[i]);
-                let anchor_str = format!("{}", mems[i].anchor());
-                idx.remove(&anchor_str);
-                for val in idx.values_mut() {
-                    if *val > i {
-                        *val -= 1;
-                    }
-                }
+            if i < store.memories.len() {
+                MemoryCodec::erase(&mut u, &store.memories[i]);
+                let anchor_str = format!("{}", store.memories[i].anchor());
                 ctrl.forget_tracker.remove(&anchor_str);
-                mems.remove(i);
+                store.remove_at(i);
             }
         }
 
         tracing::info!(
             cycle,
             erased = to_erase.len(),
-            remaining = mems.len(),
+            remaining = store.memories.len(),
             over_limit = over_limit_count,
             "cognitive controller: auto-forget erased memories"
         );
     }
 
-    drop(mems);
-    drop(idx);
+    drop(store);
     drop(u);
 }

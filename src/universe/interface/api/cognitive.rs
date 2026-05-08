@@ -96,7 +96,7 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
     }
     let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
     if let Some(c) = metrics::API_DREAM_TOTAL.get() {
         c.inc();
@@ -104,7 +104,7 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
     tracing::info!("running dream cycle");
 
     let dream = DreamEngine::new();
-    let report = dream.dream(&u, &mut h, &mems);
+    let report = dream.dream(&u, &mut h, &store.memories);
 
     tracing::info!(
         replayed = report.paths_replayed,
@@ -113,11 +113,11 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
         "dream cycle complete"
     );
 
-    drop(mems);
-    let mems = state.memories.read().await;
+    drop(store);
+    let store = state.memory_store.read().await;
     {
         let mut sem = state.semantic.write().await;
-        sem.sync_after_dream(&mems, &u);
+        sem.sync_after_dream(&store.memories, &u);
     }
 
     state.event_sender.publish(UniverseEvent::DreamCompleted {
@@ -143,10 +143,10 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
 
 pub async fn regulate(State(state): State<SharedState>) -> Json<ApiResponse<Vec<String>>> {
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut h = state.hebbian.write().await;
 
-    let report = UniverseObserver::inspect(&u, &h, &mems);
+    let report = UniverseObserver::inspect(&u, &h, &store.memories);
     let regulator = SelfRegulator::new();
     let actions = regulator.regulate(&report, &mut h);
 
@@ -226,13 +226,15 @@ pub async fn assess_novelty(
 
     let (report, should_store) = {
         let sem = state.semantic.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
         let knn = sem.search_similar(&req.data, 5);
         let knn_distances: Vec<(f64, usize)> = knn
             .iter()
             .filter_map(|r| {
-                mems.iter()
+                store
+                    .memories
+                    .iter()
                     .position(|m| {
                         let mk = crate::universe::memory::AtomKey::from_atom(m);
                         mk == r.atom_key
@@ -241,7 +243,7 @@ pub async fn assess_novelty(
             })
             .collect();
         let detector = crate::universe::memory::NoveltyDetector::default();
-        let nr = detector.assess(&req.data, &knn_distances, &anchor, &h, &mems);
+        let nr = detector.assess(&req.data, &knn_distances, &anchor, &h, &store.memories);
         let ss = detector.should_store(&nr);
         (nr, ss)
     };
@@ -273,9 +275,9 @@ pub async fn semantic_index_all(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<SemanticStatusResponse>> {
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut sem = state.semantic.write().await;
-    for atom in mems.iter() {
+    for atom in store.memories.iter() {
         if let Ok(data) = crate::universe::memory::MemoryCodec::decode(&u, atom) {
             sem.index_memory(atom, &data);
         }
@@ -291,12 +293,13 @@ pub async fn semantic_index_all(
 pub async fn semantic_extract_concepts(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<SemanticStatusResponse>> {
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut sem = state.semantic.write().await;
     let atoms_by_key: std::collections::HashMap<
         crate::universe::memory::AtomKey,
         &crate::universe::memory::MemoryAtom,
-    > = mems
+    > = store
+        .memories
         .iter()
         .map(|a| (crate::universe::memory::AtomKey::from_atom(a), a))
         .collect();
@@ -325,10 +328,10 @@ pub async fn clustering_maintenance(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<ClusteringStatusResponse>> {
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut h = state.hebbian.write().await;
     let mut cl = state.clustering.write().await;
-    let report = cl.run_maintenance_cycle(&mems, &mut h, &u);
+    let report = cl.run_maintenance_cycle(&store.memories, &mut h, &u);
     Json(ApiResponse::ok(ClusteringStatusResponse {
         memories_clustered: report.memories_in_attractors,
         attractors_found: report.attractors,
@@ -374,9 +377,9 @@ pub async fn watchdog_checkup(
     let mut u = state.universe.write().await;
     let mut h = state.hebbian.write().await;
     let mut c = state.crystal.write().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut wd = state.watchdog.write().await;
-    let report = wd.checkup(&mut u, &mut h, &mut c, &mems);
+    let report = wd.checkup(&mut u, &mut h, &mut c, &store.memories);
     Json(ApiResponse::ok(WatchdogCheckupResponse {
         level: report.level.as_str().to_string(),
         utilization: report.utilization,
@@ -394,14 +397,14 @@ pub async fn agent_execute_observer(
 ) -> Json<ApiResponse<AgentExecuteResponse>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let c = state.crystal.read().await;
     let con = state.constitution.read().await;
     let agent = ObserverAgent;
     let ctx = AgentContext {
         universe: &u,
         hebbian: &h,
-        memories: &mems,
+        memories: &store.memories,
         crystal: &c,
         constitution: &con,
         event_sender: Some(&state.event_sender),
@@ -420,14 +423,14 @@ pub async fn agent_execute_emotion(
 ) -> Json<ApiResponse<AgentExecuteResponse>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let c = state.crystal.read().await;
     let con = state.constitution.read().await;
     let agent = EmotionAgent;
     let ctx = AgentContext {
         universe: &u,
         hebbian: &h,
-        memories: &mems,
+        memories: &store.memories,
         crystal: &c,
         constitution: &con,
         event_sender: Some(&state.event_sender),
@@ -446,14 +449,14 @@ pub async fn agent_execute_crystal(
 ) -> Json<ApiResponse<AgentExecuteResponse>> {
     let mut u = state.universe.write().await;
     let mut h = state.hebbian.write().await;
-    let mut mems = state.memories.write().await;
+    let mut store = state.memory_store.write().await;
     let mut c = state.crystal.write().await;
     let con = state.constitution.read().await;
     let agent = CrystalAgent;
     let mut ctx = AgentContextMut {
         universe: &mut u,
         hebbian: &mut h,
-        memories: &mut mems,
+        memories: &mut store.memories,
         crystal: &mut c,
         constitution: &con,
         event_sender: Some(&state.event_sender),
@@ -472,11 +475,11 @@ pub async fn memory_aging(
     Json(req): Json<super::types::AgingRequest>,
 ) -> Result<Json<ApiResponse<super::types::AgingResponse>>, AppError> {
     let accessed = req.accessed_anchors.unwrap_or_default();
-    let mut mems = state.memories.write().await;
+    let mut store = state.memory_store.write().await;
     let engine = crate::universe::memory::AgingEngine::default();
-    let report = engine.age(&mut mems, &accessed);
+    let report = engine.age(&mut store.memories, &accessed);
     let flagged = engine
-        .flagged_memories(&mems)
+        .flagged_memories(&store.memories)
         .iter()
         .map(|(_, m)| format!("{}", m.anchor()))
         .collect();
@@ -493,9 +496,9 @@ pub async fn memory_aging(
 pub async fn detect_contradictions(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<serde_json::Value>> {
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let detector = crate::universe::memory::ContradictionDetector::default();
-    let report = detector.detect(&mems);
+    let report = detector.detect(&store.memories);
     Json(ApiResponse::ok(serde_json::json!({
         "contradictions": report.contradictions.len(),
         "merge_candidates": report.merge_candidates.len(),
@@ -509,9 +512,12 @@ pub async fn get_cognitive_state(
 ) -> Json<ApiResponse<serde_json::Value>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let cs =
-        crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(&u, &h, &mems);
+    let store = state.memory_store.read().await;
+    let cs = crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(
+        &u,
+        &h,
+        &store.memories,
+    );
     let json =
         serde_json::to_value(&cs).unwrap_or(serde_json::json!({"error": "serialize failed"}));
     Json(ApiResponse::ok(json))
@@ -522,8 +528,12 @@ pub async fn get_attention_map(
 ) -> Json<ApiResponse<serde_json::Value>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let map = crate::universe::cognitive::attention::AttentionEngine::new().compute(&u, &h, &mems);
+    let store = state.memory_store.read().await;
+    let map = crate::universe::cognitive::attention::AttentionEngine::new().compute(
+        &u,
+        &h,
+        &store.memories,
+    );
     let json =
         serde_json::to_value(&map).unwrap_or(serde_json::json!({"error": "serialize failed"}));
     Json(ApiResponse::ok(json))
@@ -534,10 +544,10 @@ pub async fn get_dream_insights(
 ) -> Json<ApiResponse<serde_json::Value>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
     let report = crate::universe::cognitive::dream_insight::DreamInsightEngine::new()
-        .generate_insights(&u, &h, &mems, &sem);
+        .generate_insights(&u, &h, &store.memories, &sem);
     let json =
         serde_json::to_value(&report).unwrap_or(serde_json::json!({"error": "serialize failed"}));
     Json(ApiResponse::ok(json))
@@ -548,20 +558,23 @@ pub async fn reflect(
 ) -> Result<Json<ApiResponse<super::types::ReflectResponse>>, AppError> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
 
     let insights = crate::universe::cognitive::dream_insight::DreamInsightEngine::new()
-        .generate_insights(&u, &h, &mems, &sem);
+        .generate_insights(&u, &h, &store.memories, &sem);
 
-    let cs =
-        crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(&u, &h, &mems);
+    let cs = crate::universe::cognitive::cognitive_state::CognitiveStateEngine::assess(
+        &u,
+        &h,
+        &store.memories,
+    );
 
     let conservation_ok = u.verify_conservation();
 
     drop(u);
     drop(h);
-    drop(mems);
+    drop(store);
     drop(sem);
 
     let insights_json = serde_json::to_value(&insights).unwrap_or(serde_json::json!({}));
@@ -578,11 +591,11 @@ pub async fn reflect(
 pub async fn identity_profile(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<serde_json::Value>> {
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let guard = state.identity_guard.read().await;
-    let profile = guard.profile(&mems);
+    let profile = guard.profile(&store.memories);
     drop(guard);
-    drop(mems);
+    drop(store);
     match serde_json::to_value(profile) {
         Ok(v) => Json(ApiResponse::ok(v)),
         Err(e) => Json(ApiResponse::err(e.to_string())),
@@ -594,10 +607,13 @@ pub async fn meta_cognitive_state(
 ) -> Json<ApiResponse<serde_json::Value>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let model =
-        crate::universe::cognitive::meta_cognitive::MetaCognitiveEngine::assess(&u, &h, &mems);
-    drop(mems);
+    let store = state.memory_store.read().await;
+    let model = crate::universe::cognitive::meta_cognitive::MetaCognitiveEngine::assess(
+        &u,
+        &h,
+        &store.memories,
+    );
+    drop(store);
     drop(h);
     drop(u);
     match serde_json::to_value(model) {

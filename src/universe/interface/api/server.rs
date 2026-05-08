@@ -115,7 +115,7 @@ pub async fn start_server(
         let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);
         let u = state.universe.read().await;
         let h = state.hebbian.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let c = state.crystal.read().await;
         if state.config.backup.persist_backend == "sqlite" {
             let sqlite_path = persist_path.with_extension("db");
@@ -123,15 +123,20 @@ pub async fn start_server(
                 &sqlite_path,
                 &u,
                 &h,
-                &mems,
+                &store.memories,
                 &c,
             ) {
                 Ok(rows) => tracing::info!("final SQLite persist on shutdown: {} rows", rows),
                 Err(e) => tracing::warn!("final SQLite persist failed: {}", e),
             }
         } else {
-            match crate::universe::persist_file::PersistFile::save(&persist_path, &u, &h, &mems, &c)
-            {
+            match crate::universe::persist_file::PersistFile::save(
+                &persist_path,
+                &u,
+                &h,
+                &store.memories,
+                &c,
+            ) {
                 Ok(info) => tracing::info!("final persist on shutdown: {}", info),
                 Err(e) => tracing::warn!("final persist failed: {}", e),
             }

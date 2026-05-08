@@ -26,8 +26,9 @@ fn build_state() -> Arc<AppState> {
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(10_000_000.0)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
-        memories: tokio::sync::RwLock::new(Vec::new()),
-        memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        memory_store: tokio::sync::RwLock::new(
+            tetramem_v12::universe::api::MemoryStore::new(),
+        ),
         crystal: tokio::sync::RwLock::new(CrystalEngine::new()),
         perception: tokio::sync::RwLock::new(
             tetramem_v12::universe::perception::PerceptionBudget::new(10_000_000.0),

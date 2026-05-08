@@ -37,13 +37,15 @@ pub async fn remember(
 
     let novelty_report = {
         let sem = state.semantic.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
         let knn = sem.search_similar(&data, 5);
         let knn_distances: Vec<(f64, usize)> = knn
             .iter()
             .filter_map(|r| {
-                mems.iter()
+                store
+                    .memories
+                    .iter()
                     .position(|m| {
                         let mk = crate::universe::memory::AtomKey::from_atom(m);
                         mk == r.atom_key
@@ -52,7 +54,7 @@ pub async fn remember(
             })
             .collect();
         let detector = crate::universe::memory::NoveltyDetector::default();
-        detector.assess(&data, &knn_distances, &anchor, &h, &mems)
+        detector.assess(&data, &knn_distances, &anchor, &h, &store.memories)
     };
 
     let adjusted_importance = if importance < 0.01 {
@@ -62,8 +64,7 @@ pub async fn remember(
     };
 
     let mut u = state.universe.write().await;
-    let mut mems = state.memories.write().await;
-    let mut idx = state.memory_index.write().await;
+    let mut store = state.memory_store.write().await;
     let mut sem = state.semantic.write().await;
     let mut h = state.hebbian.write().await;
     let mut cl = state.clustering.write().await;
@@ -101,7 +102,7 @@ pub async fn remember(
     sem.index_memory(&atom, &data);
     let similar = sem.search_similar(&data, 5);
     for hit in &similar {
-        if let Some(other) = mems.iter().find(|m| {
+        if let Some(other) = store.memories.iter().find(|m| {
             let mk = crate::universe::memory::AtomKey::from_atom(m);
             mk == hit.atom_key
         }) {
@@ -112,16 +113,20 @@ pub async fn remember(
 
     cl.register_memory(*atom.anchor(), &data);
 
-    let i = mems.len();
-    mems.push(atom);
-    idx.insert(anchor_str.clone(), i);
+    store.push(atom);
 
     let conservation_ok = u.verify_conservation();
 
     {
         let interests = state.interests.read().await;
         let surfacer = crate::universe::memory::MemorySurfacer::default();
-        let surfaced = surfacer.surface(&anchor, &h, &mems, &interests, novelty_report.score);
+        let surfaced = surfacer.surface(
+            &anchor,
+            &h,
+            &store.memories,
+            &interests,
+            novelty_report.score,
+        );
         drop(interests);
         for mut sm in surfaced {
             sm.seq = state
@@ -167,11 +172,11 @@ pub async fn recall(
     let ideal_phys = ideal_anchor.physical();
 
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let h = state.hebbian.read().await;
 
     let mut spatial_hits: Vec<(usize, f64)> = Vec::new();
-    for (i, mem) in mems.iter().enumerate() {
+    for (i, mem) in store.memories.iter().enumerate() {
         if let Some(ref src) = req.source {
             if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
                 continue;
@@ -194,12 +199,14 @@ pub async fn recall(
         if hits.len() >= limit {
             break;
         }
-        let mem = &mems[idx];
+        let mem = &store.memories[idx];
         let nb = h.get_neighbors(mem.anchor());
         let associated: Vec<String> = nb
             .iter()
             .filter_map(|(coord, _)| {
-                mems.iter()
+                store
+                    .memories
+                    .iter()
                     .find(|m| m.anchor() == coord)
                     .map(|m| format!("{}", m.anchor()))
             })
@@ -229,7 +236,8 @@ pub async fn recall(
             if hits.iter().any(|h| h["anchor"] == k_str) {
                 continue;
             }
-            if let Some(mem) = mems
+            if let Some(mem) = store
+                .memories
                 .iter()
                 .find(|m| m.anchor().basis() == k.atom_key.vertices_basis[0])
             {
@@ -274,11 +282,12 @@ pub async fn associate(
     };
 
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
 
-    let seed_anchor = mems
+    let seed_anchor = store
+        .memories
         .iter()
         .min_by(|a, b| {
             let da = a.anchor().distance_sq(&ideal_anchor);
@@ -303,7 +312,8 @@ pub async fn associate(
             .iter()
             .take(5)
             .map(|t| {
-                let desc = mems
+                let desc = store
+                    .memories
                     .iter()
                     .find(|m| format!("{}", m.anchor()) == *t)
                     .and_then(|m| m.description().map(String::from))
@@ -336,26 +346,26 @@ pub async fn consolidate(
     let report = {
         let u = state.universe.read().await;
         let mut h = state.hebbian.write().await;
-        let mems = state.memories.read().await;
-        crate::universe::dream::DreamEngine::new().dream(&u, &mut h, &mems)
+        let store = state.memory_store.read().await;
+        crate::universe::dream::DreamEngine::new().dream(&u, &mut h, &store.memories)
     };
 
     let maintenance_report = {
         let u = state.universe.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let mut h = state.hebbian.write().await;
         let mut cl = state.clustering.write().await;
-        cl.run_maintenance_cycle(&mems, &mut h, &u);
+        cl.run_maintenance_cycle(&store.memories, &mut h, &u);
         (cl, h)
     };
     let (_cl, h) = maintenance_report;
 
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
     let mut weakened = 0usize;
     let mut strengthened = 0usize;
-    for mem in mems.iter() {
+    for mem in store.memories.iter() {
         let neighbors = h.get_neighbors(mem.anchor());
         for (_, weight) in &neighbors {
             if *weight < importance_threshold {
@@ -392,21 +402,22 @@ pub async fn context(
 ) -> Result<Json<ApiResponse<Value>>, AppError> {
     match req.action.as_str() {
         "status" => {
-            let mems = state.memories.read().await;
+            let store = state.memory_store.read().await;
             Ok(Json(ApiResponse::ok(json!({
-                "total_memories": mems.len(),
+                "total_memories": store.memories.len(),
             }))))
         }
         "reconstruct" => {
             let query = req.content.unwrap_or_default();
             let query_data = nlp::text_to_embedding(&query, 0.5);
-            let mems = state.memories.read().await;
+            let store = state.memory_store.read().await;
             let sem = state.semantic.read().await;
 
             let knn = sem.search_similar(&query_data, 5);
             let mut reconstructed = Vec::new();
             for k in &knn {
-                if let Some(mem) = mems
+                if let Some(mem) = store
+                    .memories
                     .iter()
                     .find(|m| m.anchor().basis() == k.atom_key.vertices_basis[0])
                 {
@@ -432,7 +443,7 @@ pub async fn context(
             };
             let ideal_phys = ideal_anchor.physical();
 
-            let mems = state.memories.read().await;
+            let mems = state.memory_store.read().await;
             let h = state.hebbian.read().await;
             let sem = state.semantic.read().await;
 
@@ -440,6 +451,7 @@ pub async fn context(
             let mut used_basis = std::collections::HashSet::<[i32; 7]>::new();
 
             let mut all_anchors: Vec<_> = mems
+                .memories
                 .iter()
                 .map(|m| (m.anchor().physical(), *m.anchor(), m.created_at()))
                 .collect();
@@ -454,7 +466,7 @@ pub async fn context(
                 let dz = (ideal_phys[2] - phys[2]).abs();
                 if dx + dy + dz < 150 && !used_basis.contains(&anchor.basis()) {
                     used_basis.insert(anchor.basis());
-                    if let Some(mem) = mems.iter().find(|m| m.anchor() == anchor) {
+                    if let Some(mem) = mems.memories.iter().find(|m| m.anchor() == anchor) {
                         let desc = mem.description().unwrap_or("").to_string();
                         if !desc.is_empty() {
                             recent.push(json!({
@@ -481,6 +493,7 @@ pub async fn context(
                     }
                     used_basis.insert(anchor.basis());
                     if let Some(mem) = mems
+                        .memories
                         .iter()
                         .find(|m| m.anchor().basis() == k.atom_key.vertices_basis[0])
                     {
@@ -505,7 +518,7 @@ pub async fn context(
                     if recent.len() >= 8 {
                         break;
                     }
-                    if let Some(mem) = mems.iter().find(|m| m.anchor() == coord) {
+                    if let Some(mem) = mems.memories.iter().find(|m| m.anchor() == coord) {
                         let desc = mem.description().unwrap_or("").to_string();
                         if !desc.is_empty() && !used_basis.contains(&mem.anchor().basis()) {
                             used_basis.insert(mem.anchor().basis());
@@ -546,21 +559,15 @@ pub async fn forget(
     let anchor_str = format!("{}", &anchor);
 
     let mut u = state.universe.write().await;
-    let mut mems = state.memories.write().await;
-    let mut idx = state.memory_index.write().await;
+    let mut store = state.memory_store.write().await;
 
-    let pos = idx.remove(&anchor_str);
+    let pos = store.index.get(&anchor_str).copied();
     match pos {
         Some(i) => {
-            if i < mems.len() {
-                let desc = mems[i].description().unwrap_or("").to_string();
-                crate::universe::memory::MemoryCodec::erase(&mut u, &mems[i]);
-                mems.remove(i);
-                for (_key, val) in idx.iter_mut() {
-                    if *val > i {
-                        *val -= 1;
-                    }
-                }
+            if i < store.memories.len() {
+                let desc = store.memories[i].description().unwrap_or("").to_string();
+                crate::universe::memory::MemoryCodec::erase(&mut u, &store.memories[i]);
+                store.remove_at(i);
                 let conservation_ok = u.verify_conservation();
                 Ok((
                     StatusCode::OK,
@@ -568,7 +575,7 @@ pub async fn forget(
                         "success": true,
                         "erased_anchor": anchor_str,
                         "description": desc,
-                        "remaining_memories": mems.len(),
+                        "remaining_memories": store.memories.len(),
                         "conservation_ok": conservation_ok,
                     }))),
                 ))

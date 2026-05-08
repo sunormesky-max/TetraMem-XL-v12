@@ -12,9 +12,9 @@ use super::types::*;
 pub async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<HealthResponse>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
-    let report = UniverseObserver::inspect(&u, &h, &mems);
+    let report = UniverseObserver::inspect(&u, &h, &store.memories);
 
     let level = report.health_level().as_str().to_string();
     if level == "WARNING" || level == "CRITICAL" {
@@ -37,7 +37,7 @@ pub async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<He
 pub async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsResponse>> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let stats = u.stats();
 
     tracing::debug!(nodes = stats.active_nodes, utilization = %format!("{:.1}%", stats.utilization * 100.0), "stats requested");
@@ -57,7 +57,7 @@ pub async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<Sta
         conservation_ok: u
             .verify_conservation_with_tolerance(state.config.universe.energy_drift_tolerance),
         energy_drift: u.energy_drift(),
-        memory_count: mems.len(),
+        memory_count: store.memories.len(),
         hebbian_edges: h.edge_count(),
         hebbian_total_weight: h.total_weight(),
     }))
@@ -66,7 +66,7 @@ pub async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<Sta
 pub async fn get_metrics(State(state): State<SharedState>) -> String {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let stats = u.stats();
     metrics::update_universe_metrics(
         stats.active_nodes,
@@ -75,12 +75,12 @@ pub async fn get_metrics(State(state): State<SharedState>) -> String {
         stats.total_energy,
         stats.allocated_energy,
         stats.available_energy,
-        mems.len(),
+        store.memories.len(),
         h.edge_count(),
     );
     drop(u);
     drop(h);
-    drop(mems);
+    drop(store);
     metrics::render_metrics()
 }
 

@@ -17,10 +17,10 @@ pub async fn create_backup(
     let report = {
         let u = state.universe.read().await;
         let h = state.hebbian.read().await;
-        let mems = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let c = state.crystal.read().await;
         let mut bs = state.backup.write().await;
-        bs.create_backup(BackupTrigger::Manual, &u, &h, &mems, &c)
+        bs.create_backup(BackupTrigger::Manual, &u, &h, &store.memories, &c)
             .map_err(|e| AppError::Internal(e.to_string()))?
     };
 

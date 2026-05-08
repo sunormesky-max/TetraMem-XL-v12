@@ -78,8 +78,8 @@ impl SpontaneousDrive {
         _cognitive_state: &CognitiveState,
     ) {
         let mem_count = {
-            let mems = state.memories.read().await;
-            mems.len()
+            let store = state.memory_store.read().await;
+            store.memories.len()
         };
 
         if mem_count == 0 {
@@ -147,16 +147,17 @@ impl SpontaneousDrive {
     }
 
     async fn spontaneous_pulse(&mut self, state: &Arc<AppState>) {
-        let (seeds, cold_zones) = {
-            let u = state.universe.read().await;
-            let h = state.hebbian.read().await;
-            let mems = state.memories.read().await;
-            let attention = crate::universe::cognitive::attention::AttentionEngine::new()
-                .compute(&u, &h, &mems);
-            let seeds = attention.recommendation.suggested_pulse_anchors;
-            let cold = attention.recommendation.cold_zones;
-            (seeds, cold)
-        };
+        let (seeds, cold_zones) =
+            {
+                let u = state.universe.read().await;
+                let h = state.hebbian.read().await;
+                let store = state.memory_store.read().await;
+                let attention = crate::universe::cognitive::attention::AttentionEngine::new()
+                    .compute(&u, &h, &store.memories);
+                let seeds = attention.recommendation.suggested_pulse_anchors;
+                let cold = attention.recommendation.cold_zones;
+                (seeds, cold)
+            };
 
         let mut origins: Vec<[i32; 7]> = Vec::new();
 
@@ -214,8 +215,8 @@ impl SpontaneousDrive {
 
     async fn spontaneous_recall(&mut self, state: &Arc<AppState>) {
         let mem_count = {
-            let mems = state.memories.read().await;
-            mems.len()
+            let store = state.memory_store.read().await;
+            store.memories.len()
         };
 
         if mem_count < 2 {
@@ -223,10 +224,10 @@ impl SpontaneousDrive {
         }
 
         let candidates = {
-            let mems = state.memories.read().await;
+            let store = state.memory_store.read().await;
             let h = state.hebbian.read().await;
             let mut scored: Vec<(usize, f64)> = Vec::new();
-            for (i, mem) in mems.iter().enumerate() {
+            for (i, mem) in store.memories.iter().enumerate() {
                 let anchor_str = format!("{}", mem.anchor());
                 if self.recall_history.contains(&anchor_str) {
                     continue;
@@ -259,15 +260,16 @@ impl SpontaneousDrive {
         }
 
         let contradictions = {
-            let mems = state.memories.read().await;
+            let store = state.memory_store.read().await;
             let h = state.hebbian.read().await;
             let mut found = 0usize;
             for &(idx, _score) in &candidates {
-                let mem = &mems[idx];
+                let mem = &store.memories[idx];
                 let neighbors = h.get_neighbors(mem.anchor());
                 for (coord, _weight) in &neighbors {
-                    if let Some(other_idx) = mems.iter().position(|m| m.anchor() == coord) {
-                        let other = &mems[other_idx];
+                    if let Some(other_idx) = store.memories.iter().position(|m| m.anchor() == coord)
+                    {
+                        let other = &store.memories[other_idx];
                         let desc_a = mem.description().unwrap_or("");
                         let desc_b = other.description().unwrap_or("");
                         if crate::universe::memory::contradiction::descriptions_conflict(
@@ -292,8 +294,8 @@ impl SpontaneousDrive {
         }
 
         for &(idx, _) in &candidates {
-            let mems = state.memories.read().await;
-            if let Some(mem) = mems.get(idx) {
+            let store = state.memory_store.read().await;
+            if let Some(mem) = store.memories.get(idx) {
                 let anchor_str = format!("{}", mem.anchor());
                 self.recall_history.push(anchor_str);
             }
@@ -306,8 +308,8 @@ impl SpontaneousDrive {
         let self_model = {
             let u = state.universe.read().await;
             let h = state.hebbian.read().await;
-            let mems = state.memories.read().await;
-            MetaCognitiveEngine::assess(&u, &h, &mems)
+            let store = state.memory_store.read().await;
+            MetaCognitiveEngine::assess(&u, &h, &store.memories)
         };
 
         let blind_spots = &self_model.blind_spots;
@@ -344,8 +346,8 @@ impl SpontaneousDrive {
                 .collect();
 
             if !low_conf_tags.is_empty() {
-                let mut mems = state.memories.write().await;
-                for mem in mems.iter_mut() {
+                let mut store = state.memory_store.write().await;
+                for mem in store.memories.iter_mut() {
                     for tag in &low_conf_tags {
                         if mem.tags().contains(&tag.to_string()) {
                             let boost = 0.02 * self.curiosity;
@@ -354,7 +356,7 @@ impl SpontaneousDrive {
                         }
                     }
                 }
-                drop(mems);
+                drop(store);
             }
 
             tracing::debug!(

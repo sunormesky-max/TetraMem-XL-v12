@@ -22,11 +22,70 @@ use crate::universe::safety::events::EventBus;
 use crate::universe::safety::identity_guard::IdentityGuard;
 use crate::universe::watchdog::Watchdog;
 
+pub struct MemoryStore {
+    pub memories: Vec<MemoryAtom>,
+    pub index: HashMap<String, usize>,
+}
+
+impl MemoryStore {
+    pub fn new() -> Self {
+        Self {
+            memories: Vec::new(),
+            index: HashMap::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.memories.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.memories.is_empty()
+    }
+
+    pub fn rebuild_index(&mut self) {
+        self.index.clear();
+        for (i, m) in self.memories.iter().enumerate() {
+            self.index.insert(format!("{}", m.anchor()), i);
+        }
+    }
+
+    pub fn push(&mut self, atom: MemoryAtom) {
+        let idx = self.memories.len();
+        self.index.insert(format!("{}", atom.anchor()), idx);
+        self.memories.push(atom);
+    }
+
+    pub fn remove_at(&mut self, i: usize) -> Option<MemoryAtom> {
+        if i >= self.memories.len() {
+            return None;
+        }
+        let anchor_str = format!("{}", self.memories[i].anchor());
+        self.index.remove(&anchor_str);
+        let atom = self.memories.remove(i);
+        for val in self.index.values_mut() {
+            if *val > i {
+                *val -= 1;
+            }
+        }
+        Some(atom)
+    }
+
+    pub fn get_by_anchor(&self, anchor_str: &str) -> Option<&MemoryAtom> {
+        self.index.get(anchor_str).map(|&i| &self.memories[i])
+    }
+}
+
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct AppState {
     pub universe: RwLock<DarkUniverse>,
     pub hebbian: RwLock<HebbianMemory>,
-    pub memories: RwLock<Vec<MemoryAtom>>,
-    pub memory_index: RwLock<HashMap<String, usize>>,
+    pub memory_store: RwLock<MemoryStore>,
     pub crystal: RwLock<CrystalEngine>,
     pub perception: RwLock<PerceptionBudget>,
     pub semantic: RwLock<SemanticEngine>,

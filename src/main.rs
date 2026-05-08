@@ -210,8 +210,10 @@ fn main() {
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
                 universe: tokio::sync::RwLock::new(universe),
                 hebbian: tokio::sync::RwLock::new(hebbian),
-                memories: tokio::sync::RwLock::new(memories),
-                memory_index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+                memory_store: tokio::sync::RwLock::new(tetramem_v12::universe::api::MemoryStore {
+                    memories,
+                    index: std::collections::HashMap::new(),
+                }),
                 crystal: tokio::sync::RwLock::new(crystal),
                 perception: tokio::sync::RwLock::new(perception_budget),
                 semantic: tokio::sync::RwLock::new(semantic_engine),
@@ -248,11 +250,8 @@ fn main() {
             rt.block_on(async {
                 {
                     {
-                        let mems = state.memories.read().await;
-                        let mut idx = state.memory_index.write().await;
-                        for (i, m) in mems.iter().enumerate() {
-                            idx.insert(format!("{}", m.anchor()), i);
-                        }
+                        let mut store = state.memory_store.write().await;
+                        store.rebuild_index();
                     }
                     let state_ref = state.clone();
                     let mut cm = state.cluster.lock().await;
@@ -385,10 +384,10 @@ fn main() {
                                 let sqlite_path = persist_path_clone.with_extension("db");
                                 let u = state_clone.universe.read().await;
                                 let h = state_clone.hebbian.read().await;
-                                let mems = state_clone.memories.read().await;
+                                let store = state_clone.memory_store.read().await;
                                 let c = state_clone.crystal.read().await;
                                 match tetramem_v12::universe::persist_sqlite::PersistSqlite::save(
-                                    &sqlite_path, &u, &h, &mems, &c,
+                                    &sqlite_path, &u, &h, &store.memories, &c,
                                 ) {
                                     Ok(rows) => {
                                         tracing::debug!("auto-persist SQLite: {} rows", rows);
@@ -401,10 +400,10 @@ fn main() {
                                 let json = {
                                     let u = state_clone.universe.read().await;
                                     let h = state_clone.hebbian.read().await;
-                                    let mems = state_clone.memories.read().await;
+                                    let store = state_clone.memory_store.read().await;
                                     let c = state_clone.crystal.read().await;
                                     tetramem_v12::universe::persist::PersistEngine::to_json(
-                                        &u, &h, &mems, &c,
+                                        &u, &h, &store.memories, &c,
                                     )
                                 };
                                 match json {

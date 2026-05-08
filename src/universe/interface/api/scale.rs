@@ -17,10 +17,10 @@ use super::types::*;
 pub async fn auto_scale(State(state): State<SharedState>) -> Json<ApiResponse<ScaleResponse>> {
     let mut u = state.universe.write().await;
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
     let scaler = AutoScaler::new();
-    let report = scaler.auto_scale(&mut u, &h, &mems);
+    let report = scaler.auto_scale(&mut u, &h, &store.memories);
 
     tracing::info!(
         nodes_added = report.nodes_added,

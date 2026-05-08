@@ -87,13 +87,14 @@ pub async fn encode_memory(
 
     let novelty_report = {
         let sem = state.semantic.read().await;
-        let mems_r = state.memories.read().await;
+        let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
         let knn = sem.search_similar(&req.data, 5);
         let knn_distances: Vec<(f64, usize)> = knn
             .iter()
             .filter_map(|r| {
-                mems_r
+                store
+                    .memories
                     .iter()
                     .position(|m| {
                         let mk = crate::universe::memory::AtomKey::from_atom(m);
@@ -103,7 +104,7 @@ pub async fn encode_memory(
             })
             .collect();
         let detector = crate::universe::memory::NoveltyDetector::default();
-        detector.assess(&req.data, &knn_distances, &anchor, &h, &mems_r)
+        detector.assess(&req.data, &knn_distances, &anchor, &h, &store.memories)
     };
 
     let adjusted_importance = if req.importance < 0.01 {
@@ -113,8 +114,7 @@ pub async fn encode_memory(
     };
 
     let mut u = state.universe.write().await;
-    let mut mems = state.memories.write().await;
-    let mut idx = state.memory_index.write().await;
+    let mut store = state.memory_store.write().await;
 
     match MemoryCodec::encode(&mut u, &anchor, &req.data) {
         Ok(mut atom) => {
@@ -148,7 +148,7 @@ pub async fn encode_memory(
                 if !similar.is_empty() {
                     let mut h = state.hebbian.write().await;
                     for hit in &similar {
-                        if let Some(other) = mems.iter().find(|m| {
+                        if let Some(other) = store.memories.iter().find(|m| {
                             let mk = crate::universe::memory::AtomKey::from_atom(m);
                             mk == hit.atom_key
                         }) {
@@ -159,9 +159,7 @@ pub async fn encode_memory(
                 }
             }
 
-            let i = mems.len();
-            mems.push(atom);
-            idx.insert(anchor_str.clone(), i);
+            store.push(atom);
             state.event_sender.publish(UniverseEvent::MemoryEncoded {
                 anchor: anchor_7,
                 data_dim,
@@ -172,8 +170,13 @@ pub async fn encode_memory(
                 let interests = state.interests.read().await;
                 let h_surf = state.hebbian.read().await;
                 let surfacer = crate::universe::memory::MemorySurfacer::default();
-                let surfaced =
-                    surfacer.surface(&anchor, &h_surf, &mems, &interests, novelty_report.score);
+                let surfaced = surfacer.surface(
+                    &anchor,
+                    &h_surf,
+                    &store.memories,
+                    &interests,
+                    novelty_report.score,
+                );
                 drop(interests);
                 drop(h_surf);
                 for mut sm in surfaced {
@@ -219,8 +222,7 @@ pub async fn decode_memory(
 ) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), AppError> {
     validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
-    let mems = state.memories.read().await;
-    let idx = state.memory_index.read().await;
+    let store = state.memory_store.read().await;
 
     if let Some(c) = metrics::API_DECODE_TOTAL.get() {
         c.inc();
@@ -228,8 +230,8 @@ pub async fn decode_memory(
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let anchor_str = format!("{}", &anchor);
 
-    if let Some(&i) = idx.get(&anchor_str) {
-        if let Some(mem) = mems.get(i) {
+    if let Some(&i) = store.index.get(&anchor_str) {
+        if let Some(mem) = store.memories.get(i) {
             if mem.data_dim() == req.data_dim {
                 match MemoryCodec::decode(&u, mem) {
                     Ok(data) => {
@@ -261,11 +263,12 @@ pub async fn list_memories(
     State(state): State<SharedState>,
     Query(params): Query<ListMemoriesParams>,
 ) -> Json<ApiResponseWithMeta<Vec<MemoryListItem>>> {
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let offset = params.offset.unwrap_or(0);
     let limit = params.limit.unwrap_or(100).min(1000);
-    let total = mems.len();
-    let list: Vec<MemoryListItem> = mems
+    let total = store.memories.len();
+    let list: Vec<MemoryListItem> = store
+        .memories
         .iter()
         .skip(offset)
         .take(limit)
@@ -288,10 +291,10 @@ pub async fn list_memories(
 pub async fn memory_timeline(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<Vec<TimelineDay>>> {
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let mut day_map: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    for m in mems.iter() {
+    for m in store.memories.iter() {
         let ts = if m.created_at() > 0 {
             m.created_at()
         } else {
@@ -331,7 +334,7 @@ pub async fn memory_trace(
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
     let source = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let max_hops = req.max_hops.unwrap_or(10).min(100);
@@ -342,7 +345,8 @@ pub async fn memory_trace(
 
     let mut hops: Vec<TraceHop> = Vec::new();
 
-    let mem_index: std::collections::HashMap<String, &MemoryAtom> = mems
+    let mem_index: std::collections::HashMap<String, &MemoryAtom> = store
+        .memories
         .iter()
         .map(|m| (format!("{}", m.anchor()), m))
         .collect();
@@ -388,13 +392,12 @@ pub async fn annotate_memory(
     if let Some(ref cat) = req.category {
         validate_field_len("category", cat, MAX_TAG_LEN).map_err(AppError::BadRequest)?;
     }
-    let mut mems = state.memories.write().await;
-    let idx = state.memory_index.read().await;
+    let mut store = state.memory_store.write().await;
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let anchor_str = format!("{}", &anchor);
 
-    if let Some(&i) = idx.get(&anchor_str) {
-        if let Some(mem) = mems.get_mut(i) {
+    if let Some(&i) = store.index.get(&anchor_str) {
+        if let Some(mem) = store.memories.get_mut(i) {
             for tag in &req.tags {
                 mem.add_tag(tag);
             }
@@ -454,14 +457,14 @@ pub async fn semantic_search(
     Json(req): Json<SemanticSearchRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
     let sem = state.semantic.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let k = req.k.clamp(1, 100);
 
     let results = sem.search_similar(&req.data, k);
     let hits: Vec<SemanticHit> = results
         .into_iter()
         .filter_map(|r| {
-            let mem = mems.iter().find(|m| {
+            let mem = store.memories.iter().find(|m| {
                 let mk = crate::universe::memory::AtomKey::from_atom(m);
                 mk == r.atom_key
             })?;
@@ -491,7 +494,7 @@ pub async fn semantic_text_query(
     Json(req): Json<SemanticTextQueryRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
     let sem = state.semantic.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let k = req.k.clamp(1, 100);
     let text = if req.text.len() > MAX_STRING_FIELD_LEN {
         &req.text[..MAX_STRING_FIELD_LEN]
@@ -504,7 +507,7 @@ pub async fn semantic_text_query(
     let hits: Vec<SemanticHit> = knn_results
         .into_iter()
         .filter_map(|r| {
-            let mem = mems.iter().find(|m| {
+            let mem = store.memories.iter().find(|m| {
                 let mk = crate::universe::memory::AtomKey::from_atom(m);
                 mk == r.atom_key
             })?;
@@ -530,18 +533,18 @@ pub async fn semantic_relations(
 ) -> Result<Json<ApiResponse<SemanticRelationResponse>>, AppError> {
     validate_coord_3(&req.anchor)?;
     let sem = state.semantic.read().await;
-    let mems = state.memories.read().await;
-    let idx = state.memory_index.read().await;
+    let store = state.memory_store.read().await;
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let anchor_str = format!("{}", &anchor);
 
-    if let Some(&i) = idx.get(&anchor_str) {
-        if let Some(mem) = mems.get(i) {
+    if let Some(&i) = store.index.get(&anchor_str) {
+        if let Some(mem) = store.memories.get(i) {
             let relations = sem.find_relations(mem);
             let rel_infos: Vec<RelationInfo> = relations
                 .iter()
                 .map(|r| {
-                    let from_str = mems
+                    let from_str = store
+                        .memories
                         .iter()
                         .find(|m| {
                             let mk = crate::universe::memory::AtomKey::from_atom(m);
@@ -549,7 +552,8 @@ pub async fn semantic_relations(
                         })
                         .map(|m| format!("{}", m.anchor()))
                         .unwrap_or_else(|| "?".to_string());
-                    let to_str = mems
+                    let to_str = store
+                        .memories
                         .iter()
                         .find(|m| {
                             let mk = crate::universe::memory::AtomKey::from_atom(m);
@@ -586,14 +590,14 @@ pub async fn temporal_predict(
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
 
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
     let sequence = h.get_temporal_sequence(&anchor, max_steps);
 
     let predictions: Vec<PredictedMemory> = sequence
         .into_iter()
         .enumerate()
         .filter_map(|(step, (coord, strength))| {
-            let mem = mems.iter().find(|m| m.anchor() == &coord)?;
+            let mem = store.memories.iter().find(|m| m.anchor() == &coord)?;
             Some(PredictedMemory {
                 anchor: format!("{}", mem.anchor()),
                 step: step + 1,
@@ -617,18 +621,22 @@ pub async fn reconstruct(
     let anchor_str = format!("{}", &anchor);
 
     let h = state.hebbian.read().await;
-    let mems = state.memories.read().await;
-    let idx = state.memory_index.read().await;
+    let store = state.memory_store.read().await;
 
-    let reconstructed =
-        crate::universe::HebbianMemory::reconstruct_from_cue(&h, &anchor, &mems, &idx, max_hops);
+    let reconstructed = crate::universe::HebbianMemory::reconstruct_from_cue(
+        &h,
+        &anchor,
+        &store.memories,
+        &store.index,
+        max_hops,
+    );
 
     let results: Vec<ReconstructedMemory> = match reconstructed {
         Some(items) => items
             .into_iter()
             .enumerate()
             .map(|(hop, (coord, weight, _data))| {
-                let mem = mems.iter().find(|m| m.anchor() == &coord);
+                let mem = store.memories.iter().find(|m| m.anchor() == &coord);
                 ReconstructedMemory {
                     anchor: format!("{}", coord),
                     hop: hop + 1,

@@ -128,7 +128,7 @@ pub async fn emotion_dream(
 ) -> Result<Json<ApiResponse<EmotionDreamResponse>>, AppError> {
     let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
-    let mems = state.memories.read().await;
+    let store = state.memory_store.read().await;
 
     let es = match req.emotion_source.as_str() {
         "Perceived" => EmotionSource::Perceived,
@@ -144,7 +144,7 @@ pub async fn emotion_dream(
     tracing::info!(cluster = %emotion.cluster, "running emotion dream cycle");
 
     let dream = DreamEngine::new();
-    let report = dream.dream_with_emotion(&u, &mut h, &mems, &pad, es);
+    let report = dream.dream_with_emotion(&u, &mut h, &store.memories, &pad, es);
 
     Ok(Json(ApiResponse::ok(EmotionDreamResponse {
         paths_replayed: report.paths_replayed,
