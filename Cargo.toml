@@ -78,3 +78,8 @@ harness = false
 name = "stress_test"
 path = "tests/stress_test.rs"
 harness = false
+
+[[test]]
+name = "honest_benchmark"
+path = "tests/honest_benchmark.rs"
+harness = false

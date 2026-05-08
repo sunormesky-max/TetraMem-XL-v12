@@ -369,6 +369,10 @@ async fn run_maintenance_inner(
         }
     }
 
+    if cfg.interest_ttl_enabled {
+        interest_ttl_cleanup(state, cfg).await;
+    }
+
     if let Some(ref mut drive) = ctrl.spontaneous {
         drive
             .run_cycle_with_state(state, spontaneous_cfg, vigor, &cognitive_state)
@@ -474,4 +478,46 @@ async fn auto_forget_step(
 
     drop(store);
     drop(u);
+}
+
+async fn interest_ttl_cleanup(state: &Arc<AppState>, cfg: &MaintenanceConfig) {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut interests = state.interests.write().await;
+    let before = interests.len();
+
+    interests.retain(|_id, profile| !profile.is_expired(now_secs));
+
+    let expired = before - interests.len();
+
+    if interests.len() > cfg.max_interests {
+        let mut entries: Vec<_> = interests.iter().collect();
+        entries.sort_by_key(|(_, p)| p.registered_at);
+        let to_remove = entries.len() - cfg.max_interests;
+        let oldest: Vec<String> = entries
+            .iter()
+            .take(to_remove)
+            .map(|(id, _)| id.to_string())
+            .collect();
+        for id in oldest {
+            interests.remove(&id);
+        }
+        tracing::warn!(
+            expired,
+            evicted = to_remove,
+            remaining = interests.len(),
+            "cognitive controller: interest TTL cleanup evicted excess interests"
+        );
+    } else if expired > 0 {
+        tracing::info!(
+            expired,
+            remaining = interests.len(),
+            "cognitive controller: interest TTL cleanup removed expired"
+        );
+    }
+
+    drop(interests);
 }

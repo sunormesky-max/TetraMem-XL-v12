@@ -32,9 +32,7 @@ fn make_test_state() -> Arc<AppState> {
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(config.universe.total_energy)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
-        memory_store: tokio::sync::RwLock::new(
-            tetramem_v12::universe::api::MemoryStore::new(),
-        ),
+        memory_store: tokio::sync::RwLock::new(tetramem_v12::universe::api::MemoryStore::new()),
         crystal: tokio::sync::RwLock::new(CrystalEngine::new()),
         perception: tokio::sync::RwLock::new(PerceptionBudget::new(1000.0)),
         semantic: tokio::sync::RwLock::new(SemanticEngine::new(SemanticConfig::default())),

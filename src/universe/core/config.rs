@@ -137,6 +137,12 @@ pub struct MaintenanceConfig {
     pub auto_forget_grace_cycles: u32,
     #[serde(default = "default_max_memories")]
     pub max_memories: usize,
+    #[serde(default = "default_interest_ttl_enabled")]
+    pub interest_ttl_enabled: bool,
+    #[serde(default = "default_interest_default_ttl_secs")]
+    pub interest_default_ttl_secs: u64,
+    #[serde(default = "default_max_interests")]
+    pub max_interests: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,6 +247,9 @@ fn default_maintenance() -> MaintenanceConfig {
         auto_forget_enabled: default_auto_forget_enabled(),
         auto_forget_grace_cycles: default_auto_forget_grace_cycles(),
         max_memories: default_max_memories(),
+        interest_ttl_enabled: default_interest_ttl_enabled(),
+        interest_default_ttl_secs: default_interest_default_ttl_secs(),
+        max_interests: default_max_interests(),
     }
 }
 
@@ -345,6 +354,15 @@ fn default_auto_forget_grace_cycles() -> u32 {
 }
 fn default_max_memories() -> usize {
     100_000
+}
+fn default_interest_ttl_enabled() -> bool {
+    true
+}
+fn default_interest_default_ttl_secs() -> u64 {
+    3600
+}
+fn default_max_interests() -> usize {
+    1000
 }
 fn default_spontaneous_enabled() -> bool {
     true
@@ -556,6 +574,16 @@ impl AppConfig {
         if self.maintenance.max_memories == 0 {
             return Err(ConfigError::Parse(
                 "maintenance.max_memories must be > 0".to_string(),
+            ));
+        }
+        if self.maintenance.interest_default_ttl_secs == 0 {
+            return Err(ConfigError::Parse(
+                "maintenance.interest_default_ttl_secs must be > 0".to_string(),
+            ));
+        }
+        if self.maintenance.max_interests == 0 {
+            return Err(ConfigError::Parse(
+                "maintenance.max_interests must be > 0".to_string(),
             ));
         }
         if !(0.0..=1.0).contains(&self.spontaneous.base_curiosity) {

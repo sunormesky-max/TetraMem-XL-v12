@@ -27,6 +27,25 @@ pub struct InterestProfile {
     pub min_activation: f64,
     #[serde(default)]
     pub keywords: Vec<String>,
+    #[serde(default = "default_ttl_secs")]
+    pub ttl_secs: u64,
+    #[serde(default)]
+    pub registered_at: u64,
+}
+
+const DEFAULT_INTEREST_TTL_SECS: u64 = 3600;
+
+fn default_ttl_secs() -> u64 {
+    DEFAULT_INTEREST_TTL_SECS
+}
+
+impl InterestProfile {
+    pub fn is_expired(&self, now_secs: u64) -> bool {
+        if self.ttl_secs == 0 {
+            return false;
+        }
+        now_secs > self.registered_at && now_secs - self.registered_at > self.ttl_secs
+    }
 }
 
 fn default_min_importance() -> f64 {
@@ -401,6 +420,8 @@ mod tests {
         assert_eq!(profile.tags.len(), 2);
         assert_eq!(profile.min_importance, 0.5);
         assert!(profile.categories.is_empty());
+        assert_eq!(profile.ttl_secs, DEFAULT_INTEREST_TTL_SECS);
+        assert_eq!(profile.registered_at, 0);
     }
 
     #[test]
@@ -412,6 +433,8 @@ mod tests {
             min_importance: 0.0,
             min_activation: 0.0,
             keywords: vec![],
+            ttl_secs: 3600,
+            registered_at: 0,
         };
         let mut u = crate::universe::DarkUniverse::new(10000.0);
         let anchor = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
@@ -432,6 +455,8 @@ mod tests {
             min_importance: 0.0,
             min_activation: 0.0,
             keywords: vec!["quantum".to_string()],
+            ttl_secs: 3600,
+            registered_at: 0,
         };
         let mut u = crate::universe::DarkUniverse::new(10000.0);
         let anchor = Coord7D::new_even([10, 0, 0, 0, 0, 0, 0]);
@@ -441,5 +466,47 @@ mod tests {
         atom.set_description("quantum entanglement experiment");
         atom.set_importance(0.5);
         assert!(matches_interest(&profile, &atom, 0.5, 0.5));
+    }
+
+    #[test]
+    fn interest_profile_expired_after_ttl() {
+        let profile = InterestProfile {
+            agent_id: "test".to_string(),
+            tags: vec![],
+            categories: vec![],
+            min_importance: 0.3,
+            min_activation: 0.1,
+            keywords: vec![],
+            ttl_secs: 100,
+            registered_at: 1000,
+        };
+        assert!(!profile.is_expired(1050));
+        assert!(!profile.is_expired(1100));
+        assert!(profile.is_expired(1101));
+        assert!(profile.is_expired(2000));
+    }
+
+    #[test]
+    fn interest_profile_no_expiry_when_ttl_zero() {
+        let profile = InterestProfile {
+            agent_id: "test".to_string(),
+            tags: vec![],
+            categories: vec![],
+            min_importance: 0.3,
+            min_activation: 0.1,
+            keywords: vec![],
+            ttl_secs: 0,
+            registered_at: 100,
+        };
+        assert!(!profile.is_expired(9999999));
+    }
+
+    #[test]
+    fn interest_profile_deserialization_with_custom_ttl() {
+        let json = r#"{"agent_id":"bot2","ttl_secs":7200,"registered_at":1234567890}"#;
+        let profile: InterestProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.ttl_secs, 7200);
+        assert_eq!(profile.registered_at, 1234567890);
+        assert!(profile.is_expired(1234567890 + 7201));
     }
 }

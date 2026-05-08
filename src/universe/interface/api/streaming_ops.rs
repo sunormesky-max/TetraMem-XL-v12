@@ -18,7 +18,7 @@ use super::types::*;
 
 pub async fn register_interest(
     State(state): State<SharedState>,
-    Json(profile): Json<InterestProfile>,
+    Json(mut profile): Json<InterestProfile>,
 ) -> Result<Json<ApiResponse<Value>>, AppError> {
     if profile.agent_id.trim().is_empty() {
         return Err(AppError::BadRequest("agent_id is required".to_string()));
@@ -30,8 +30,27 @@ pub async fn register_interest(
             cat, MAX_TAG_LEN
         )));
     }
+
+    if profile.ttl_secs == 0 {
+        profile.ttl_secs = state.config.maintenance.interest_default_ttl_secs;
+    }
+    profile.registered_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     let agent_id = profile.agent_id.clone();
     let mut interests = state.interests.write().await;
+
+    if interests.len() >= state.config.maintenance.max_interests
+        && !interests.contains_key(&agent_id)
+    {
+        return Err(AppError::BadRequest(format!(
+            "maximum interests ({}) reached",
+            state.config.maintenance.max_interests
+        )));
+    }
+
     interests.insert(agent_id.clone(), profile);
     Ok(Json(ApiResponse::ok(serde_json::json!({
         "registered": true,
@@ -88,9 +107,32 @@ pub async fn memory_stream(
 pub async fn surface_status(State(state): State<SharedState>) -> Json<ApiResponse<Value>> {
     let interests = state.interests.read().await;
     let receiver_count = state.memory_stream.receiver_count();
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let agent_details: Vec<serde_json::Value> = interests
+        .iter()
+        .map(|(id, p)| {
+            let remaining = if p.ttl_secs == 0 {
+                None
+            } else {
+                let elapsed = now_secs.saturating_sub(p.registered_at);
+                Some(p.ttl_secs.saturating_sub(elapsed))
+            };
+            serde_json::json!({
+                "agent_id": id,
+                "ttl_remaining_secs": remaining,
+                "tags_count": p.tags.len(),
+            })
+        })
+        .collect();
     Json(ApiResponse::ok(serde_json::json!({
         "registered_agents": interests.len(),
         "active_streams": receiver_count,
-        "agents": interests.keys().collect::<Vec<_>>(),
+        "max_interests": state.config.maintenance.max_interests,
+        "default_ttl_secs": state.config.maintenance.interest_default_ttl_secs,
+        "ttl_cleanup_enabled": state.config.maintenance.interest_ttl_enabled,
+        "agents": agent_details,
     })))
 }
