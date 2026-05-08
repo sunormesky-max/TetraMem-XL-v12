@@ -52,6 +52,7 @@ fn build_state() -> Arc<AppState> {
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
         interests: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         memory_stream: tetramem_v12::universe::memory::create_broadcast_channel(),
+        surfaced_seq: std::sync::atomic::AtomicU64::new(0),
         config,
         jwt: JwtConfig::new("test-secret".to_string(), 3600),
         users: UserStore::new(

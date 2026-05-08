@@ -52,6 +52,10 @@ enum Commands {
         #[arg(short, long, default_value = "10000000.0")]
         energy: f64,
     },
+    McpProxy {
+        #[arg(short, long, default_value = "http://127.0.0.1:3456")]
+        server: String,
+    },
     McpDemo,
     Skills,
 }
@@ -224,6 +228,7 @@ fn main() {
                 ),
                 interests: tokio::sync::RwLock::new(std::collections::HashMap::new()),
                 memory_stream: tetramem_v12::universe::memory::create_broadcast_channel(),
+                surfaced_seq: std::sync::atomic::AtomicU64::new(0),
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
                 users: UserStore::new(&config.auth.users, &config.auth.jwt_secret),
@@ -362,7 +367,9 @@ fn main() {
                 }
 
                 {
-                    let _controller_handle = tetramem_v12::universe::adaptive::cognitive_controller::spawn_cognitive_controller(state.clone());
+                    if let Some(controller_handle) = tetramem_v12::universe::adaptive::cognitive_controller::spawn_cognitive_controller(state.clone()) {
+                        let _controller_handle = controller_handle;
+                    }
                 }
 
                 if auto_persist && persist_interval > 0 {
@@ -471,6 +478,12 @@ fn main() {
             let server = tetramem_v12::mcp::server::McpServer::new(energy);
             if let Err(e) = server.run() {
                 tracing::error!("MCP server error: {}", e);
+            }
+        }
+        Some(Commands::McpProxy { server }) => {
+            let proxy = tetramem_v12::mcp::proxy::McpProxy::new(server);
+            if let Err(e) = proxy.run() {
+                tracing::error!("MCP proxy error: {}", e);
             }
         }
         Some(Commands::McpDemo) => {

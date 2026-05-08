@@ -20,9 +20,14 @@ const WEAK_EDGE_THRESHOLD: f64 = 0.15;
 const WEAK_EDGE_BOOST: f64 = 0.05;
 const MAX_WEAK_REINFORCE: usize = 20;
 const FORGET_THRESHOLD: f64 = 0.05;
+const IDENTITY_RESTORE_MIN: f64 = 0.85;
+const MIN_INTERVAL_SECS: u64 = 30;
+const MAX_INTERVAL_SECS: u64 = 600;
 
 struct ControllerState {
     forget_tracker: HashMap<String, u32>,
+    last_elapsed_ms: f64,
+    consecutive_failures: u32,
 }
 
 pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {
@@ -32,30 +37,49 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
         return None;
     }
 
-    let interval_secs = cfg.interval_secs.max(30);
+    let base_interval = cfg.interval_secs.max(MIN_INTERVAL_SECS);
     tracing::info!(
-        "cognitive controller: spawning (interval={}s, dream_urgency>={:.2}, auto_forget={}, max_memories={})",
-        interval_secs,
+        "cognitive controller: spawning (base_interval={}s, dream_urgency>={:.2}, auto_forget={}, max_memories={})",
+        base_interval,
         cfg.dream_min_urgency,
         cfg.auto_forget_enabled,
         cfg.max_memories,
     );
 
     let handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-        interval.tick().await;
         let mut cycle: u64 = 0;
         let mut ctrl = ControllerState {
             forget_tracker: HashMap::new(),
+            last_elapsed_ms: 0.0,
+            consecutive_failures: 0,
         };
+
         loop {
+            let adaptive_interval = compute_adaptive_interval(base_interval, &ctrl);
+            let mut interval = tokio::time::interval(Duration::from_secs(adaptive_interval));
+            interval.tick().await;
             interval.tick().await;
             cycle += 1;
+
             run_maintenance_cycle(&state, &cfg, cycle, &mut ctrl).await;
         }
     });
 
     Some(handle)
+}
+
+fn compute_adaptive_interval(base: u64, ctrl: &ControllerState) -> u64 {
+    if ctrl.consecutive_failures > 0 {
+        return (base * 2).min(MAX_INTERVAL_SECS);
+    }
+    let elapsed = ctrl.last_elapsed_ms;
+    if elapsed > 30_000.0 {
+        return (base * 2).min(MAX_INTERVAL_SECS);
+    }
+    if elapsed > 10_000.0 {
+        return ((base as f64 * 1.5) as u64).min(MAX_INTERVAL_SECS);
+    }
+    base.max(MIN_INTERVAL_SECS)
 }
 
 async fn run_maintenance_cycle(
@@ -79,12 +103,15 @@ async fn run_maintenance_cycle(
     };
 
     if mem_count == 0 {
+        ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         return;
     }
 
     let should_dream = cognitive_state.dream_readiness.should_dream
         && cognitive_state.dream_readiness.urgency >= cfg.dream_min_urgency;
     let vigor = cognitive_state.overall_vigor;
+
+    restore_identity_importance(state).await;
 
     if should_dream {
         let mut h = state.hebbian.write().await;
@@ -142,7 +169,7 @@ async fn run_maintenance_cycle(
 
         tracing::info!(
             cycle,
-            "cognitive controller: dream completed — replayed={}, weakened={}, consolidated={}, edges {}→{}",
+            "cognitive controller: dream — replayed={}, weakened={}, consolidated={}, edges {}→{}",
             report.paths_replayed,
             report.paths_weakened,
             report.memories_consolidated,
@@ -167,84 +194,13 @@ async fn run_maintenance_cycle(
             tracing::warn!(
                 cycle,
                 flagged = report.flagged_for_forget,
-                "cognitive controller: aging flagged memories for potential forget"
+                "cognitive controller: aging flagged memories"
             );
         }
     }
 
     if cfg.aging_enabled && cfg.auto_forget_enabled && cycle > 2 {
-        let guard = state.identity_guard.read().await;
-        let mut mems = state.memories.write().await;
-        let mut idx = state.memory_index.write().await;
-        let mut u = state.universe.write().await;
-
-        let mut to_erase: Vec<usize> = Vec::new();
-        let mut over_limit_count: usize = 0;
-
-        for (i, mem) in mems.iter().enumerate() {
-            let anchor_str = format!("{}", mem.anchor());
-
-            if mem.importance() < FORGET_THRESHOLD {
-                if guard.is_identity_memory(mem) {
-                    continue;
-                }
-                let count = ctrl.forget_tracker.entry(anchor_str.clone()).or_insert(0);
-                *count += 1;
-                if *count >= cfg.auto_forget_grace_cycles {
-                    to_erase.push(i);
-                }
-            } else {
-                ctrl.forget_tracker.remove(&anchor_str);
-            }
-        }
-
-        if mems.len() > cfg.max_memories {
-            let excess = mems.len() - cfg.max_memories;
-            let mut candidates: Vec<(usize, f64)> = mems
-                .iter()
-                .enumerate()
-                .filter(|(i, m)| !to_erase.contains(i) && !guard.is_identity_memory(m))
-                .map(|(i, m)| (i, m.importance()))
-                .collect();
-            candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            for (i, _) in candidates.into_iter().take(excess) {
-                to_erase.push(i);
-            }
-            over_limit_count = excess;
-        }
-        drop(guard);
-
-        if !to_erase.is_empty() {
-            to_erase.sort_unstable();
-            to_erase.dedup();
-
-            for &i in to_erase.iter().rev() {
-                if i < mems.len() {
-                    MemoryCodec::erase(&mut u, &mems[i]);
-                    let anchor_str = format!("{}", mems[i].anchor());
-                    idx.remove(&anchor_str);
-                    for val in idx.values_mut() {
-                        if *val > i {
-                            *val -= 1;
-                        }
-                    }
-                    ctrl.forget_tracker.remove(&anchor_str);
-                    mems.remove(i);
-                }
-            }
-
-            tracing::info!(
-                cycle,
-                erased = to_erase.len(),
-                remaining = mems.len(),
-                over_limit = over_limit_count,
-                "cognitive controller: auto-forget erased decayed memories"
-            );
-        }
-
-        drop(mems);
-        drop(idx);
-        drop(u);
+        auto_forget_step(state, cfg, cycle, ctrl).await;
     }
 
     if cfg.clustering_enabled {
@@ -264,7 +220,7 @@ async fn run_maintenance_cycle(
             attractors = report.attractors,
             tunnels = report.tunnels_discovered,
             bridges = report.bridges_created,
-            "cognitive controller: clustering maintenance done"
+            "cognitive controller: clustering done"
         );
     }
 
@@ -309,7 +265,7 @@ async fn run_maintenance_cycle(
                 cycle,
                 stress = format!("{:.2}", report.stress_level),
                 imbalance = format!("{:.2}", report.dimension_pressure.imbalance),
-                "cognitive controller: high stress regulation applied"
+                "cognitive controller: high stress regulation"
             );
         }
     }
@@ -336,7 +292,7 @@ async fn run_maintenance_cycle(
                 level = format!("{:?}", report.level),
                 utilization = format!("{:.1}%", report.utilization * 100.0),
                 conservation_ok = report.conservation_ok,
-                "cognitive controller: watchdog checkup"
+                "cognitive controller: watchdog"
             );
         }
     }
@@ -347,16 +303,115 @@ async fn run_maintenance_cycle(
         drop(events);
 
         if drained > 0 {
-            tracing::debug!(cycle, drained, "cognitive controller: event bus drained");
+            tracing::debug!(cycle, drained, "cognitive controller: events drained");
         }
     }
 
-    let elapsed = start.elapsed();
+    ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let adaptive_next = compute_adaptive_interval(cfg.interval_secs.max(MIN_INTERVAL_SECS), ctrl);
     tracing::info!(
         cycle,
-        elapsed_ms = elapsed.as_secs_f64() * 1000.0,
+        elapsed_ms = format!("{:.0}", ctrl.last_elapsed_ms),
         vigor = format!("{:.3}", vigor),
         dream = should_dream,
-        "cognitive controller: maintenance cycle complete"
+        next_in_secs = adaptive_next,
+        "cognitive controller: cycle complete"
     );
+}
+
+async fn restore_identity_importance(state: &Arc<AppState>) {
+    let guard = state.identity_guard.read().await;
+    let mut mems = state.memories.write().await;
+    for mem in mems.iter_mut() {
+        if guard.is_identity_memory(mem) && mem.importance() < IDENTITY_RESTORE_MIN {
+            mem.set_importance(IDENTITY_RESTORE_MIN);
+            tracing::debug!(
+                anchor = %format!("{}", mem.anchor()),
+                restored_to = IDENTITY_RESTORE_MIN,
+                "identity guard: restored decayed identity memory importance"
+            );
+        }
+    }
+    drop(mems);
+    drop(guard);
+}
+
+async fn auto_forget_step(
+    state: &Arc<AppState>,
+    cfg: &MaintenanceConfig,
+    cycle: u64,
+    ctrl: &mut ControllerState,
+) {
+    let guard = state.identity_guard.read().await;
+    let mut mems = state.memories.write().await;
+    let mut idx = state.memory_index.write().await;
+    let mut u = state.universe.write().await;
+
+    let mut to_erase: Vec<usize> = Vec::new();
+    let mut over_limit_count: usize = 0;
+
+    for (i, mem) in mems.iter().enumerate() {
+        let anchor_str = format!("{}", mem.anchor());
+
+        if mem.importance() < FORGET_THRESHOLD {
+            if guard.is_identity_memory(mem) {
+                continue;
+            }
+            let count = ctrl.forget_tracker.entry(anchor_str.clone()).or_insert(0);
+            *count += 1;
+            if *count >= cfg.auto_forget_grace_cycles {
+                to_erase.push(i);
+            }
+        } else {
+            ctrl.forget_tracker.remove(&anchor_str);
+        }
+    }
+
+    if mems.len() > cfg.max_memories {
+        let excess = mems.len() - cfg.max_memories;
+        let mut candidates: Vec<(usize, f64)> = mems
+            .iter()
+            .enumerate()
+            .filter(|(i, m)| !to_erase.contains(i) && !guard.is_identity_memory(m))
+            .map(|(i, m)| (i, m.importance()))
+            .collect();
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (i, _) in candidates.into_iter().take(excess) {
+            to_erase.push(i);
+        }
+        over_limit_count = excess;
+    }
+    drop(guard);
+
+    if !to_erase.is_empty() {
+        to_erase.sort_unstable();
+        to_erase.dedup();
+
+        for &i in to_erase.iter().rev() {
+            if i < mems.len() {
+                MemoryCodec::erase(&mut u, &mems[i]);
+                let anchor_str = format!("{}", mems[i].anchor());
+                idx.remove(&anchor_str);
+                for val in idx.values_mut() {
+                    if *val > i {
+                        *val -= 1;
+                    }
+                }
+                ctrl.forget_tracker.remove(&anchor_str);
+                mems.remove(i);
+            }
+        }
+
+        tracing::info!(
+            cycle,
+            erased = to_erase.len(),
+            remaining = mems.len(),
+            over_limit = over_limit_count,
+            "cognitive controller: auto-forget erased memories"
+        );
+    }
+
+    drop(mems);
+    drop(idx);
+    drop(u);
 }

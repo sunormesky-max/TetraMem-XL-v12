@@ -177,7 +177,10 @@ pub async fn encode_memory(
                     surfacer.surface(&anchor, &h_surf, &mems, &interests, novelty_report.score);
                 drop(interests);
                 drop(h_surf);
-                for sm in surfaced {
+                for mut sm in surfaced {
+                    sm.seq = state
+                        .surfaced_seq
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let _ = state.memory_stream.send(sm);
                 }
             }

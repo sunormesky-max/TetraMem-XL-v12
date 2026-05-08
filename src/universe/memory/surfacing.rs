@@ -39,6 +39,7 @@ fn default_min_activation() -> f64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SurfacedMemory {
+    pub seq: u64,
     pub anchor: String,
     pub reason: SurfacedReason,
     pub activation_score: f64,
@@ -192,6 +193,7 @@ impl MemorySurfacer {
                     .any(|p| matches_interest(p, mem, 1.0, novelty_score));
                 if is_interested || interests.is_empty() {
                     surfaced.push(SurfacedMemory {
+                        seq: 0,
                         anchor: format!("{}", mem.anchor()),
                         reason: SurfacedReason::NoveltyHigh,
                         activation_score: 1.0,
@@ -225,6 +227,7 @@ impl MemorySurfacer {
                     continue;
                 }
                 surfaced.push(SurfacedMemory {
+                    seq: 0,
                     anchor: format!("{}", mem.anchor()),
                     reason: if *activation > 0.3 {
                         SurfacedReason::ActivationSpread
@@ -337,6 +340,7 @@ mod tests {
     #[test]
     fn surfaced_memory_serialization() {
         let sm = SurfacedMemory {
+            seq: 0,
             anchor: "(0,0,0|0,0,0,0)".to_string(),
             reason: SurfacedReason::ActivationSpread,
             activation_score: 0.75,
@@ -359,6 +363,7 @@ mod tests {
         let mut rx2 = tx.subscribe();
 
         let sm = SurfacedMemory {
+            seq: 0,
             anchor: "test".to_string(),
             reason: SurfacedReason::NoveltyHigh,
             activation_score: 1.0,

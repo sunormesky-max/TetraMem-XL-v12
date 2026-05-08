@@ -37,6 +37,7 @@ pub struct AppState {
     pub cluster: Mutex<ClusterManager>,
     pub interests: RwLock<HashMap<String, InterestProfile>>,
     pub memory_stream: tokio::sync::broadcast::Sender<SurfacedMemory>,
+    pub surfaced_seq: std::sync::atomic::AtomicU64,
     pub config: AppConfig,
     pub jwt: JwtConfig,
     pub users: UserStore,

@@ -71,9 +71,16 @@ pub async fn memory_stream(
     let stream = BroadcastStream::new(rx).filter_map(|result| match result {
         Ok(surfaced) => {
             let data = serde_json::to_string(&surfaced).unwrap_or_default();
-            Some(Ok(Event::default().data(data).event("surfaced_memory")))
+            let id = surfaced.seq.to_string();
+            Some(Ok(Event::default()
+                .data(data)
+                .event("surfaced_memory")
+                .id(id)))
         }
-        Err(_) => None,
+        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+            tracing::warn!("SSE client lagged, skipped {} messages", n);
+            None
+        }
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

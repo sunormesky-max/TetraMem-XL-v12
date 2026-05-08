@@ -3,10 +3,12 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 pub mod core;
 pub mod protocol;
+pub mod proxy;
 pub mod server;
 pub mod tools;
 
 pub use core::{ContextEntry, TetraMemCore};
 pub use protocol::*;
+pub use proxy::McpProxy;
 pub use server::McpServer;
 pub use tools::TetraMemTools;

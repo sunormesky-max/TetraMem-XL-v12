@@ -123,7 +123,10 @@ pub async fn remember(
         let surfacer = crate::universe::memory::MemorySurfacer::default();
         let surfaced = surfacer.surface(&anchor, &h, &mems, &interests, novelty_report.score);
         drop(interests);
-        for sm in surfaced {
+        for mut sm in surfaced {
+            sm.seq = state
+                .surfaced_seq
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let _ = state.memory_stream.send(sm);
         }
     }
