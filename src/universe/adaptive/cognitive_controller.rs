@@ -102,21 +102,54 @@ async fn run_maintenance_cycle(
 ) {
     let start = std::time::Instant::now();
 
-    let cognitive_state = {
+    let result = run_maintenance_inner(state, cfg, spontaneous_cfg, cycle, ctrl).await;
+
+    match result {
+        Ok(()) => {
+            ctrl.consecutive_failures = 0;
+        }
+        Err(e) => {
+            ctrl.consecutive_failures += 1;
+            tracing::error!(
+                cycle,
+                consecutive_failures = ctrl.consecutive_failures,
+                error = %e,
+                "cognitive controller: error in maintenance cycle"
+            );
+        }
+    }
+
+    ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let adaptive_next = compute_adaptive_interval(cfg.interval_secs.max(MIN_INTERVAL_SECS), ctrl);
+    tracing::info!(
+        cycle,
+        elapsed_ms = format!("{:.0}", ctrl.last_elapsed_ms),
+        next_in_secs = adaptive_next,
+        failures = ctrl.consecutive_failures,
+        "cognitive controller: cycle complete"
+    );
+}
+
+async fn run_maintenance_inner(
+    state: &Arc<AppState>,
+    cfg: &MaintenanceConfig,
+    spontaneous_cfg: &SpontaneousConfig,
+    cycle: u64,
+    ctrl: &mut ControllerState,
+) -> Result<(), String> {
+    let start = std::time::Instant::now();
+
+    let (cognitive_state, mem_count) = {
         let u = state.universe.read().await;
         let h = state.hebbian.read().await;
         let mems = state.memories.read().await;
-        CognitiveStateEngine::assess(&u, &h, &mems)
-    };
-
-    let mem_count = {
-        let mems = state.memories.read().await;
-        mems.len()
+        let cs = CognitiveStateEngine::assess(&u, &h, &mems);
+        let mc = mems.len();
+        (cs, mc)
     };
 
     if mem_count == 0 {
-        ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        return;
+        return Ok(());
     }
 
     let should_dream = cognitive_state.dream_readiness.should_dream
@@ -320,19 +353,20 @@ async fn run_maintenance_cycle(
     }
 
     if let Some(ref mut drive) = ctrl.spontaneous {
-        drive.run_cycle(state, spontaneous_cfg).await;
+        drive
+            .run_cycle_with_state(state, spontaneous_cfg, vigor, &cognitive_state)
+            .await;
     }
 
-    ctrl.last_elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let adaptive_next = compute_adaptive_interval(cfg.interval_secs.max(MIN_INTERVAL_SECS), ctrl);
-    tracing::info!(
+    tracing::debug!(
         cycle,
-        elapsed_ms = format!("{:.0}", ctrl.last_elapsed_ms),
+        elapsed_ms = format!("{:.0}", start.elapsed().as_secs_f64() * 1000.0),
         vigor = format!("{:.3}", vigor),
         dream = should_dream,
-        next_in_secs = adaptive_next,
-        "cognitive controller: cycle complete"
+        "cognitive controller: inner cycle done"
     );
+
+    Ok(())
 }
 
 async fn restore_identity_importance(state: &Arc<AppState>) {

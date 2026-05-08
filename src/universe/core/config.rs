@@ -402,10 +402,9 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
-            let dev_mode = std::env::var("TETRAMEM_DEV_MODE").is_ok()
-                || std::env::var("TETRAMEM_DEV_MODE")
-                    .map(|v| v == "1")
-                    .unwrap_or(false);
+            let dev_mode = std::env::var("TETRAMEM_DEV_MODE")
+                .map(|v| v == "1")
+                .unwrap_or(false);
             if !dev_mode {
                 return Err(ConfigError::Io(format!(
                     "config file not found: {} — set TETRAMEM_DEV_MODE=1 to allow development mode",
@@ -547,6 +546,31 @@ impl AppConfig {
         if self.rate_limit.burst == 0 {
             return Err(ConfigError::Parse(
                 "rate_limit.burst must be > 0".to_string(),
+            ));
+        }
+        if self.maintenance.interval_secs == 0 {
+            return Err(ConfigError::Parse(
+                "maintenance.interval_secs must be > 0".to_string(),
+            ));
+        }
+        if self.maintenance.max_memories == 0 {
+            return Err(ConfigError::Parse(
+                "maintenance.max_memories must be > 0".to_string(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.spontaneous.base_curiosity) {
+            return Err(ConfigError::Parse(
+                "spontaneous.base_curiosity must be in [0, 1]".to_string(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.spontaneous.base_reflection) {
+            return Err(ConfigError::Parse(
+                "spontaneous.base_reflection must be in [0, 1]".to_string(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.spontaneous.base_exploration) {
+            return Err(ConfigError::Parse(
+                "spontaneous.base_exploration must be in [0, 1]".to_string(),
             ));
         }
         Ok(())

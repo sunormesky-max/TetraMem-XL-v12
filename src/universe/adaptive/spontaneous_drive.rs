@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::universe::api::AppState;
-use crate::universe::cognitive::cognitive_state::CognitiveStateEngine;
+use crate::universe::cognitive::cognitive_state::CognitiveState;
 use crate::universe::cognitive::meta_cognitive::MetaCognitiveEngine;
 use crate::universe::config::SpontaneousConfig;
 use crate::universe::coord::Coord7D;
@@ -71,14 +71,13 @@ impl SpontaneousDrive {
         }
     }
 
-    pub async fn run_cycle(&mut self, state: &Arc<AppState>, config: &SpontaneousConfig) {
-        let cognitive_state = {
-            let u = state.universe.read().await;
-            let h = state.hebbian.read().await;
-            let mems = state.memories.read().await;
-            CognitiveStateEngine::assess(&u, &h, &mems)
-        };
-
+    pub async fn run_cycle_with_state(
+        &mut self,
+        state: &Arc<AppState>,
+        config: &SpontaneousConfig,
+        vigor: f64,
+        _cognitive_state: &CognitiveState,
+    ) {
         let mem_count = {
             let mems = state.memories.read().await;
             mems.len()
@@ -88,7 +87,6 @@ impl SpontaneousDrive {
             return;
         }
 
-        let vigor = cognitive_state.overall_vigor;
         self.metrics.last_assessment_vigor = vigor;
 
         self.assess_and_adjust(vigor);
@@ -373,7 +371,7 @@ impl SpontaneousDrive {
 
     async fn event_reactor(&mut self, state: &Arc<AppState>) {
         let events = state.events.lock().await;
-        let history = events.history();
+        let history: Vec<_> = events.history().into_iter().cloned().collect();
         let recent_len = history.len();
 
         if recent_len == 0 {

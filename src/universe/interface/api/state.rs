@@ -11,12 +11,13 @@ use crate::universe::cluster::ClusterManager;
 use crate::universe::config::AppConfig;
 use crate::universe::constitution::Constitution;
 use crate::universe::crystal::CrystalEngine;
-use crate::universe::events::EventBus;
+use crate::universe::events::EventBusSender;
 use crate::universe::hebbian::HebbianMemory;
 use crate::universe::memory::MemoryAtom;
 use crate::universe::memory::{ClusteringEngine, InterestProfile, SemanticEngine, SurfacedMemory};
 use crate::universe::node::DarkUniverse;
 use crate::universe::perception::PerceptionBudget;
+use crate::universe::safety::events::EventBus;
 use crate::universe::safety::identity_guard::IdentityGuard;
 use crate::universe::watchdog::Watchdog;
 
@@ -30,8 +31,8 @@ pub struct AppState {
     pub semantic: RwLock<SemanticEngine>,
     pub clustering: RwLock<ClusteringEngine>,
     pub constitution: RwLock<Constitution>,
-    pub events: tokio::sync::Mutex<EventBus>,
-    pub event_sender: crate::universe::events::EventBusSender,
+    pub events: Mutex<EventBus>,
+    pub event_sender: EventBusSender,
     pub watchdog: RwLock<Watchdog>,
     pub backup: RwLock<BackupScheduler>,
     pub cluster: Mutex<ClusterManager>,

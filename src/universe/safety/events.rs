@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
-use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::collections::{HashMap, VecDeque};
+
+const CHANNEL_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub enum UniverseEvent {
     MemoryEncoded {
-        anchor: [i32; 3],
+        anchor: [i32; 7],
         data_dim: usize,
         importance: f64,
     },
     MemoryDecoded {
-        anchor: [i32; 3],
+        anchor: [i32; 7],
     },
     PulseCompleted {
         source: [i32; 7],
@@ -175,11 +176,10 @@ pub type SubscriberId = u64;
 type BoxedHandler = Box<dyn Fn(&UniverseEvent) + Send + Sync>;
 
 pub struct EventBus {
-    sender: Sender<UniverseEvent>,
-    receiver: Receiver<UniverseEvent>,
+    receiver: std::sync::mpsc::Receiver<UniverseEvent>,
     subscribers: HashMap<SubscriberId, BoxedHandler>,
     next_sub_id: SubscriberId,
-    history: Vec<UniverseEvent>,
+    history: VecDeque<UniverseEvent>,
     max_history: usize,
 }
 
@@ -191,13 +191,13 @@ impl Default for EventBus {
 
 impl EventBus {
     pub fn new() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
+        std::mem::forget(tx);
         Self {
-            sender: tx,
             receiver: rx,
             subscribers: HashMap::new(),
             next_sub_id: 1,
-            history: Vec::new(),
+            history: VecDeque::new(),
             max_history: 1000,
         }
     }
@@ -205,12 +205,6 @@ impl EventBus {
     pub fn with_history_capacity(mut self, cap: usize) -> Self {
         self.max_history = cap;
         self
-    }
-
-    pub fn publish(&self, event: UniverseEvent) {
-        if self.sender.send(event).is_err() {
-            tracing::warn!("eventbus publish: receiver dropped, event discarded");
-        }
     }
 
     pub fn subscribe(
@@ -233,29 +227,45 @@ impl EventBus {
             match self.receiver.try_recv() {
                 Ok(event) => {
                     for handler in self.subscribers.values() {
-                        handler(&event);
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handler(&event);
+                        }));
                     }
                     if self.history.len() >= self.max_history {
-                        self.history.remove(0);
+                        self.history.pop_front();
                     }
-                    self.history.push(event);
+                    self.history.push_back(event);
                     count += 1;
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
         count
     }
 
     pub fn sender(&self) -> EventBusSender {
-        EventBusSender {
-            inner: self.sender.clone(),
+        let (tx, _) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
+        EventBusSender { inner: tx }
+    }
+
+    pub fn create_channel() -> (EventBusSender, std::sync::mpsc::Receiver<UniverseEvent>) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
+        (EventBusSender { inner: tx }, rx)
+    }
+
+    pub fn from_receiver(rx: std::sync::mpsc::Receiver<UniverseEvent>) -> Self {
+        Self {
+            receiver: rx,
+            subscribers: HashMap::new(),
+            next_sub_id: 1,
+            history: VecDeque::new(),
+            max_history: 1000,
         }
     }
 
-    pub fn history(&self) -> &[UniverseEvent] {
-        &self.history
+    pub fn history(&self) -> Vec<&UniverseEvent> {
+        self.history.iter().collect()
     }
 
     pub fn history_len(&self) -> usize {
@@ -269,17 +279,21 @@ impl EventBus {
     pub fn clear_history(&mut self) {
         self.history.clear();
     }
+
+    pub fn pending_count(&self) -> usize {
+        self.receiver.iter().count()
+    }
 }
 
 #[derive(Clone)]
 pub struct EventBusSender {
-    inner: Sender<UniverseEvent>,
+    inner: std::sync::mpsc::SyncSender<UniverseEvent>,
 }
 
 impl EventBusSender {
     pub fn publish(&self, event: UniverseEvent) {
         if self.inner.send(event).is_err() {
-            tracing::warn!("EventBusSender publish: receiver dropped, event discarded");
+            tracing::warn!("EventBusSender: receiver dropped, event discarded");
         }
     }
 }
@@ -289,21 +303,26 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    fn create_pair() -> (EventBusSender, EventBus) {
+        let (tx, rx) = EventBus::create_channel();
+        (tx, EventBus::from_receiver(rx))
+    }
+
     #[test]
     fn event_bus_pub_sub() {
-        let mut bus = EventBus::new();
+        let (sender, mut bus) = create_pair();
         let received = Arc::new(Mutex::new(Vec::new()));
         let recv_clone = received.clone();
         bus.subscribe(move |evt| {
             recv_clone.lock().unwrap().push(format!("{}", evt));
         });
 
-        bus.publish(UniverseEvent::MemoryEncoded {
-            anchor: [1, 2, 3],
+        sender.publish(UniverseEvent::MemoryEncoded {
+            anchor: [1, 2, 3, 0, 0, 0, 0],
             data_dim: 7,
             importance: 0.8,
         });
-        bus.publish(UniverseEvent::PulseCompleted {
+        sender.publish(UniverseEvent::PulseCompleted {
             source: [1, 2, 3, 0, 0, 0, 0],
             pulse_type: "exploratory".into(),
             visited_nodes: 42,
@@ -329,15 +348,9 @@ mod tests {
     }
 
     #[test]
-    fn event_bus_sender_clone() {
-        let mut bus = EventBus::new();
-        let sender = bus.sender();
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let recv_clone = received.clone();
-        bus.subscribe(move |evt| {
-            recv_clone.lock().unwrap().push(format!("{}", evt));
-        });
-
+    fn sender_clone_and_publish() {
+        let (sender, mut bus) = create_pair();
+        bus.subscribe(|_| {});
         sender.publish(UniverseEvent::CrystalFormed {
             new_crystals: 3,
             new_super: 1,
@@ -349,10 +362,11 @@ mod tests {
 
     #[test]
     fn event_bus_history_cap() {
-        let mut bus = EventBus::new().with_history_capacity(3);
+        let (sender, mut bus) = create_pair();
+        bus = bus.with_history_capacity(3);
         bus.subscribe(|_| {});
         for i in 0..5u32 {
-            bus.publish(UniverseEvent::BackupCreated {
+            sender.publish(UniverseEvent::BackupCreated {
                 backup_id: i as u64,
                 bytes: 100,
                 conservation_ok: true,
@@ -377,5 +391,26 @@ mod tests {
         assert!(s.contains("DreamCompleted"));
         assert!(s.contains("replay=10"));
         assert!(s.contains("merge=2"));
+    }
+
+    #[test]
+    fn subscriber_panic_doesnt_kill_drain() {
+        let (sender, mut bus) = create_pair();
+        let received = Arc::new(Mutex::new(0usize));
+        let recv_clone = received.clone();
+        bus.subscribe(move |_| {
+            panic!("intentional test panic");
+        });
+        bus.subscribe(move |_: &UniverseEvent| {
+            *recv_clone.lock().unwrap() += 1;
+        });
+        sender.publish(UniverseEvent::BackupCreated {
+            backup_id: 1,
+            bytes: 100,
+            conservation_ok: true,
+        });
+        let drained = bus.drain();
+        assert_eq!(drained, 1);
+        assert_eq!(*received.lock().unwrap(), 1);
     }
 }

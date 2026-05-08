@@ -136,9 +136,8 @@ pub async fn encode_memory(
             let anchor_str = format!("{}", atom.anchor());
             let created_at = atom.created_at();
             let data_dim = req.data.len();
-            let anchor_3 = req.anchor;
+            let anchor_7 = atom.anchor().basis();
             let importance = atom.importance();
-            tracing::info!(anchor = %anchor_str, manifested, "memory encoded successfully");
 
             {
                 let mut sem = state.semantic.write().await;
@@ -164,7 +163,7 @@ pub async fn encode_memory(
             mems.push(atom);
             idx.insert(anchor_str.clone(), i);
             state.event_sender.publish(UniverseEvent::MemoryEncoded {
-                anchor: anchor_3,
+                anchor: anchor_7,
                 data_dim,
                 importance,
             });

@@ -171,7 +171,9 @@ fn main() {
             );
             let constitution =
                 tetramem_v12::universe::constitution::Constitution::tetramem_default();
-            let mut event_bus = tetramem_v12::universe::events::EventBus::new();
+            let (event_sender, event_rx) =
+                tetramem_v12::universe::events::EventBus::create_channel();
+            let mut event_bus = tetramem_v12::universe::events::EventBus::from_receiver(event_rx);
             event_bus.subscribe(|event| match event {
                 tetramem_v12::universe::events::UniverseEvent::MemoryEncoded {
                     anchor,
@@ -203,7 +205,6 @@ fn main() {
                 }
                 _ => {}
             });
-            let event_sender = event_bus.sender();
             let watchdog =
                 tetramem_v12::universe::watchdog::Watchdog::with_defaults(universe.total_energy());
             let state = std::sync::Arc::new(tetramem_v12::universe::api::AppState {
