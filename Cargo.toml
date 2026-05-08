@@ -37,6 +37,8 @@ async-trait = "0.1"
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.13", features = ["json", "blocking"] }
+wasmi = "0.40"
+base64 = "0.22"
 
 [dev-dependencies]
 criterion = "0.8"

@@ -58,6 +58,7 @@ fn make_test_state() -> Arc<AppState> {
         identity_guard: tokio::sync::RwLock::new(
             tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
         ),
+        plugins: tokio::sync::RwLock::new(tetramem_v12::universe::plugins::PluginManager::new(1_000_000)),
         shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }

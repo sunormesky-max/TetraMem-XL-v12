@@ -20,6 +20,7 @@ use crate::universe::node::DarkUniverse;
 use crate::universe::perception::PerceptionBudget;
 use crate::universe::safety::events::EventBus;
 use crate::universe::safety::identity_guard::IdentityGuard;
+use crate::universe::plugins::PluginManager;
 use crate::universe::watchdog::Watchdog;
 
 pub struct MemoryStore {
@@ -103,6 +104,7 @@ pub struct AppState {
     pub jwt: JwtConfig,
     pub users: UserStore,
     pub identity_guard: RwLock<IdentityGuard>,
+    pub plugins: RwLock<PluginManager>,
     pub shutdown: Arc<AtomicBool>,
 }
 

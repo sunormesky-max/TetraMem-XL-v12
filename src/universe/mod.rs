@@ -10,6 +10,7 @@ pub mod interface;
 pub mod memory;
 pub mod safety;
 pub mod storage;
+pub mod plugins;
 
 pub use core::config;
 pub use core::coord;
@@ -49,6 +50,8 @@ pub use interface::metrics;
 
 pub use safety::constitution;
 pub use safety::events;
+
+pub use plugins::{PluginManager, PluginManifest, PluginPermissions, PluginStatus};
 
 pub use agent::{
     AgentContext, AgentContextMut, AgentKind, AgentReport, CognitiveAgent, CrystalAgent,

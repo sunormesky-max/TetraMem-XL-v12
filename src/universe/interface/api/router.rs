@@ -59,6 +59,10 @@ use super::state::SharedState;
 use super::streaming_ops::{
     list_interests, memory_stream, register_interest, surface_status, unregister_interest,
 };
+use super::plugin_ops::{
+    plugin_disable, plugin_enable, plugin_execute, plugin_install,
+    plugin_list, plugin_manager_stats, plugin_reset_energy, plugin_status, plugin_uninstall,
+};
 
 struct RateLimiter {
     count: AtomicU64,
@@ -362,6 +366,13 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/cognitive/reflect", post(reflect))
         .route("/cognitive/identity", get(identity_profile))
         .route("/cognitive/meta", get(meta_cognitive_state))
+        .route("/plugins/list", get(plugin_list))
+        .route("/plugins/stats", get(plugin_manager_stats))
+        .route("/plugins/:name/status", get(plugin_status))
+        .route("/plugins/:name/enable", post(plugin_enable))
+        .route("/plugins/:name/disable", post(plugin_disable))
+        .route("/plugins/:name/execute", post(plugin_execute))
+        .route("/plugins/:name/reset-energy", post(plugin_reset_energy))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(
@@ -395,6 +406,8 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/clustering/maintenance", post(clustering_maintenance))
         .route("/watchdog/checkup", post(watchdog_checkup))
         .route("/agent/crystal", post(agent_execute_crystal))
+        .route("/plugins/install", post(plugin_install))
+        .route("/plugins/:name/uninstall", post(plugin_uninstall))
         .layer(middleware::from_fn(rate_limit_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
