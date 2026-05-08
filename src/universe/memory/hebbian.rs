@@ -167,6 +167,9 @@ impl HebbianMemory {
         for i in 0..path.len() - 1 {
             let src = path[i];
             let tgt = path[i + 1];
+            if src == tgt {
+                continue;
+            }
             let fwd_key = (src, tgt);
             let rev_key = (tgt, src);
 
@@ -390,10 +393,9 @@ impl HebbianMemory {
             .filter(|(c, _)| {
                 let fwd = self.edges.get(&(*anchor, *c));
                 let rev = self.edges.get(&(*c, *anchor));
-                let delay = fwd
-                    .map(|e| e.avg_delay_ms)
-                    .or_else(|| rev.map(|e| e.avg_delay_ms))
-                    .unwrap_or(0.0);
+                let fwd_delay = fwd.map(|e| e.avg_delay_ms).unwrap_or(0.0);
+                let rev_delay = rev.map(|e| e.avg_delay_ms).unwrap_or(0.0);
+                let delay = fwd_delay.max(rev_delay);
                 delay > 0.0 && delay <= window_ms
             })
             .collect()

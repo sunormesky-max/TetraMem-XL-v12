@@ -54,6 +54,9 @@ pub async fn encode_memory(
     if let Some(ref cat) = req.category {
         validate_field_len("category", cat, MAX_TAG_LEN).map_err(AppError::BadRequest)?;
     }
+    if let Some(ref source) = req.source {
+        validate_field_len("source", source, MAX_STRING_FIELD_LEN).map_err(AppError::BadRequest)?;
+    }
     for &v in &req.data {
         if !v.is_finite() {
             return Err(AppError::BadRequest(
@@ -118,8 +121,8 @@ pub async fn encode_memory(
         req.importance * 0.7 + novelty_report.suggested_importance * 0.3
     };
 
-    let mut u = state.universe.write().await;
     let mut store = state.memory_store.write().await;
+    let mut u = state.universe.write().await;
 
     let encode_result = match MemoryCodec::encode(&mut u, &anchor, &req.data) {
         Ok(mut atom) => {
@@ -401,6 +404,9 @@ pub async fn annotate_memory(
     if let Some(ref cat) = req.category {
         validate_field_len("category", cat, MAX_TAG_LEN).map_err(AppError::BadRequest)?;
     }
+    if let Some(ref source) = req.source {
+        validate_field_len("source", source, MAX_STRING_FIELD_LEN).map_err(AppError::BadRequest)?;
+    }
     let mut store = state.memory_store.write().await;
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let anchor_str = format!("{}", &anchor);
@@ -465,8 +471,8 @@ pub async fn semantic_search(
     State(state): State<SharedState>,
     Json(req): Json<SemanticSearchRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
-    let sem = state.semantic.read().await;
     let store = state.memory_store.read().await;
+    let sem = state.semantic.read().await;
     let k = req.k.clamp(1, 100);
 
     let results = sem.search_similar(&req.data, k);
@@ -502,11 +508,15 @@ pub async fn semantic_text_query(
     State(state): State<SharedState>,
     Json(req): Json<SemanticTextQueryRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
-    let sem = state.semantic.read().await;
     let store = state.memory_store.read().await;
+    let sem = state.semantic.read().await;
     let k = req.k.clamp(1, 100);
     let text = if req.text.len() > MAX_STRING_FIELD_LEN {
-        &req.text[..MAX_STRING_FIELD_LEN]
+        let mut end = MAX_STRING_FIELD_LEN;
+        while !req.text.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        &req.text[..end]
     } else {
         &req.text
     };
@@ -541,8 +551,8 @@ pub async fn semantic_relations(
     Json(req): Json<SemanticRelationRequest>,
 ) -> Result<Json<ApiResponse<SemanticRelationResponse>>, AppError> {
     validate_coord_3(&req.anchor)?;
-    let sem = state.semantic.read().await;
     let store = state.memory_store.read().await;
+    let sem = state.semantic.read().await;
     let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
     let anchor_str = format!("{}", &anchor);
 

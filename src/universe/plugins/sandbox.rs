@@ -23,6 +23,11 @@ impl WasmSandbox {
         Self { engine }
     }
 
+    // TODO: wasmi does not support fuel-based execution interruption (unlike wasmtime).
+    // Callers should use `tokio::task::spawn_blocking` with a timeout to guard against
+    // infinite loops in untrusted WASM modules. A future migration to wasmtime or a
+    // separate watchdog thread could provide deterministic interruption.
+
     pub fn validate(&self, wasm_bytes: &[u8]) -> Result<(), AppError> {
         Module::new(&self.engine, wasm_bytes)
             .map(|_| ())
@@ -133,9 +138,19 @@ impl WasmSandbox {
         if !request.input.is_empty() {
             let offset = 0usize;
             let data = &request.input;
-            if offset + data.len() <= memory.data(&store).len() {
-                memory.data_mut(&mut store)[offset..offset + data.len()].copy_from_slice(data);
+            if offset + data.len() > memory.data(&store).len() {
+                return PluginExecutionResult {
+                    output: Vec::new(),
+                    energy_consumed: 0,
+                    execution_time_us: start.elapsed().as_micros() as u64,
+                    success: false,
+                    error: Some(format!(
+                        "input too large for WASM memory: {} bytes",
+                        data.len()
+                    )),
+                };
             }
+            memory.data_mut(&mut store)[offset..offset + data.len()].copy_from_slice(data);
         }
 
         let func_name = &request.function;

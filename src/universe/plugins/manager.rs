@@ -39,6 +39,22 @@ impl PluginManager {
         if manifest.name.is_empty() {
             return Err(AppError::BadRequest("plugin name cannot be empty".into()));
         }
+        const MAX_NAME_LEN: usize = 128;
+        const MAX_DESC_LEN: usize = 4096;
+        if manifest.name.len() > MAX_NAME_LEN {
+            return Err(AppError::BadRequest(format!(
+                "plugin name too long: {} chars (max {})",
+                manifest.name.len(),
+                MAX_NAME_LEN
+            )));
+        }
+        if manifest.description.len() > MAX_DESC_LEN {
+            return Err(AppError::BadRequest(format!(
+                "description too long: {} chars (max {})",
+                manifest.description.len(),
+                MAX_DESC_LEN
+            )));
+        }
         if manifest.api_version != 1 {
             return Err(AppError::BadRequest(format!(
                 "unsupported API version: {}",
@@ -49,6 +65,14 @@ impl PluginManager {
             return Err(AppError::BadRequest(format!(
                 "plugin '{}' already installed",
                 manifest.name
+            )));
+        }
+        const MAX_WASM_SIZE: usize = 1024 * 1024;
+        if wasm_bytes.len() > MAX_WASM_SIZE {
+            return Err(AppError::BadRequest(format!(
+                "WASM module too large: {} bytes (max {} bytes)",
+                wasm_bytes.len(),
+                MAX_WASM_SIZE
             )));
         }
         self.sandbox.validate(&wasm_bytes)?;
@@ -124,30 +148,62 @@ impl PluginManager {
         let energy_limit = request
             .energy_limit
             .unwrap_or(entry.info.manifest.energy_budget);
+        let energy_budget = entry.info.manifest.energy_budget;
+        let current_consumed = entry.info.energy_consumed;
+        let permissions = entry.info.manifest.permissions.clone();
+        let wasm_bytes_ref: &[u8] = &entry.wasm_bytes;
 
-        entry.info.status = PluginStatus::Running;
+        struct StatusGuard<'a> {
+            info: &'a mut PluginInfo,
+            committed: bool,
+        }
+
+        impl<'a> StatusGuard<'a> {
+            fn new(info: &'a mut PluginInfo) -> Self {
+                info.status = PluginStatus::Running;
+                Self {
+                    info,
+                    committed: false,
+                }
+            }
+            fn commit(mut self, status: PluginStatus) {
+                self.info.status = status;
+                self.committed = true;
+            }
+        }
+
+        impl<'a> Drop for StatusGuard<'a> {
+            fn drop(&mut self) {
+                if !self.committed {
+                    self.info.status = PluginStatus::Error("execution panicked".into());
+                }
+            }
+        }
+
+        let guard = StatusGuard::new(&mut entry.info);
         let result = self.sandbox.execute(
-            &entry.wasm_bytes,
+            wasm_bytes_ref,
             &request,
-            &entry.info.manifest.permissions,
+            &permissions,
             energy_limit,
         );
 
-        entry.info.executions += 1;
-        entry.info.energy_consumed += result.energy_consumed;
-        entry.info.last_execution = Some(chrono::Utc::now().to_rfc3339());
-
-        if entry.info.energy_consumed >= entry.info.manifest.energy_budget {
-            entry.info.status = PluginStatus::SuspendedEnergyBudgetExceeded;
+        let consumed = result.energy_consumed;
+        if current_consumed + consumed >= energy_budget {
+            guard.commit(PluginStatus::SuspendedEnergyBudgetExceeded);
             tracing::warn!(
                 name = %name,
-                consumed = entry.info.energy_consumed,
-                budget = entry.info.manifest.energy_budget,
+                consumed = current_consumed + consumed,
+                budget = energy_budget,
                 "plugin suspended: energy budget exceeded"
             );
         } else {
-            entry.info.status = PluginStatus::Enabled;
+            guard.commit(PluginStatus::Enabled);
         }
+
+        entry.info.executions += 1;
+        entry.info.energy_consumed += consumed;
+        entry.info.last_execution = Some(chrono::Utc::now().to_rfc3339());
 
         Ok(result)
     }

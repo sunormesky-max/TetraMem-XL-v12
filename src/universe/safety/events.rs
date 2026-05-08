@@ -281,7 +281,7 @@ impl EventBus {
     }
 
     pub fn pending_count(&self) -> usize {
-        self.receiver.iter().count()
+        self.receiver.try_iter().count()
     }
 }
 

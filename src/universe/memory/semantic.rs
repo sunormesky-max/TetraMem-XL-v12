@@ -108,7 +108,7 @@ impl SemanticEmbedding {
             vec[10] = q4 - q1;
 
             let mut sorted = data.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             vec[11] = sorted[data.len() / 2];
         }
 
@@ -126,7 +126,7 @@ impl SemanticEmbedding {
 
         if data.len() >= 10 {
             let mut sorted = data.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let p25 = sorted[data.len() / 4];
             let p75 = sorted[data.len() * 3 / 4];
             vec[16] = p75 - p25;
@@ -249,7 +249,7 @@ impl SemanticEmbedding {
         vec[meta_base + 7] = integer_ratio;
         let unique_count = {
             let mut sorted = data.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let mut count = 1;
             for i in 1..sorted.len() {
                 if (sorted[i] - sorted[i - 1]).abs() > 1e-10 {
@@ -1652,7 +1652,7 @@ impl SemanticEngine {
 
         for atom in atoms {
             let key = AtomKey::from_atom(atom);
-            let embedding = SemanticEmbedding::from_data_and_annotation(&[atom.importance()], atom);
+            let embedding = SemanticEmbedding::from_annotation(atom);
             let results = self.index.search_knn(&embedding, k);
 
             for result in results {
