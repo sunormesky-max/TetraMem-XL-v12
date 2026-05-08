@@ -97,7 +97,9 @@ fn make_anchor(i: usize) -> Coord7D {
 }
 
 struct IndexedMemory {
+    #[allow(dead_code)]
     data_idx: usize,
+    #[allow(dead_code)]
     anchor: Coord7D,
 }
 
@@ -235,7 +237,7 @@ fn main() {
             let mut all_reachable = HashSet::new();
             all_reachable.insert(origin);
 
-            for n_hops in 1..=3 {
+            for (n_hops, hop_count) in hop_counts.iter_mut().enumerate().skip(1).take(3) {
                 let mut frontier: Vec<Coord7D> = vec![origin];
                 let mut visited: HashSet<Coord7D> = HashSet::new();
                 visited.insert(origin);
@@ -259,7 +261,7 @@ fn main() {
                         ac == *coord
                     }) {
                         all_reachable.insert(*coord);
-                        hop_counts[n_hops] += 1;
+                        *hop_count += 1;
                     }
                 }
             }
@@ -281,8 +283,8 @@ fn main() {
             "    Hebbian extra (missed by KNN): {:.1} results/query",
             hebbian_extra as f64 / n_queries as f64,
         );
-        for h in 1..=3 {
-            println!("      hop-{} discoveries: {}", h, hop_counts[h]);
+        for (h, &count) in hop_counts.iter().enumerate().skip(1).take(3) {
+            println!("      hop-{} discoveries: {}", h, count);
         }
         println!("    Time: {:.1}ms", elapsed.as_secs_f64() * 1000.0);
         println!();

@@ -150,6 +150,8 @@ impl SemanticEmbedding {
         }
 
         if data.len() >= 4 {
+            let n = data.len() as f64;
+            let two_pi_over_n = 2.0 * std::f64::consts::PI / n;
             let mut fft_mag = [0.0f64; FREQ_DIM];
             for (k, slot) in fft_mag
                 .iter_mut()
@@ -158,13 +160,13 @@ impl SemanticEmbedding {
             {
                 let mut re = 0.0f64;
                 let mut im = 0.0f64;
-                for t in 0..data.len() {
-                    let angle =
-                        2.0 * std::f64::consts::PI * k as f64 * t as f64 / data.len() as f64;
-                    re += data[t] * angle.cos();
-                    im -= data[t] * angle.sin();
+                let k_f64 = k as f64;
+                for (t, &val) in data.iter().enumerate() {
+                    let angle = two_pi_over_n * k_f64 * t as f64;
+                    re += val * angle.cos();
+                    im -= val * angle.sin();
                 }
-                *slot = (re * re + im * im).sqrt() / data.len() as f64;
+                *slot = (re * re + im * im).sqrt() / n;
             }
             for (i, &val) in fft_mag.iter().enumerate().take(FREQ_DIM) {
                 let pos = STAT_DIM + HIST_DIM + i;

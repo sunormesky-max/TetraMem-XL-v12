@@ -85,7 +85,7 @@ pub async fn encode_memory(
         c.inc();
     }
 
-    let novelty_report = {
+    let (novelty_report, knn_cache) = {
         let sem = state.semantic.read().await;
         let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
@@ -103,8 +103,13 @@ pub async fn encode_memory(
                     .map(|idx| (r.distance, idx))
             })
             .collect();
+        let knn_cache: Vec<(crate::universe::memory::AtomKey, f64)> = knn
+            .into_iter()
+            .map(|r| (r.atom_key, r.similarity))
+            .collect();
         let detector = crate::universe::memory::NoveltyDetector::default();
-        detector.assess(&req.data, &knn_distances, &anchor, &h, &store.memories)
+        let report = detector.assess(&req.data, &knn_distances, &anchor, &h, &store.memories);
+        (report, knn_cache)
     };
 
     let adjusted_importance = if req.importance < 0.01 {
@@ -116,7 +121,7 @@ pub async fn encode_memory(
     let mut u = state.universe.write().await;
     let mut store = state.memory_store.write().await;
 
-    match MemoryCodec::encode(&mut u, &anchor, &req.data) {
+    let encode_result = match MemoryCodec::encode(&mut u, &anchor, &req.data) {
         Ok(mut atom) => {
             for tag in &req.tags {
                 atom.add_tag(tag);
@@ -139,20 +144,21 @@ pub async fn encode_memory(
             let anchor_7 = atom.anchor().basis();
             let importance = atom.importance();
 
+            drop(u);
+
             {
                 let mut sem = state.semantic.write().await;
                 sem.index_memory(&atom, &req.data);
-                let similar = sem.search_similar(&req.data, 5);
                 drop(sem);
 
-                if !similar.is_empty() {
+                if !knn_cache.is_empty() {
                     let mut h = state.hebbian.write().await;
-                    for hit in &similar {
+                    for (hit_key, hit_sim) in &knn_cache {
                         if let Some(other) = store.memories.iter().find(|m| {
                             let mk = crate::universe::memory::AtomKey::from_atom(m);
-                            mk == hit.atom_key
+                            mk == *hit_key
                         }) {
-                            let semantic_strength = hit.similarity * 1.5;
+                            let semantic_strength = hit_sim * 1.5;
                             h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
                         }
                     }
@@ -207,13 +213,16 @@ pub async fn encode_memory(
             ))
         }
         Err(e) => {
+            drop(u);
             tracing::warn!(error = %e, "memory encode failed");
             Ok((
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse::err(format!("encode failed: {}", e))),
             ))
         }
-    }
+    };
+
+    encode_result
 }
 
 pub async fn decode_memory(

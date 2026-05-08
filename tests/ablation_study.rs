@@ -52,13 +52,13 @@ fn generate_clustered_data() -> (Vec<Vec<f64>>, Vec<usize>) {
         }
         centroids.push(c);
     }
-    for ci in 0..N_CLUSTERS {
+    for (ci, centroid) in centroids.iter().enumerate() {
         for _ in 0..PER_CLUSTER {
             let mut point = Vec::with_capacity(DATA_DIM);
-            for di in 0..DATA_DIM {
+            for &c_val in centroid.iter() {
                 s = lcg(s);
                 let noise = ((s >> 33) as f64) / (1u64 << 31) as f64 - 1.0;
-                point.push(centroids[ci][di] + noise * SPREAD);
+                point.push(c_val + noise * SPREAD);
             }
             data.push(point);
             labels.push(ci);
@@ -68,6 +68,7 @@ fn generate_clustered_data() -> (Vec<Vec<f64>>, Vec<usize>) {
 }
 
 struct MemoryEntry {
+    #[allow(dead_code)]
     data_idx: usize,
     cluster: usize,
     anchor: Coord7D,

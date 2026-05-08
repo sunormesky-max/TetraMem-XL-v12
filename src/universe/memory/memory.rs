@@ -389,12 +389,35 @@ impl MemoryCodec {
             return None;
         }
 
-        for i in 0..available.len() {
-            for j in (i + 1)..available.len() {
-                for k in (j + 1)..available.len() {
-                    let tet = Tetrahedron::new([*anchor, available[i], available[j], available[k]]);
+        let anchor_f = anchor.as_f64();
+        let mut scored: Vec<(usize, f64)> = available
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let cf = c.as_f64();
+                let d: f64 = (0..7).map(|d| (cf[d] - anchor_f[d]).powi(2)).sum();
+                (i, d)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let n_candidates = scored.len().min(20);
+        for i in 0..n_candidates {
+            for j in (i + 1)..n_candidates {
+                for k in (j + 1)..n_candidates {
+                    let tet = Tetrahedron::new([
+                        *anchor,
+                        available[scored[i].0],
+                        available[scored[j].0],
+                        available[scored[k].0],
+                    ]);
                     if tet.has_volume() {
-                        return Some([*anchor, available[i], available[j], available[k]]);
+                        return Some([
+                            *anchor,
+                            available[scored[i].0],
+                            available[scored[j].0],
+                            available[scored[k].0],
+                        ]);
                     }
                 }
             }

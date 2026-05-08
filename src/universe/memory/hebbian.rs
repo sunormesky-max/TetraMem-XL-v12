@@ -86,8 +86,8 @@ pub struct HebbianEdgeFull {
 #[derive(Clone)]
 pub struct HebbianMemory {
     edges: HashMap<(Coord7D, Coord7D), HebbianEdge>,
-    forward: HashMap<Coord7D, Vec<(Coord7D, f64)>>,
-    backward: HashMap<Coord7D, Vec<(Coord7D, f64)>>,
+    forward: HashMap<Coord7D, HashMap<Coord7D, f64>>,
+    backward: HashMap<Coord7D, HashMap<Coord7D, f64>>,
     pub max_paths: usize,
     decay: f64,
     reinforce: f64,
@@ -260,33 +260,33 @@ impl HebbianMemory {
     }
 
     fn add_dir_adj_entry(&mut self, src: &Coord7D, tgt: &Coord7D, weight: f64) {
-        self.forward.entry(*src).or_default().push((*tgt, weight));
-        self.backward.entry(*tgt).or_default().push((*src, weight));
+        self.forward.entry(*src).or_default().insert(*tgt, weight);
+        self.backward.entry(*tgt).or_default().insert(*src, weight);
     }
 
     fn update_dir_adj_weight(&mut self, src: &Coord7D, tgt: &Coord7D, weight: f64) {
-        if let Some(list) = self.forward.get_mut(src) {
-            if let Some(entry) = list.iter_mut().find(|(c, _)| c == tgt) {
-                entry.1 = weight;
+        if let Some(map) = self.forward.get_mut(src) {
+            if let Some(w) = map.get_mut(tgt) {
+                *w = weight;
             }
         }
-        if let Some(list) = self.backward.get_mut(tgt) {
-            if let Some(entry) = list.iter_mut().find(|(c, _)| c == src) {
-                entry.1 = weight;
+        if let Some(map) = self.backward.get_mut(tgt) {
+            if let Some(w) = map.get_mut(src) {
+                *w = weight;
             }
         }
     }
 
     fn remove_dir_adj_entry(&mut self, src: &Coord7D, tgt: &Coord7D) {
-        if let Some(list) = self.forward.get_mut(src) {
-            list.retain(|(c, _)| c != tgt);
-            if list.is_empty() {
+        if let Some(map) = self.forward.get_mut(src) {
+            map.remove(tgt);
+            if map.is_empty() {
                 self.forward.remove(src);
             }
         }
-        if let Some(list) = self.backward.get_mut(tgt) {
-            list.retain(|(c, _)| c != src);
-            if list.is_empty() {
+        if let Some(map) = self.backward.get_mut(tgt) {
+            map.remove(src);
+            if map.is_empty() {
                 self.backward.remove(tgt);
             }
         }
@@ -301,21 +301,21 @@ impl HebbianMemory {
         self.forward.clear();
         self.backward.clear();
         for (src, tgt, w) in &entries {
-            self.forward.entry(*src).or_default().push((*tgt, *w));
-            self.backward.entry(*tgt).or_default().push((*src, *w));
+            self.forward.entry(*src).or_default().insert(*tgt, *w);
+            self.backward.entry(*tgt).or_default().insert(*src, *w);
         }
     }
 
     pub fn get_neighbors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
         let mut seen: HashMap<Coord7D, f64> = HashMap::new();
-        if let Some(list) = self.forward.get(node) {
-            for &(c, w) in list {
+        if let Some(map) = self.forward.get(node) {
+            for (&c, &w) in map {
                 let e = seen.entry(c).or_default();
                 *e = (*e).max(w);
             }
         }
-        if let Some(list) = self.backward.get(node) {
-            for &(c, w) in list {
+        if let Some(map) = self.backward.get(node) {
+            for (&c, &w) in map {
                 let e = seen.entry(c).or_default();
                 *e = (*e).max(w);
             }
@@ -326,13 +326,17 @@ impl HebbianMemory {
     }
 
     pub fn get_successors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
-        let mut result = self.forward.get(node).cloned().unwrap_or_default();
+        let mut result: Vec<_> = self.forward.get(node)
+            .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
+            .unwrap_or_default();
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
 
     pub fn get_predecessors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
-        let mut result = self.backward.get(node).cloned().unwrap_or_default();
+        let mut result: Vec<_> = self.backward.get(node)
+            .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
+            .unwrap_or_default();
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         result
     }
@@ -344,7 +348,9 @@ impl HebbianMemory {
         visited.insert(current);
 
         for _ in 0..max_steps {
-            let successors = self.forward.get(&current).cloned().unwrap_or_default();
+            let successors: Vec<(Coord7D, f64)> = self.forward.get(&current)
+                .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
+                .unwrap_or_default();
             let best = successors
                 .into_iter()
                 .filter(|(c, _)| !visited.contains(c))
