@@ -118,9 +118,9 @@ pub async fn plugin_execute(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let (wasm_bytes, permissions, energy_limit, energy_budget, current_consumed) = {
         let plugins = state.plugins.read().await;
-        let entry = plugins.get_entry(&name).ok_or_else(|| {
-            AppError::NotFound(format!("plugin '{}' not found", name))
-        })?;
+        let entry = plugins
+            .get_entry(&name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
         if !entry.is_enabled() {
             return Err(AppError::BadRequest(format!(
                 "plugin '{}' is not enabled",
@@ -147,7 +147,12 @@ pub async fn plugin_execute(
 
     {
         let mut plugins = state.plugins.write().await;
-        plugins.record_execution(&name, result.energy_consumed, energy_budget, current_consumed)?;
+        plugins.record_execution(
+            &name,
+            result.energy_consumed,
+            energy_budget,
+            current_consumed,
+        )?;
     }
 
     let val = serde_json::to_value(&result).unwrap_or_default();
