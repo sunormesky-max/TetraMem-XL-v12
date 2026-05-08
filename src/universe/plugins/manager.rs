@@ -99,9 +99,10 @@ impl PluginManager {
     }
 
     pub fn enable(&mut self, name: &str) -> Result<(), AppError> {
-        let entry = self.plugins.get_mut(name).ok_or_else(|| {
-            AppError::NotFound(format!("plugin '{}' not found", name))
-        })?;
+        let entry = self
+            .plugins
+            .get_mut(name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
         match &entry.info.status {
             PluginStatus::Installed | PluginStatus::Disabled => {
                 entry.info.status = PluginStatus::Enabled;
@@ -121,9 +122,10 @@ impl PluginManager {
     }
 
     pub fn disable(&mut self, name: &str) -> Result<(), AppError> {
-        let entry = self.plugins.get_mut(name).ok_or_else(|| {
-            AppError::NotFound(format!("plugin '{}' not found", name))
-        })?;
+        let entry = self
+            .plugins
+            .get_mut(name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
         entry.info.status = PluginStatus::Disabled;
         tracing::info!(name = %name, "plugin disabled");
         Ok(())
@@ -134,9 +136,10 @@ impl PluginManager {
         name: &str,
         request: PluginExecutionRequest,
     ) -> Result<PluginExecutionResult, AppError> {
-        let entry = self.plugins.get_mut(name).ok_or_else(|| {
-            AppError::NotFound(format!("plugin '{}' not found", name))
-        })?;
+        let entry = self
+            .plugins
+            .get_mut(name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
 
         if !matches!(entry.info.status, PluginStatus::Enabled) {
             return Err(AppError::BadRequest(format!(
@@ -181,12 +184,9 @@ impl PluginManager {
         }
 
         let guard = StatusGuard::new(&mut entry.info);
-        let result = self.sandbox.execute(
-            wasm_bytes_ref,
-            &request,
-            &permissions,
-            energy_limit,
-        );
+        let result = self
+            .sandbox
+            .execute(wasm_bytes_ref, &request, &permissions, energy_limit);
 
         let consumed = result.energy_consumed;
         if current_consumed + consumed >= energy_budget {
@@ -217,11 +217,15 @@ impl PluginManager {
     }
 
     pub fn reset_energy(&mut self, name: &str) -> Result<(), AppError> {
-        let entry = self.plugins.get_mut(name).ok_or_else(|| {
-            AppError::NotFound(format!("plugin '{}' not found", name))
-        })?;
+        let entry = self
+            .plugins
+            .get_mut(name)
+            .ok_or_else(|| AppError::NotFound(format!("plugin '{}' not found", name)))?;
         entry.info.energy_consumed = 0;
-        if matches!(entry.info.status, PluginStatus::SuspendedEnergyBudgetExceeded) {
+        if matches!(
+            entry.info.status,
+            PluginStatus::SuspendedEnergyBudgetExceeded
+        ) {
             entry.info.status = PluginStatus::Enabled;
         }
         tracing::info!(name = %name, "plugin energy budget reset");

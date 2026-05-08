@@ -52,16 +52,16 @@ use super::phase::{
 use super::physics_ops::{
     physics_configure, physics_distance, physics_profile, physics_project, physics_status,
 };
+use super::plugin_ops::{
+    plugin_disable, plugin_enable, plugin_execute, plugin_install, plugin_list,
+    plugin_manager_stats, plugin_reset_energy, plugin_status, plugin_uninstall,
+};
 use super::raft_rpc::{raft_append, raft_snapshot, raft_transfer, raft_vote};
 use super::scale::{auto_scale, frontier_expand, get_hebbian_neighbors};
 use super::server::login;
 use super::state::SharedState;
 use super::streaming_ops::{
     list_interests, memory_stream, register_interest, surface_status, unregister_interest,
-};
-use super::plugin_ops::{
-    plugin_disable, plugin_enable, plugin_execute, plugin_install,
-    plugin_list, plugin_manager_stats, plugin_reset_energy, plugin_status, plugin_uninstall,
 };
 
 struct RateLimiter {

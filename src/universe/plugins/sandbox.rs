@@ -5,7 +5,9 @@ use crate::universe::error::AppError;
 use crate::universe::plugins::manifest::{
     PluginExecutionRequest, PluginExecutionResult, PluginPermissions,
 };
-use wasmi::{Engine, Linker, Memory, MemoryType, Module, ResourceLimiter, Store, StoreLimitsBuilder};
+use wasmi::{
+    Engine, Linker, Memory, MemoryType, Module, ResourceLimiter, Store, StoreLimitsBuilder,
+};
 
 pub struct WasmSandbox {
     engine: Engine,
@@ -200,9 +202,7 @@ impl WasmSandbox {
         linker.func_wrap(
             "env",
             "tetramem_energy_remaining",
-            |caller: wasmi::Caller<'_, HostState>| -> u64 {
-                caller.data().energy_remaining
-            },
+            |caller: wasmi::Caller<'_, HostState>| -> u64 { caller.data().energy_remaining },
         )?;
 
         linker.func_wrap(
@@ -225,16 +225,18 @@ impl WasmSandbox {
         linker.func_wrap(
             "env",
             "tetramem_input_len",
-            |caller: wasmi::Caller<'_, HostState>| -> u32 {
-                caller.data().input_data.len() as u32
-            },
+            |caller: wasmi::Caller<'_, HostState>| -> u32 { caller.data().input_data.len() as u32 },
         )?;
 
         linker.func_wrap(
             "env",
             "tetramem_can_memory_read",
             |caller: wasmi::Caller<'_, HostState>| -> i32 {
-                if caller.data().permissions.memory_read { 1 } else { 0 }
+                if caller.data().permissions.memory_read {
+                    1
+                } else {
+                    0
+                }
             },
         )?;
 
@@ -242,7 +244,11 @@ impl WasmSandbox {
             "env",
             "tetramem_can_memory_write",
             |caller: wasmi::Caller<'_, HostState>| -> i32 {
-                if caller.data().permissions.memory_write { 1 } else { 0 }
+                if caller.data().permissions.memory_write {
+                    1
+                } else {
+                    0
+                }
             },
         )?;
 
@@ -250,7 +256,11 @@ impl WasmSandbox {
             "env",
             "tetramem_can_hebbian_read",
             |caller: wasmi::Caller<'_, HostState>| -> i32 {
-                if caller.data().permissions.hebbian_read { 1 } else { 0 }
+                if caller.data().permissions.hebbian_read {
+                    1
+                } else {
+                    0
+                }
             },
         )?;
 
@@ -258,7 +268,11 @@ impl WasmSandbox {
             "env",
             "tetramem_can_pulse_fire",
             |caller: wasmi::Caller<'_, HostState>| -> i32 {
-                if caller.data().permissions.pulse_fire { 1 } else { 0 }
+                if caller.data().permissions.pulse_fire {
+                    1
+                } else {
+                    0
+                }
             },
         )?;
 
@@ -275,7 +289,10 @@ impl WasmSandbox {
             "env",
             "tetramem_output_append",
             |mut caller: wasmi::Caller<'_, HostState>, value: u32| {
-                caller.data_mut().output_data.extend_from_slice(&value.to_le_bytes());
+                caller
+                    .data_mut()
+                    .output_data
+                    .extend_from_slice(&value.to_le_bytes());
             },
         )?;
 

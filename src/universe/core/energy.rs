@@ -95,7 +95,7 @@ impl EnergyField {
     }
 
     pub fn uniform(total: f64) -> Self {
-        if total < 0.0 {
+        if total.is_nan() || total < 0.0 {
             return Self::zero();
         }
         let per_dim = total / DIM as f64;
@@ -105,7 +105,7 @@ impl EnergyField {
     }
 
     pub fn with_physical_bias(total: f64, physical_ratio: f64) -> Self {
-        if total < 0.0 || !(0.0..=1.0).contains(&physical_ratio) {
+        if total.is_nan() || total < 0.0 || !(0.0..=1.0).contains(&physical_ratio) {
             return Self::zero();
         }
         let phys_total = total * physical_ratio;
@@ -162,7 +162,7 @@ impl EnergyField {
     }
 
     pub fn dim(&self, i: usize) -> f64 {
-        self.dims[i]
+        self.dims.get(i).copied().unwrap_or(0.0)
     }
 
     pub fn dims(&self) -> &[f64; DIM] {
@@ -350,6 +350,15 @@ impl EnergyField {
                     total_coupled += transfer;
                 }
             }
+        }
+        if total_coupled > actual {
+            let excess = total_coupled - actual;
+            for j in 0..DIM {
+                if j != source_dim && coupling.get(source_dim, j) > 0.0 {
+                    self.dims[j] -= excess / coupled_count as f64;
+                }
+            }
+            total_coupled = actual;
         }
         let remainder = actual - total_coupled;
         self.dims[source_dim] += remainder;

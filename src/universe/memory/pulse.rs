@@ -344,11 +344,7 @@ impl PulseEngine {
                 continue;
             }
 
-            let child_strength = if pulse.pulse_type == PulseType::Cascade {
-                pulse.strength * self.cascade_energy_factor / fanout as f64
-            } else {
-                pulse.strength
-            };
+            let child_strength = pulse.strength * self.cascade_energy_factor / fanout.max(1) as f64;
 
             for (neighbor, decay) in candidates.iter().take(fanout) {
                 if visited.contains(neighbor) {
@@ -436,12 +432,7 @@ impl PulseEngine {
                 continue;
             }
 
-            let child_strength = if pulse.pulse_type == PulseType::Cascade {
-                pulse.strength * self.cascade_energy_factor / fanout as f64
-            } else {
-                pulse.strength
-            };
-
+            let child_strength = pulse.strength * self.cascade_energy_factor / fanout.max(1) as f64;
             for (neighbor, decay) in candidates.iter().take(fanout) {
                 if visited.contains(neighbor) {
                     continue;
@@ -869,28 +860,36 @@ mod tests {
     }
 
     #[test]
-    fn physics_vs_flat_different_activation() {
+    fn emotion_modulated_differs_from_flat() {
         let u = make_grid_universe();
         let source = Coord7D::new_even([2, 2, 2, 0, 0, 0, 0]);
 
         let mut h1 = HebbianMemory::new();
         let mut h2 = HebbianMemory::new();
         let engine = PulseEngine::new();
+        let pad = PadVector {
+            pleasure: 0.8,
+            arousal: 0.6,
+            dominance: 0.4,
+        };
+        let emotion_config = EmotionPulseConfig::new();
 
         let flat_result = engine.propagate(&source, PulseType::Exploratory, &u, &mut h1);
-        let rich_result = engine.propagate_with_physics(
+        let emotion_result = engine.propagate_with_emotion(
             &source,
             PulseType::Exploratory,
             &u,
             &mut h2,
-            &UniversePhysics::rich(),
+            None,
+            &emotion_config,
+            &pad,
         );
 
         assert!(
-            (flat_result.total_activation - rich_result.total_activation).abs() > 0.001,
-            "rich physics should produce different activation than flat: flat={}, rich={}",
+            (flat_result.total_activation - emotion_result.total_activation).abs() > 0.001,
+            "emotion-modulated pulse should differ from flat: flat={}, emotion={}",
             flat_result.total_activation,
-            rich_result.total_activation,
+            emotion_result.total_activation,
         );
     }
 

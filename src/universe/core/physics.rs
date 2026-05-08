@@ -393,6 +393,14 @@ impl CouplingMatrix {
                 }
             }
         }
+        if total_coupled > actual {
+            for j in 0..DIM {
+                if j != from_dim && self.c[from_dim][j] > 0.0 {
+                    dims[j] -= (total_coupled - actual) / coupled_count as f64;
+                }
+            }
+            total_coupled = actual;
+        }
         actual - total_coupled
     }
 }

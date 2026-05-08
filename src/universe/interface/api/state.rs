@@ -18,9 +18,9 @@ use crate::universe::memory::MemoryAtom;
 use crate::universe::memory::{ClusteringEngine, InterestProfile, SemanticEngine, SurfacedMemory};
 use crate::universe::node::DarkUniverse;
 use crate::universe::perception::PerceptionBudget;
+use crate::universe::plugins::PluginManager;
 use crate::universe::safety::events::EventBus;
 use crate::universe::safety::identity_guard::IdentityGuard;
-use crate::universe::plugins::PluginManager;
 use crate::universe::watchdog::Watchdog;
 
 pub struct MemoryStore {

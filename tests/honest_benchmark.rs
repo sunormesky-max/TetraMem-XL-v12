@@ -27,7 +27,9 @@ fn generate_random_data(n: usize, dim: usize, seed: u64) -> Vec<Vec<f64>> {
     for _ in 0..n {
         let mut vec = Vec::with_capacity(dim);
         for _ in 0..dim {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let val = ((s >> 33) as f64) / (1u64 << 31) as f64 - 1.0;
             vec.push(val);
         }
@@ -80,7 +82,10 @@ fn recall_at_k(result_indices: &[usize], ground_truth: &[(usize, f64)]) -> f64 {
     if gt_set.is_empty() {
         return 1.0;
     }
-    let hits = result_indices.iter().filter(|idx| gt_set.contains(idx)).count();
+    let hits = result_indices
+        .iter()
+        .filter(|idx| gt_set.contains(idx))
+        .count();
     hits as f64 / gt_set.len() as f64
 }
 
@@ -114,9 +119,15 @@ fn main() {
     let k_values = [1, 5, 10, 20];
 
     println!("━━━ 1. KNN RECALL@K (TetraMem brute-force vs ground truth) ━━━");
-    println!("Data dim: {} | Embedding dim: 64 | Metric: cosine similarity", data_dim);
+    println!(
+        "Data dim: {} | Embedding dim: 64 | Metric: cosine similarity",
+        data_dim
+    );
     println!();
-    println!("{:<8} {:<4} {:>10} {:>12} {:>10}", "N", "k", "recall@k", "avg_query", "total");
+    println!(
+        "{:<8} {:<4} {:>10} {:>12} {:>10}",
+        "N", "k", "recall@k", "avg_query", "total"
+    );
     println!("{}", "-".repeat(50));
 
     for &n in &[100usize, 500, 1_000, 5_000] {
@@ -132,7 +143,10 @@ fn main() {
             if let Ok(atom) = MemoryCodec::encode(&mut universe, &anchor, d) {
                 engine.index_memory_data_only(&atom, d);
                 anchor_to_idx.insert(*atom.anchor(), indexed_mems.len());
-                indexed_mems.push(IndexedMemory { data_idx: i, anchor: *atom.anchor() });
+                indexed_mems.push(IndexedMemory {
+                    data_idx: i,
+                    anchor: *atom.anchor(),
+                });
             }
         }
         let indexed = indexed_mems.len();
@@ -141,7 +155,10 @@ fn main() {
             continue;
         }
 
-        let embeddings: Vec<SemanticEmbedding> = data.iter().map(|d| SemanticEmbedding::from_data(d)).collect();
+        let embeddings: Vec<SemanticEmbedding> = data
+            .iter()
+            .map(|d| SemanticEmbedding::from_data(d))
+            .collect();
         let n_queries = 50usize.min(indexed);
         let query_indices: Vec<usize> = (0..n_queries).map(|i| (i * indexed) / n_queries).collect();
 
@@ -174,7 +191,11 @@ fn main() {
 
             println!(
                 "{:<8} {:<4} {:>10.4} {:>10.0}µs {:>8.1}ms",
-                indexed, k, avg_recall, avg_us, elapsed.as_secs_f64() * 1000.0,
+                indexed,
+                k,
+                avg_recall,
+                avg_us,
+                elapsed.as_secs_f64() * 1000.0,
             );
         }
         println!();
@@ -185,11 +206,7 @@ fn main() {
     println!("Data: clustered (intra-cluster similarity, inter-cluster gap)");
     println!();
 
-    let cluster_configs: &[(usize, usize, f64)] = &[
-        (10, 50, 0.3),
-        (20, 50, 0.3),
-        (50, 20, 0.3),
-    ];
+    let cluster_configs: &[(usize, usize, f64)] = &[(10, 50, 0.3), (20, 50, 0.3), (50, 20, 0.3)];
 
     for &(n_clusters, per_cluster, spread) in cluster_configs {
         let data = generate_clustered_data(n_clusters, per_cluster, data_dim, spread, 99);
@@ -218,7 +235,10 @@ fn main() {
 
         let indexed = anchor_coords.len();
         if indexed < 20 {
-            println!("  {} clusters × {} — too few encoded", n_clusters, per_cluster);
+            println!(
+                "  {} clusters × {} — too few encoded",
+                n_clusters, per_cluster
+            );
             continue;
         }
 
@@ -273,12 +293,17 @@ fn main() {
         let elapsed = start.elapsed();
         println!(
             "  {} clusters × {} (spread={}) — {} memories, {} Hebbian edges",
-            n_clusters, per_cluster, spread,
+            n_clusters,
+            per_cluster,
+            spread,
             indexed,
             hebbian.edge_count(),
         );
         println!("    k={} queries={}", k, n_queries);
-        println!("    Pure KNN avg:           {:.1} results/query", knn_total as f64 / n_queries as f64);
+        println!(
+            "    Pure KNN avg:           {:.1} results/query",
+            knn_total as f64 / n_queries as f64
+        );
         println!(
             "    Hebbian extra (missed by KNN): {:.1} results/query",
             hebbian_extra as f64 / n_queries as f64,
@@ -292,7 +317,10 @@ fn main() {
 
     println!("━━━ 3. THROUGHPUT — Encode + Embed + Index ━━━");
     println!();
-    println!("{:<8} {:>8} {:>10} {:>12}", "N", "encoded", "time_ms", "rate/s");
+    println!(
+        "{:<8} {:>8} {:>10} {:>12}",
+        "N", "encoded", "time_ms", "rate/s"
+    );
     println!("{}", "-".repeat(42));
 
     for &n in &[100usize, 500, 1_000, 5_000] {
@@ -312,13 +340,22 @@ fn main() {
         let elapsed = start.elapsed();
         let rate = encoded as f64 / elapsed.as_secs_f64();
 
-        println!("{:<8} {:>8} {:>10.1} {:>12.0}", n, encoded, elapsed.as_secs_f64() * 1000.0, rate);
+        println!(
+            "{:<8} {:>8} {:>10.1} {:>12.0}",
+            n,
+            encoded,
+            elapsed.as_secs_f64() * 1000.0,
+            rate
+        );
     }
     println!();
 
     println!("━━━ 4. ENERGY CONSERVATION UNDER LOAD ━━━");
     println!();
-    println!("{:<8} {:>12} {:>12} {:>12} {:>5}", "N", "initial", "after", "drift", "ok");
+    println!(
+        "{:<8} {:>12} {:>12} {:>12} {:>5}",
+        "N", "initial", "after", "drift", "ok"
+    );
     println!("{}", "-".repeat(52));
 
     for &n in &[100usize, 1_000, 5_000] {
@@ -335,7 +372,11 @@ fn main() {
 
         println!(
             "{:<8} {:>12.2} {:>12.2} {:>12.2e} {:>5}",
-            n, initial, after, drift, if drift < 1e-6 { "YES" } else { "NO" },
+            n,
+            initial,
+            after,
+            drift,
+            if drift < 1e-6 { "YES" } else { "NO" },
         );
     }
     println!();

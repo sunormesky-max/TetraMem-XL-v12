@@ -36,7 +36,8 @@ const MAX_MEMORIES: usize = 400;
 const EVICT_COUNT: usize = TOTAL - MAX_MEMORIES;
 
 fn lcg(seed: u64) -> u64 {
-    seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+    seed.wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407)
 }
 
 fn generate_clustered_data() -> (Vec<Vec<f64>>, Vec<usize>) {
@@ -135,7 +136,11 @@ fn compute_data_similarity(a: &[f64], b: &[f64]) -> f64 {
     let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let na: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
     let nb: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if na < 1e-10 || nb < 1e-10 { 0.0 } else { (dot / (na * nb)).clamp(0.0, 1.0) }
+    if na < 1e-10 || nb < 1e-10 {
+        0.0
+    } else {
+        (dot / (na * nb)).clamp(0.0, 1.0)
+    }
 }
 
 fn energy_evict(entries: &mut Vec<MemoryEntry>, count: usize) -> usize {
@@ -199,7 +204,10 @@ fn multi_hop_recall(
             break;
         }
         let query_cluster = entries[qi].cluster;
-        let same_cluster_count = entries.iter().filter(|e| e.cluster == query_cluster).count();
+        let same_cluster_count = entries
+            .iter()
+            .filter(|e| e.cluster == query_cluster)
+            .count();
         if same_cluster_count <= 1 {
             continue;
         }
@@ -243,7 +251,7 @@ fn multi_hop_recall(
                 if entries[idx].cluster == query_cluster && idx != qi {
                     found_in_cluster += 1;
                 }
-        }
+            }
         }
         for &idx in &knn_set {
             if idx < entries.len() && entries[idx].cluster == query_cluster && idx != qi {
@@ -264,11 +272,7 @@ fn multi_hop_recall(
     }
 }
 
-fn avg_path_length(
-    entries: &[MemoryEntry],
-    hebbian: &HebbianMemory,
-    n_queries: usize,
-) -> f64 {
+fn avg_path_length(entries: &[MemoryEntry], hebbian: &HebbianMemory, n_queries: usize) -> f64 {
     let mut total_hops = 0usize;
     let mut found = 0usize;
 
@@ -277,9 +281,10 @@ fn avg_path_length(
             break;
         }
         let query_cluster = entries[qi].cluster;
-        let target = entries.iter().enumerate().find(|(idx, e)| {
-            *idx != qi && e.cluster == query_cluster
-        });
+        let target = entries
+            .iter()
+            .enumerate()
+            .find(|(idx, e)| *idx != qi && e.cluster == query_cluster);
         let (_, target_entry) = match target {
             Some(t) => t,
             None => continue,
@@ -363,7 +368,11 @@ fn run_variant(
         if let Ok(atom) = MemoryCodec::encode(&mut universe, &anchor, d) {
             engine.index_memory_data_only(&atom, d);
 
-            let importance = if labels[i] < 5 { 0.8 } else { 0.3 + (i as f64 % 0.5) };
+            let importance = if labels[i] < 5 {
+                0.8
+            } else {
+                0.3 + (i as f64 % 0.5)
+            };
 
             entries.push(MemoryEntry {
                 data_idx: i,
@@ -429,25 +438,33 @@ fn main() {
     println!("══════════════════════════════════════════════════════════");
     println!("Hypothesis: Hebbian + Topology + EnergyEviction > any subset");
     println!();
-    println!("Dataset: {} clusters × {} points = {} total", N_CLUSTERS, PER_CLUSTER, TOTAL);
-    println!("Eviction: keep {} of {} (evict {})", MAX_MEMORIES, TOTAL, EVICT_COUNT);
+    println!(
+        "Dataset: {} clusters × {} points = {} total",
+        N_CLUSTERS, PER_CLUSTER, TOTAL
+    );
+    println!(
+        "Eviction: keep {} of {} (evict {})",
+        MAX_MEMORIES, TOTAL, EVICT_COUNT
+    );
     println!("Clusters 0-4 marked important (importance=0.8)");
     println!();
 
     let (data, labels) = generate_clustered_data();
 
     let variants: Vec<(&str, bool, bool, bool)> = vec![
-        ("Full",            true,  true,  true),
-        ("NoHebbian",       false, true,  true),
-        ("NoTopology",      true,  false, true),
-        ("NoEnergy",        true,  true,  false),
-        ("BareMinimum",     false, false, false),
+        ("Full", true, true, true),
+        ("NoHebbian", false, true, true),
+        ("NoTopology", true, false, true),
+        ("NoEnergy", true, true, false),
+        ("BareMinimum", false, false, false),
     ];
 
     println!("━━━ Results ━━━");
     println!();
-    println!("{:<15} {:>12} {:>12} {:>12} {:>10}",
-        "Variant", "HopRecall", "ForgetRate", "AvgPathLen", "Time");
+    println!(
+        "{:<15} {:>12} {:>12} {:>12} {:>10}",
+        "Variant", "HopRecall", "ForgetRate", "AvgPathLen", "Time"
+    );
     println!("{}", "-".repeat(65));
 
     let mut results = Vec::new();
@@ -458,7 +475,11 @@ fn main() {
             r.name,
             r.multi_hop_recall * 100.0,
             r.forgetting_rate * 100.0,
-            if r.avg_path_length.is_infinite() { f64::INFINITY } else { r.avg_path_length },
+            if r.avg_path_length.is_infinite() {
+                f64::INFINITY
+            } else {
+                r.avg_path_length
+            },
             r.total_time_ms,
         );
         results.push(r);
@@ -479,12 +500,24 @@ fn main() {
         };
 
         println!("{} vs Full:", r.name);
-        println!("  HopRecall:     {}{:.2}%", if recall_delta >= 0.0 { "+" } else { "" }, recall_delta);
-        println!("  ForgetRate:    {}{:.2}%", if forget_delta >= 0.0 { "+" } else { "" }, forget_delta);
+        println!(
+            "  HopRecall:     {}{:.2}%",
+            if recall_delta >= 0.0 { "+" } else { "" },
+            recall_delta
+        );
+        println!(
+            "  ForgetRate:    {}{:.2}%",
+            if forget_delta >= 0.0 { "+" } else { "" },
+            forget_delta
+        );
         if path_delta.is_nan() {
             println!("  PathLength:    N/A");
         } else {
-            println!("  PathLength:    {}{:.1} hops", if path_delta >= 0.0 { "+" } else { "" }, path_delta);
+            println!(
+                "  PathLength:    {}{:.1} hops",
+                if path_delta >= 0.0 { "+" } else { "" },
+                path_delta
+            );
         }
         println!();
     }

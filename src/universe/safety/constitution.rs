@@ -253,7 +253,12 @@ impl Constitution {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                violations.push(format!(
+                    "unknown operation '{}' is not recognized by constitution",
+                    operation
+                ));
+            }
         }
 
         ConstitutionCheck {
@@ -377,10 +382,14 @@ mod tests {
     }
 
     #[test]
-    fn validate_operation_unknown_allowed() {
+    fn validate_operation_unknown_denied() {
         let c = Constitution::tetramem_default();
         let check = c.validate_operation("unknown_op");
-        assert!(check.allowed);
+        assert!(!check.allowed);
+        assert!(check
+            .violations
+            .iter()
+            .any(|v| v.contains("unknown operation")));
     }
 
     #[test]

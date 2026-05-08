@@ -329,7 +329,9 @@ impl HebbianMemory {
     }
 
     pub fn get_successors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
-        let mut result: Vec<_> = self.forward.get(node)
+        let mut result: Vec<_> = self
+            .forward
+            .get(node)
             .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
             .unwrap_or_default();
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -337,7 +339,9 @@ impl HebbianMemory {
     }
 
     pub fn get_predecessors(&self, node: &Coord7D) -> Vec<(Coord7D, f64)> {
-        let mut result: Vec<_> = self.backward.get(node)
+        let mut result: Vec<_> = self
+            .backward
+            .get(node)
             .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
             .unwrap_or_default();
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -351,7 +355,9 @@ impl HebbianMemory {
         visited.insert(current);
 
         for _ in 0..max_steps {
-            let successors: Vec<(Coord7D, f64)> = self.forward.get(&current)
+            let successors: Vec<(Coord7D, f64)> = self
+                .forward
+                .get(&current)
                 .map(|m| m.iter().map(|(&c, &w)| (c, w)).collect())
                 .unwrap_or_default();
             let best = successors
