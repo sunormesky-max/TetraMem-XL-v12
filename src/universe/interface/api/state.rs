@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -43,6 +44,7 @@ pub struct AppState {
     pub jwt: JwtConfig,
     pub users: UserStore,
     pub identity_guard: RwLock<IdentityGuard>,
+    pub shutdown: Arc<AtomicBool>,
 }
 
 pub type SharedState = Arc<AppState>;

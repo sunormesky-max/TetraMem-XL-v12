@@ -26,6 +26,9 @@ fn make_test_state() -> Arc<AppState> {
     config.server.cors_origins = vec!["*".to_string()];
     config.server.static_dir = Some("./panel/dist".to_string());
 
+    let (event_sender, event_rx) = EventBus::create_channel();
+    let event_bus = EventBus::from_receiver(event_rx);
+
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(config.universe.total_energy)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
@@ -42,8 +45,8 @@ fn make_test_state() -> Arc<AppState> {
             }],
             vec![],
         )),
-        events: tokio::sync::Mutex::new(EventBus::new()),
-        event_sender: EventBus::new().sender(),
+        events: tokio::sync::Mutex::new(event_bus),
+        event_sender,
         watchdog: tokio::sync::RwLock::new(Watchdog::with_defaults(10000.0)),
         backup: tokio::sync::RwLock::new(BackupScheduler::new(BackupConfig::default())),
         cluster: tokio::sync::Mutex::new(ClusterManager::new(1, "127.0.0.1:3456".to_string())),
@@ -56,6 +59,7 @@ fn make_test_state() -> Arc<AppState> {
         identity_guard: tokio::sync::RwLock::new(
             tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
         ),
+        shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
 

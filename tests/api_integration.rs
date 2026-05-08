@@ -21,8 +21,8 @@ fn build_state() -> Arc<AppState> {
     metrics::init_metrics();
     let mut config = AppConfig::default();
     config.auth.enabled = false;
-    let event_bus = tetramem_v12::universe::events::EventBus::new();
-    let event_sender = event_bus.sender();
+    let (event_sender, event_rx) = tetramem_v12::universe::events::EventBus::create_channel();
+    let event_bus = tetramem_v12::universe::events::EventBus::from_receiver(event_rx);
     Arc::new(AppState {
         universe: tokio::sync::RwLock::new(DarkUniverse::new(10_000_000.0)),
         hebbian: tokio::sync::RwLock::new(HebbianMemory::new()),
@@ -67,6 +67,7 @@ fn build_state() -> Arc<AppState> {
         identity_guard: tokio::sync::RwLock::new(
             tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
         ),
+        shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
 

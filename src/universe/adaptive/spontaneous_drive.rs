@@ -11,7 +11,6 @@ use crate::universe::coord::Coord7D;
 use crate::universe::events::UniverseEvent;
 use crate::universe::memory::pulse::PulseEngine;
 use crate::universe::memory::pulse::PulseType;
-use crate::universe::memory::SemanticEmbedding;
 
 const MAX_PULSE_PER_CYCLE: usize = 3;
 const MAX_RECALL_PER_CYCLE: usize = 5;
@@ -225,6 +224,7 @@ impl SpontaneousDrive {
 
         let candidates = {
             let mems = state.memories.read().await;
+            let h = state.hebbian.read().await;
             let mut scored: Vec<(usize, f64)> = Vec::new();
             for (i, mem) in mems.iter().enumerate() {
                 let anchor_str = format!("{}", mem.anchor());
@@ -232,6 +232,7 @@ impl SpontaneousDrive {
                     continue;
                 }
                 let importance = mem.importance();
+                let connectivity = (h.get_neighbors(mem.anchor()).len() as f64).ln_1p();
                 let age_factor = {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -240,7 +241,10 @@ impl SpontaneousDrive {
                     let age_ms = now.saturating_sub(mem.created_at());
                     (age_ms as f64 / 3_600_000.0).min(1.0)
                 };
-                let score = importance * 0.5 + age_factor * 0.3 + self.reflection_drive * 0.2;
+                let score = importance * 0.4
+                    + age_factor * 0.2
+                    + connectivity * 0.2
+                    + self.reflection_drive * 0.2;
                 scored.push((i, score));
             }
             scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -256,28 +260,22 @@ impl SpontaneousDrive {
 
         let contradictions = {
             let mems = state.memories.read().await;
+            let h = state.hebbian.read().await;
             let mut found = 0usize;
             for &(idx, _score) in &candidates {
                 let mem = &mems[idx];
-                for (j, other) in mems.iter().enumerate() {
-                    if j == idx {
-                        continue;
-                    }
-                    let dist_sq = mem.anchor().distance_sq(other.anchor());
-                    if dist_sq < 10000.0 {
-                        let emb_a = SemanticEmbedding::from_annotation(mem);
-                        let emb_b = SemanticEmbedding::from_annotation(other);
-                        let sim = emb_a.cosine_similarity(&emb_b);
-                        if sim > 0.5 {
-                            let desc_a = mem.description().unwrap_or("");
-                            let desc_b = other.description().unwrap_or("");
-                            if crate::universe::memory::contradiction::descriptions_conflict(
-                                Some(desc_a),
-                                Some(desc_b),
-                            ) {
-                                found += 1;
-                                break;
-                            }
+                let neighbors = h.get_neighbors(mem.anchor());
+                for (coord, _weight) in &neighbors {
+                    if let Some(other_idx) = mems.iter().position(|m| m.anchor() == coord) {
+                        let other = &mems[other_idx];
+                        let desc_a = mem.description().unwrap_or("");
+                        let desc_b = other.description().unwrap_or("");
+                        if crate::universe::memory::contradiction::descriptions_conflict(
+                            Some(desc_a),
+                            Some(desc_b),
+                        ) {
+                            found += 1;
+                            break;
                         }
                     }
                 }

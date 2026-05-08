@@ -72,6 +72,14 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
             interval.tick().await;
             cycle += 1;
 
+            if state.shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::info!(
+                    cycle,
+                    "cognitive controller: shutdown signal received, exiting"
+                );
+                break;
+            }
+
             run_maintenance_cycle(&state, &cfg, &spontaneous_cfg, cycle, &mut ctrl).await;
         }
     });

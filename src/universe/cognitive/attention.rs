@@ -74,6 +74,24 @@ impl AttentionEngine {
     ) -> AttentionMap {
         let mut heat_map: HashMap<[i32; 7], f64> = HashMap::new();
         let mut source_map: HashMap<[i32; 7], AttentionSource> = HashMap::new();
+        let mut nearby_count: HashMap<[i32; 7], usize> = HashMap::new();
+
+        let grid_cell = (self.neighborhood_radius.sqrt().max(1.0)) as i32;
+
+        let mut grid: HashMap<[i32; 7], Vec<usize>> = HashMap::new();
+        for (i, mem) in memories.iter().enumerate() {
+            let basis = mem.anchor().basis();
+            let cell = [
+                basis[0] / grid_cell,
+                basis[1] / grid_cell,
+                basis[2] / grid_cell,
+                basis[3] / grid_cell,
+                basis[4] / grid_cell,
+                basis[5] / grid_cell,
+                basis[6] / grid_cell,
+            ];
+            grid.entry(cell).or_default().push(i);
+        }
 
         for mem in memories {
             let basis = mem.anchor().basis();
@@ -106,20 +124,49 @@ impl AttentionEngine {
             }
         }
 
-        for mem_a in memories {
-            let mut nearby = 0usize;
-            for mem_b in memories {
-                if mem_a.anchor() == mem_b.anchor() {
-                    continue;
-                }
-                if mem_a.anchor().distance_sq(mem_b.anchor()) < self.neighborhood_radius {
-                    nearby += 1;
+        for (i, mem_a) in memories.iter().enumerate() {
+            let basis = mem_a.anchor().basis();
+            let cell = [
+                basis[0] / grid_cell,
+                basis[1] / grid_cell,
+                basis[2] / grid_cell,
+                basis[3] / grid_cell,
+                basis[4] / grid_cell,
+                basis[5] / grid_cell,
+                basis[6] / grid_cell,
+            ];
+            let mut count = 0usize;
+            for dx in -1i32..=1 {
+                for dy in -1i32..=1 {
+                    for dz in -1i32..=1 {
+                        let neighbor_cell = [
+                            cell[0] + dx,
+                            cell[1] + dy,
+                            cell[2] + dz,
+                            cell[3],
+                            cell[4],
+                            cell[5],
+                            cell[6],
+                        ];
+                        if let Some(indices) = grid.get(&neighbor_cell) {
+                            for &j in indices {
+                                if i == j {
+                                    continue;
+                                }
+                                if mem_a.anchor().distance_sq(memories[j].anchor())
+                                    < self.neighborhood_radius
+                                {
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            let basis = mem_a.anchor().basis();
-            let density_heat = (nearby as f64).ln_1p() * self.density_weight;
+            *nearby_count.entry(basis).or_insert(0) += count;
+            let density_heat = (count as f64).ln_1p() * self.density_weight;
             *heat_map.entry(basis).or_insert(0.0) += density_heat;
-            if nearby > 3
+            if count > 3
                 && source_map
                     .get(&basis)
                     .is_none_or(|s| !matches!(s, AttentionSource::DenseCluster))

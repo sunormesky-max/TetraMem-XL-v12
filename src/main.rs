@@ -236,6 +236,7 @@ fn main() {
                 identity_guard: tokio::sync::RwLock::new(
                     tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
                 ),
+                shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
             let auto_persist = config.backup.auto_persist;
@@ -368,9 +369,8 @@ fn main() {
                 }
 
                 {
-                    if let Some(controller_handle) = tetramem_v12::universe::adaptive::cognitive_controller::spawn_cognitive_controller(state.clone()) {
-                        let _controller_handle = controller_handle;
-                    }
+                    let controller_handle = tetramem_v12::universe::adaptive::cognitive_controller::spawn_cognitive_controller(state.clone());
+                    let _controller_handle = controller_handle;
                 }
 
                 if auto_persist && persist_interval > 0 {
