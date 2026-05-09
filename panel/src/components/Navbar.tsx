@@ -16,6 +16,7 @@ import {
   Brain,
   Heart,
   Shield,
+  Puzzle,
 } from 'lucide-react'
 
 const navSections = [
@@ -51,6 +52,7 @@ const navSections = [
   {
     label: '开发者',
     items: [
+      { to: '/plugins', icon: Puzzle, label: '插件市场' },
       { to: '/api', icon: Code2, label: 'API 演练场' },
     ],
   },

@@ -81,6 +81,10 @@ impl PersistFile {
         let tmp_path = path.with_extension("json.tmp");
         fs::write(&tmp_path, &json).map_err(|e| FilePersistError::Io(e.to_string()))?;
 
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::fs::remove_file(path);
+        }
         let rename_result = fs::rename(&tmp_path, path);
         if rename_result.is_err() {
             let _ = fs::remove_file(&tmp_path);

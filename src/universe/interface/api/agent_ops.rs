@@ -315,14 +315,14 @@ pub async fn associate(
                 let desc = store
                     .memories
                     .iter()
-                    .find(|m| format!("{}", m.anchor()) == *t)
+                    .find(|m| *m.anchor() == *t)
                     .and_then(|m| m.description().map(String::from))
                     .unwrap_or_default();
-                json!({"anchor": t, "description": desc})
+                json!({"anchor": t.to_string(), "description": desc})
             })
             .collect();
         results.push(json!({
-            "source": assoc.source,
+            "source": assoc.source.to_string(),
             "targets": targets,
             "confidence": assoc.confidence,
             "hops": assoc.hops,

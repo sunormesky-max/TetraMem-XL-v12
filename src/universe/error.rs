@@ -39,6 +39,12 @@ pub enum AppError {
 
     #[error("serialization error: {0}")]
     Serialize(#[from] serde_json::Error),
+
+    #[error("persistence error: {0}")]
+    Persist(#[from] crate::universe::persist::PersistError),
+
+    #[error("file persistence error: {0}")]
+    FilePersist(#[from] crate::universe::persist_file::FilePersistError),
 }
 
 #[derive(Serialize)]
@@ -85,6 +91,20 @@ impl IntoResponse for AppError {
             }
             AppError::Serialize(e) => {
                 tracing::error!("serialization error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+            }
+            AppError::Persist(e) => {
+                tracing::error!("persistence error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+            }
+            AppError::FilePersist(e) => {
+                tracing::error!("file persistence error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal server error".to_string(),

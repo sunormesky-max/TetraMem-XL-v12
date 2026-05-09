@@ -18,6 +18,7 @@ const Physics = lazy(() => import('./pages/Physics'))
 const Semantic = lazy(() => import('./pages/Semantic'))
 const Emotion = lazy(() => import('./pages/Emotion'))
 const Watchdog = lazy(() => import('./pages/Watchdog'))
+const Plugins = lazy(() => import('./pages/Plugins'))
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/semantic" element={<Semantic />} />
         <Route path="/emotion" element={<Emotion />} />
         <Route path="/watchdog" element={<Watchdog />} />
+        <Route path="/plugins" element={<Plugins />} />
         <Route path="/api" element={<ApiPlayground />} />
       </Routes>
     </Layout>

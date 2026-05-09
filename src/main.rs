@@ -241,6 +241,9 @@ fn main() {
                 config: config.clone(),
                 jwt: JwtConfig::new(config.auth.jwt_secret.clone(), config.auth.jwt_expiry_secs),
                 users: UserStore::new(&config.auth.users, &config.auth.jwt_secret),
+                token_blocklist: tokio::sync::RwLock::new(
+                    tetramem_v12::universe::auth::TokenBlocklist::new(10_000),
+                ),
                 identity_guard: tokio::sync::RwLock::new(
                     tetramem_v12::universe::safety::identity_guard::IdentityGuard::default(),
                 ),

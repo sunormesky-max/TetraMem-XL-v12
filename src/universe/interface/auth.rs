@@ -239,6 +239,48 @@ pub struct LoginResponse {
     pub expires_in: u64,
 }
 
+pub struct TokenBlocklist {
+    revoked: std::collections::HashSet<String>,
+    max_size: usize,
+}
+
+impl TokenBlocklist {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            revoked: std::collections::HashSet::new(),
+            max_size,
+        }
+    }
+
+    pub fn revoke(&mut self, jti: &str) {
+        if self.revoked.len() >= self.max_size {
+            self.revoked.clear();
+        }
+        self.revoked.insert(jti.to_string());
+    }
+
+    pub fn is_revoked(&self, jti: &str) -> bool {
+        self.revoked.contains(jti)
+    }
+
+    pub fn len(&self) -> usize {
+        self.revoked.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.revoked.is_empty()
+    }
+}
+
+impl std::fmt::Debug for TokenBlocklist {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenBlocklist")
+            .field("count", &self.revoked.len())
+            .field("max_size", &self.max_size)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -15,8 +15,8 @@ use std::collections::HashSet;
 #[derive(Debug, Clone)]
 pub struct ReasoningResult {
     pub result_type: ReasoningType,
-    pub source: String,
-    pub targets: Vec<String>,
+    pub source: Coord7D,
+    pub targets: Vec<Coord7D>,
     pub confidence: f64,
     pub hops: usize,
 }
@@ -51,15 +51,27 @@ impl ReasoningEngine {
             return Vec::new();
         }
 
+        const MAX_ANALOGY_COMPARISONS: usize = 10_000;
+
         let mut results = Vec::new();
-        for i in 0..memories.len() {
-            for j in (i + 1)..memories.len() {
+        let mut comparisons = 0usize;
+        let step = if memories.len() > 1 {
+            ((memories.len() as f64).sqrt()) as usize + 1
+        } else {
+            1
+        };
+        'outer: for i in (0..memories.len()).step_by(step) {
+            for j in (i + 1..memories.len()).step_by(step) {
+                if comparisons >= MAX_ANALOGY_COMPARISONS {
+                    break 'outer;
+                }
+                comparisons += 1;
                 let similarity = Self::energy_similarity(universe, &memories[i], &memories[j]);
                 if similarity >= threshold {
                     results.push(ReasoningResult {
                         result_type: ReasoningType::Analogy,
-                        source: format!("{}", memories[i].anchor()),
-                        targets: vec![format!("{}", memories[j].anchor())],
+                        source: *memories[i].anchor(),
+                        targets: vec![*memories[j].anchor()],
                         confidence: similarity,
                         hops: 0,
                     });
@@ -110,8 +122,8 @@ impl ReasoningEngine {
 
                 results.push(ReasoningResult {
                     result_type: ReasoningType::Association,
-                    source: format!("{}", source),
-                    targets: vec![format!("{}", neighbor)],
+                    source: *source,
+                    targets: vec![*neighbor],
                     confidence: new_conf.min(1.0),
                     hops: hops + 1,
                 });
@@ -128,8 +140,8 @@ impl ReasoningEngine {
 
                 results.push(ReasoningResult {
                     result_type: ReasoningType::Association,
-                    source: format!("{}", source),
-                    targets: vec![format!("{}", neighbor)],
+                    source: *source,
+                    targets: vec![*neighbor],
                     confidence: (strength / 10.0).min(1.0),
                     hops: hops + 1,
                 });
@@ -170,8 +182,8 @@ impl ReasoningEngine {
                     let weight = hebbian.get_bias(&path[i], &path[i + 1]);
                     results.push(ReasoningResult {
                         result_type: ReasoningType::Inference,
-                        source: format!("{}", path[i]),
-                        targets: vec![format!("{}", path[i + 1])],
+                        source: path[i],
+                        targets: vec![path[i + 1]],
                         confidence: if weight > 0.0 { weight / 5.0 } else { 0.1 }.min(1.0),
                         hops: i + 1,
                     });
@@ -214,8 +226,8 @@ impl ReasoningEngine {
                     let target = if *a == *seed { b } else { a };
                     results.push(ReasoningResult {
                         result_type: ReasoningType::Discovery,
-                        source: format!("{}", seed),
-                        targets: vec![format!("{}", target)],
+                        source: *seed,
+                        targets: vec![*target],
                         confidence: (*w * pulse_strength).min(1.0),
                         hops: 1,
                     });
@@ -311,8 +323,8 @@ impl ReasoningEngine {
                     let target = if *a == *seed { b } else { a };
                     results.push(ReasoningResult {
                         result_type: ReasoningType::Discovery,
-                        source: format!("{}", seed),
-                        targets: vec![format!("{}", target)],
+                        source: *seed,
+                        targets: vec![*target],
                         confidence: w.min(1.0),
                         hops: 1,
                     });
@@ -396,12 +408,16 @@ impl ReasoningEngine {
         let analogies = semantic.find_analogies_semantic(memories, threshold);
         analogies
             .into_iter()
-            .map(|a| ReasoningResult {
-                result_type: ReasoningType::Analogy,
-                source: format_key(&a.from, memories),
-                targets: vec![format_key(&a.to, memories)],
-                confidence: a.similarity,
-                hops: 0,
+            .filter_map(|a| {
+                let from_anchor = key_to_anchor(&a.from, memories)?;
+                let to_anchor = key_to_anchor(&a.to, memories)?;
+                Some(ReasoningResult {
+                    result_type: ReasoningType::Analogy,
+                    source: from_anchor,
+                    targets: vec![to_anchor],
+                    confidence: a.similarity,
+                    hops: 0,
+                })
             })
             .collect()
     }
@@ -417,16 +433,19 @@ impl ReasoningEngine {
         let multihop = semantic.search_multihop(query_text, k, max_hops, hebbian, memories);
         multihop
             .into_iter()
-            .map(|r| ReasoningResult {
-                result_type: if r.hop == 0 {
-                    ReasoningType::Analogy
-                } else {
-                    ReasoningType::Association
-                },
-                source: query_text.to_string(),
-                targets: vec![format_key(&r.atom_key, memories)],
-                confidence: r.similarity,
-                hops: r.hop,
+            .filter_map(|r| {
+                let anchor = key_to_anchor(&r.atom_key, memories)?;
+                Some(ReasoningResult {
+                    result_type: if r.hop == 0 {
+                        ReasoningType::Analogy
+                    } else {
+                        ReasoningType::Association
+                    },
+                    source: anchor,
+                    targets: vec![anchor],
+                    confidence: r.similarity,
+                    hops: r.hop,
+                })
             })
             .collect()
     }
@@ -458,15 +477,14 @@ impl ReasoningEngine {
     }
 }
 
-fn format_key(key: &AtomKey, memories: &[MemoryAtom]) -> String {
+fn key_to_anchor(key: &AtomKey, memories: &[MemoryAtom]) -> Option<Coord7D> {
     memories
         .iter()
         .find(|m| {
             let mk = AtomKey::from_atom(m);
             mk == *key
         })
-        .map(|m| format!("{}", m.anchor()))
-        .unwrap_or_else(|| "?".to_string())
+        .map(|m| *m.anchor())
 }
 
 #[cfg(test)]
@@ -594,8 +612,8 @@ mod tests {
     fn reasoning_result_display() {
         let r = ReasoningResult {
             result_type: ReasoningType::Analogy,
-            source: "A".to_string(),
-            targets: vec!["B".to_string()],
+            source: Coord7D::new_even([1, 2, 3, 0, 0, 0, 0]),
+            targets: vec![Coord7D::new_even([4, 5, 6, 0, 0, 0, 0])],
             confidence: 0.85,
             hops: 0,
         };

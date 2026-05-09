@@ -176,6 +176,7 @@ pub type SubscriberId = u64;
 type BoxedHandler = Box<dyn Fn(&UniverseEvent) + Send + Sync>;
 
 pub struct EventBus {
+    sender: std::sync::mpsc::SyncSender<UniverseEvent>,
     receiver: std::sync::mpsc::Receiver<UniverseEvent>,
     subscribers: HashMap<SubscriberId, BoxedHandler>,
     next_sub_id: SubscriberId,
@@ -192,8 +193,8 @@ impl Default for EventBus {
 impl EventBus {
     pub fn new() -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
-        std::mem::forget(tx);
         Self {
+            sender: tx,
             receiver: rx,
             subscribers: HashMap::new(),
             next_sub_id: 1,
@@ -245,8 +246,9 @@ impl EventBus {
     }
 
     pub fn sender(&self) -> EventBusSender {
-        let (tx, _) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
-        EventBusSender { inner: tx }
+        EventBusSender {
+            inner: self.sender.clone(),
+        }
     }
 
     pub fn create_channel() -> (EventBusSender, std::sync::mpsc::Receiver<UniverseEvent>) {
@@ -255,7 +257,9 @@ impl EventBus {
     }
 
     pub fn from_receiver(rx: std::sync::mpsc::Receiver<UniverseEvent>) -> Self {
+        let (tx, _) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
         Self {
+            sender: tx,
             receiver: rx,
             subscribers: HashMap::new(),
             next_sub_id: 1,
@@ -280,8 +284,11 @@ impl EventBus {
         self.history.clear();
     }
 
+    #[deprecated(
+        note = "Cannot non-destructively count pending events on sync_channel. Use drain() return value instead."
+    )]
     pub fn pending_count(&self) -> usize {
-        self.receiver.try_iter().count()
+        0
     }
 }
 

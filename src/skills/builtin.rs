@@ -174,7 +174,7 @@ pub mod trace_associations {
             );
             let out: Vec<Value> = results
                 .iter()
-                .map(|a| json!({"targets": a.targets, "confidence": a.confidence, "hops": a.hops}))
+                .map(|a| json!({"targets": a.targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(), "confidence": a.confidence, "hops": a.hops}))
                 .collect();
             Ok(json!({"associations": out, "total": out.len()}))
         }

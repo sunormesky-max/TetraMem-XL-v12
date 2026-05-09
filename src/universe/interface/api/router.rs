@@ -58,7 +58,7 @@ use super::plugin_ops::{
 };
 use super::raft_rpc::{raft_append, raft_snapshot, raft_transfer, raft_vote};
 use super::scale::{auto_scale, frontier_expand, get_hebbian_neighbors};
-use super::server::login;
+use super::server::{login, logout};
 use super::state::SharedState;
 use super::streaming_ops::{
     list_interests, memory_stream, register_interest, surface_status, unregister_interest,
@@ -173,6 +173,9 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => {
             let claims = state.jwt.validate_token(token)?;
+            if state.token_blocklist.read().await.is_revoked(claims.jti()) {
+                return Err(AppError::Unauthorized("token has been revoked".to_string()));
+            }
             req.extensions_mut().insert(claims);
             Ok(next.run(req).await)
         }
@@ -309,6 +312,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/stats", get(get_stats))
         .route("/metrics", get(get_metrics))
         .route("/openapi.json", get(get_openapi))
+        .route("/logout", post(logout))
         .route("/memory/encode", post(encode_memory))
         .route("/memory/decode", post(decode_memory))
         .route("/memory/list", get(list_memories))

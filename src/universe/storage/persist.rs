@@ -123,6 +123,62 @@ impl std::fmt::Display for PersistReport {
     }
 }
 
+fn compute_checksum(
+    nodes: &[NodeSnapshot],
+    edges: &[EdgeSnapshot],
+    channels: &[ChannelSnapshot],
+    memory_count: usize,
+) -> u64 {
+    let mut node_dim_hash: u64 = 0;
+    for ns in nodes {
+        for &d in &ns.dims {
+            let s = format!("{:+.17e}", d);
+            node_dim_hash = node_dim_hash.wrapping_mul(31).wrapping_add(
+                s.bytes()
+                    .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)),
+            );
+        }
+        node_dim_hash = node_dim_hash
+            .wrapping_mul(7)
+            .wrapping_add(if ns.is_even { 1 } else { 0 });
+    }
+    let mut edge_hash: u64 = 0;
+    for es in edges {
+        edge_hash = edge_hash
+            .wrapping_mul(31)
+            .wrapping_add(es.traversal_count as u64)
+            .wrapping_add(
+                es.a.iter()
+                    .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
+            )
+            .wrapping_add(
+                es.b.iter()
+                    .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
+            );
+    }
+    let mut chan_hash: u64 = 0;
+    for cs in channels {
+        chan_hash = chan_hash
+            .wrapping_mul(37)
+            .wrapping_add(if cs.is_super { 1u64 } else { 0u64 })
+            .wrapping_add(
+                cs.a.iter()
+                    .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
+            )
+            .wrapping_add(
+                cs.b.iter()
+                    .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
+            );
+    }
+    (nodes.len() as u64).wrapping_mul(0x517cc1b727220a95)
+        ^ (memory_count as u64).wrapping_mul(0x6c62272e07bb0142)
+        ^ (edges.len() as u64).wrapping_mul(0x9e3779b97f4a7c15)
+        ^ (channels.len() as u64).wrapping_mul(0x123456789abcdef0)
+        ^ node_dim_hash
+        ^ edge_hash
+        ^ chan_hash
+}
+
 pub struct PersistEngine;
 
 impl PersistEngine {
@@ -209,55 +265,8 @@ impl PersistEngine {
             .collect();
         channels.sort_by(|a, b| a.a.cmp(&b.a).then(a.b.cmp(&b.b)));
 
-        let mut node_dim_hash: u64 = 0;
-        for ns in &nodes {
-            for &d in &ns.dims {
-                let s = format!("{:+.17e}", d);
-                node_dim_hash = node_dim_hash.wrapping_mul(31).wrapping_add(
-                    s.bytes()
-                        .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)),
-                );
-            }
-            node_dim_hash =
-                node_dim_hash
-                    .wrapping_mul(7)
-                    .wrapping_add(if ns.is_even { 1 } else { 0 });
-        }
-        let mut edge_hash: u64 = 0;
-        for es in &edges {
-            edge_hash = edge_hash
-                .wrapping_mul(31)
-                .wrapping_add(es.traversal_count as u64)
-                .wrapping_add(
-                    es.a.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                )
-                .wrapping_add(
-                    es.b.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                );
-        }
-        let mut chan_hash: u64 = 0;
-        for cs in &channels {
-            chan_hash = chan_hash
-                .wrapping_mul(37)
-                .wrapping_add(if cs.is_super { 1u64 } else { 0u64 })
-                .wrapping_add(
-                    cs.a.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                )
-                .wrapping_add(
-                    cs.b.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                );
-        }
-        let conservation_checksum = (nodes.len() as u64).wrapping_mul(0x517cc1b727220a95)
-            ^ (mem_snapshots.len() as u64).wrapping_mul(0x6c62272e07bb0142)
-            ^ (edges.len() as u64).wrapping_mul(0x9e3779b97f4a7c15)
-            ^ (channels.len() as u64).wrapping_mul(0x123456789abcdef0)
-            ^ node_dim_hash
-            ^ edge_hash
-            ^ chan_hash;
+        let conservation_checksum =
+            compute_checksum(&nodes, &edges, &channels, mem_snapshots.len());
 
         let snapshot = UniverseSnapshot {
             schema_version: CURRENT_SCHEMA_VERSION,
@@ -292,6 +301,13 @@ impl PersistEngine {
         snapshot: &UniverseSnapshot,
         skip_checksum: bool,
     ) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), PersistError> {
+        if snapshot.schema_version > CURRENT_SCHEMA_VERSION {
+            return Err(PersistError::Deserialization(format!(
+                "unsupported schema version {}: max supported is {}",
+                snapshot.schema_version, CURRENT_SCHEMA_VERSION
+            )));
+        }
+
         let mut sorted_edges = snapshot.hebbian_edges.clone();
         sorted_edges.sort_by(|a, b| {
             a.a.cmp(&b.a).then(a.b.cmp(&b.b)).then(
@@ -303,55 +319,12 @@ impl PersistEngine {
         let mut sorted_channels = snapshot.crystal_channels.clone();
         sorted_channels.sort_by(|a, b| a.a.cmp(&b.a).then(a.b.cmp(&b.b)));
 
-        let mut node_dim_hash: u64 = 0;
-        for ns in &snapshot.nodes {
-            for &d in &ns.dims {
-                let s = format!("{:+.17e}", d);
-                node_dim_hash = node_dim_hash.wrapping_mul(31).wrapping_add(
-                    s.bytes()
-                        .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)),
-                );
-            }
-            node_dim_hash =
-                node_dim_hash
-                    .wrapping_mul(7)
-                    .wrapping_add(if ns.is_even { 1 } else { 0 });
-        }
-        let mut edge_hash: u64 = 0;
-        for es in &sorted_edges {
-            edge_hash = edge_hash
-                .wrapping_mul(31)
-                .wrapping_add(es.traversal_count as u64)
-                .wrapping_add(
-                    es.a.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                )
-                .wrapping_add(
-                    es.b.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                );
-        }
-        let mut chan_hash: u64 = 0;
-        for cs in &sorted_channels {
-            chan_hash = chan_hash
-                .wrapping_mul(37)
-                .wrapping_add(if cs.is_super { 1u64 } else { 0u64 })
-                .wrapping_add(
-                    cs.a.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                )
-                .wrapping_add(
-                    cs.b.iter()
-                        .fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64)),
-                );
-        }
-        let checksum = (snapshot.nodes.len() as u64).wrapping_mul(0x517cc1b727220a95)
-            ^ (snapshot.memories.len() as u64).wrapping_mul(0x6c62272e07bb0142)
-            ^ (snapshot.hebbian_edges.len() as u64).wrapping_mul(0x9e3779b97f4a7c15)
-            ^ (snapshot.crystal_channels.len() as u64).wrapping_mul(0x123456789abcdef0)
-            ^ node_dim_hash
-            ^ edge_hash
-            ^ chan_hash;
+        let checksum = compute_checksum(
+            &snapshot.nodes,
+            &sorted_edges,
+            &sorted_channels,
+            snapshot.memories.len(),
+        );
 
         if !skip_checksum
             && snapshot.conservation_checksum != 0

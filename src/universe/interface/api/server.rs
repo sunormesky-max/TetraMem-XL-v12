@@ -8,7 +8,7 @@ use std::time::Instant;
 use axum::http::StatusCode;
 use axum::{extract::ConnectInfo, extract::State, Json};
 
-use crate::universe::auth::{LoginRequest, LoginResponse};
+use crate::universe::auth::{Claims, LoginRequest, LoginResponse};
 use crate::universe::error::AppError;
 
 use super::router::create_router;
@@ -96,6 +96,19 @@ pub async fn login(
     Ok((
         StatusCode::OK,
         Json(ApiResponse::ok(LoginResponse { token, expires_in })),
+    ))
+}
+
+pub async fn logout(
+    claims: axum::Extension<Claims>,
+    State(state): State<SharedState>,
+) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), AppError> {
+    let jti = claims.jti().to_string();
+    state.token_blocklist.write().await.revoke(&jti);
+    tracing::info!(jti = %jti, "token revoked via logout");
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse::ok(serde_json::json!({ "revoked": true }))),
     ))
 }
 

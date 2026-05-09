@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::universe::auth::{JwtConfig, UserStore};
+use crate::universe::auth::{JwtConfig, TokenBlocklist, UserStore};
 use crate::universe::backup::BackupScheduler;
 use crate::universe::cluster::ClusterManager;
 use crate::universe::config::AppConfig;
@@ -103,6 +103,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub jwt: JwtConfig,
     pub users: UserStore,
+    pub token_blocklist: RwLock<TokenBlocklist>,
     pub identity_guard: RwLock<IdentityGuard>,
     pub plugins: RwLock<PluginManager>,
     pub shutdown: Arc<AtomicBool>,

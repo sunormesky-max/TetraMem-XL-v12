@@ -73,6 +73,7 @@ pub struct DarkUniverse {
     protected: HashSet<Coord7D>,
     manifestation_threshold: f64,
     physics: Option<UniversePhysics>,
+    max_nodes: usize,
 }
 
 impl DarkUniverse {
@@ -89,6 +90,7 @@ impl DarkUniverse {
             protected: HashSet::new(),
             manifestation_threshold: manifestation_threshold.clamp(0.0, 1.0),
             physics: None,
+            max_nodes: usize::MAX,
         }
     }
 
@@ -102,6 +104,7 @@ impl DarkUniverse {
             protected: HashSet::new(),
             manifestation_threshold: threshold.clamp(0.0, 1.0),
             physics: Some(physics),
+            max_nodes: usize::MAX,
         }
     }
 
@@ -111,6 +114,10 @@ impl DarkUniverse {
 
     pub fn set_manifestation_threshold(&mut self, threshold: f64) {
         self.manifestation_threshold = threshold.clamp(0.0, 1.0);
+    }
+
+    pub fn set_max_nodes(&mut self, max: usize) {
+        self.max_nodes = max;
     }
 
     pub fn physics(&self) -> Option<&UniversePhysics> {
@@ -190,11 +197,14 @@ impl DarkUniverse {
         coord: Coord7D,
         energy_amount: f64,
     ) -> Result<(), EnergyError> {
+        if self.nodes.len() >= self.max_nodes {
+            return Err(EnergyError::AlreadyOccupied);
+        }
         if self.nodes.contains_key(&coord) {
             return Err(EnergyError::AlreadyOccupied);
         }
         let allocated = self.pool.allocate(energy_amount)?;
-        let field = EnergyField::uniform(allocated);
+        let field = EnergyField::uniform(allocated).unwrap();
         self.nodes.insert(coord, DarkNode::new(coord, field));
         Ok(())
     }
@@ -205,11 +215,14 @@ impl DarkUniverse {
         energy_amount: f64,
         physical_ratio: f64,
     ) -> Result<(), EnergyError> {
+        if self.nodes.len() >= self.max_nodes {
+            return Err(EnergyError::AlreadyOccupied);
+        }
         if self.nodes.contains_key(&coord) {
             return Err(EnergyError::AlreadyOccupied);
         }
         let allocated = self.pool.allocate(energy_amount)?;
-        let field = EnergyField::with_physical_bias(allocated, physical_ratio);
+        let field = EnergyField::with_physical_bias(allocated, physical_ratio).unwrap();
         self.nodes.insert(coord, DarkNode::new(coord, field));
         Ok(())
     }
@@ -219,6 +232,9 @@ impl DarkUniverse {
         coord: Coord7D,
         field: EnergyField,
     ) -> Result<(), EnergyError> {
+        if self.nodes.len() >= self.max_nodes {
+            return Err(EnergyError::AlreadyOccupied);
+        }
         if self.nodes.contains_key(&coord) {
             return Err(EnergyError::AlreadyOccupied);
         }
@@ -271,13 +287,22 @@ impl DarkUniverse {
         if let Some(to_node) = self.nodes.get_mut(to) {
             to_node.energy.absorb(&taken);
         } else {
+            tracing::debug!(
+                "transfer_energy: creating node at {:?} via energy transfer",
+                to
+            );
             self.nodes.insert(*to, DarkNode::new(*to, taken));
         }
 
         let should_remove = self.nodes.get(from).is_some_and(|n| n.energy.is_empty());
 
         if should_remove {
-            if let Some(empty) = self.nodes.remove(from) {
+            if self.protected.contains(from) {
+                tracing::warn!(
+                    "transfer_energy: protected node {:?} emptied but preserved",
+                    from
+                );
+            } else if let Some(empty) = self.nodes.remove(from) {
                 if let Err(e) = self.pool.release_field(&empty.energy) {
                     tracing::error!(
                         "transfer_energy: release_field failed for {:?}: {:?}",

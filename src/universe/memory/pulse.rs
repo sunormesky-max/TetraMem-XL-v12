@@ -479,7 +479,8 @@ impl PulseEngine {
             let bias = 1.0 + hebb_w * bias_w;
             let exists = universe.get_node(&n).is_some();
             let quality = if exists { 1.2 } else { 0.8 };
-            candidates.push((n, self.face_decay * bias * quality));
+            let score = self.face_decay * bias * quality;
+            candidates.push((n, score.clamp(0.0, 1.0)));
         }
 
         for n in Lattice::bcc_neighbor_coords(coord) {
@@ -515,7 +516,8 @@ impl PulseEngine {
             let bias = 1.0 + hebb_w * bias_w;
             let exists = universe.get_node(&n).is_some();
             let quality = if exists { 1.2 } else { 0.8 };
-            candidates.push((n, decay.face_decay * bias * quality));
+            let score = decay.face_decay * bias * quality;
+            candidates.push((n, score.clamp(0.0, 1.0)));
         }
 
         for n in Lattice::bcc_neighbor_coords(coord) {
@@ -559,7 +561,8 @@ impl PulseEngine {
             let bias = 1.0 + hebb_w * bias_w;
             let exists = universe.get_node(&n).is_some();
             let quality = if exists { 1.2 } else { 0.8 };
-            candidates.push((n, d * bias * quality));
+            let score = d * bias * quality;
+            candidates.push((n, score.clamp(0.0, 1.0)));
         }
 
         for n in Lattice::bcc_neighbor_coords(coord) {
@@ -604,7 +607,8 @@ impl PulseEngine {
             let bias = 1.0 + hebb_w * bias_w;
             let exists = universe.get_node(&n).is_some();
             let quality = if exists { 1.2 } else { 0.8 };
-            candidates.push((n, decay * bias * quality));
+            let score = decay * bias * quality;
+            candidates.push((n, score.clamp(0.0, 1.0)));
         }
 
         for n in Lattice::bcc_neighbor_coords(coord) {

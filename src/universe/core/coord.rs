@@ -95,10 +95,10 @@ impl Coord7D {
         offsets
     }
 
-    pub fn shifted(&self, offset: &Coord7D) -> Coord7D {
+    pub fn shifted(&self, offset: &Coord7D) -> Option<Coord7D> {
         let mut new_basis = [0i32; DIM];
         for (i, (a, b)) in self.basis.iter().zip(offset.basis.iter()).enumerate() {
-            new_basis[i] = a.saturating_add(*b);
+            new_basis[i] = a.checked_add(*b)?;
         }
         let new_parity = match (self.parity, offset.parity) {
             (Parity::Even, Parity::Even) => Parity::Even,
@@ -106,10 +106,10 @@ impl Coord7D {
             (Parity::Odd, Parity::Even) => Parity::Odd,
             (Parity::Odd, Parity::Odd) => Parity::Even,
         };
-        Coord7D {
+        Some(Coord7D {
             basis: new_basis,
             parity: new_parity,
-        }
+        })
     }
 }
 
@@ -167,7 +167,14 @@ mod tests {
     fn shifted_parity() {
         let a = Coord7D::new_even([0; 7]);
         let b = Coord7D::new_odd([0; 7]);
-        let result = a.shifted(&b);
+        let result = a.shifted(&b).unwrap();
         assert_eq!(result.parity(), Parity::Odd);
+    }
+
+    #[test]
+    fn shifted_overflow_returns_none() {
+        let a = Coord7D::new_even([i32::MAX, 0, 0, 0, 0, 0, 0]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        assert!(a.shifted(&b).is_none());
     }
 }

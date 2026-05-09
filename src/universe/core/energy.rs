@@ -94,37 +94,40 @@ impl EnergyField {
         Self { dims: [0.0; DIM] }
     }
 
-    pub fn uniform(total: f64) -> Self {
+    pub fn uniform(total: f64) -> Result<Self, EnergyError> {
         if total.is_nan() || total < 0.0 {
-            return Self::zero();
+            return Err(EnergyError::NegativeDimension {
+                dim: 0,
+                value: total,
+            });
         }
         let per_dim = total / DIM as f64;
-        Self {
+        Ok(Self {
             dims: [per_dim; DIM],
-        }
+        })
     }
 
-    pub fn with_physical_bias(total: f64, physical_ratio: f64) -> Self {
-        if total.is_nan() || total < 0.0 || !(0.0..=1.0).contains(&physical_ratio) {
-            return Self::zero();
+    pub fn with_physical_bias(total: f64, physical_ratio: f64) -> Result<Self, EnergyError> {
+        if total.is_nan() || total < 0.0 {
+            return Err(EnergyError::NegativeDimension {
+                dim: 0,
+                value: total,
+            });
+        }
+        if !(0.0..=1.0).contains(&physical_ratio) {
+            return Err(EnergyError::InvalidRatio {
+                ratio: physical_ratio,
+            });
         }
         let phys_total = total * physical_ratio;
         let dark_total = total * (1.0 - physical_ratio);
-        let per_phys = if PHYSICAL_DIM > 0 {
-            phys_total / PHYSICAL_DIM as f64
-        } else {
-            0.0
-        };
-        let per_dark = if DARK_DIM > 0 {
-            dark_total / DARK_DIM as f64
-        } else {
-            0.0
-        };
-        Self {
+        let per_phys = phys_total / PHYSICAL_DIM as f64;
+        let per_dark = dark_total / DARK_DIM as f64;
+        Ok(Self {
             dims: [
                 per_phys, per_phys, per_phys, per_dark, per_dark, per_dark, per_dark,
             ],
-        }
+        })
     }
 
     pub fn from_dims(dims: [f64; DIM]) -> Result<Self, EnergyError> {
@@ -141,7 +144,7 @@ impl EnergyField {
     }
 
     pub fn total(&self) -> f64 {
-        self.dims.iter().sum()
+        kahan_sum(&self.dims)
     }
 
     pub fn physical(&self) -> f64 {
@@ -223,6 +226,7 @@ impl EnergyField {
         let actual_amount = amount.min(self.dims[from_dim]);
         self.dims[from_dim] -= actual_amount;
         self.dims[to_dim] += actual_amount;
+        self.sanitize();
         Ok(())
     }
 
@@ -246,6 +250,7 @@ impl EnergyField {
         for i in PHYSICAL_DIM..DIM {
             self.dims[i] += actual_per_dark;
         }
+        self.sanitize();
         Ok(())
     }
 
@@ -273,6 +278,7 @@ impl EnergyField {
         for i in 0..PHYSICAL_DIM {
             self.dims[i] += actual_per_phys;
         }
+        self.sanitize();
         Ok(())
     }
 
@@ -280,24 +286,42 @@ impl EnergyField {
         for i in 0..DIM {
             self.dims[i] += other.dims[i];
         }
+        self.sanitize();
+    }
+
+    fn sanitize(&mut self) {
+        for d in self.dims.iter_mut() {
+            if d.is_nan() || !d.is_finite() {
+                *d = 0.0;
+            }
+            if *d < 0.0 {
+                *d = 0.0;
+            }
+        }
     }
 
     pub fn split_ratio(&mut self, ratio: f64) -> Result<EnergyField, EnergyError> {
         if !(0.0..=1.0).contains(&ratio) {
             return Err(EnergyError::InvalidRatio { ratio });
         }
-        let original_total: f64 = self.dims.iter().sum();
+        let original_total: f64 = kahan_sum(&self.dims);
         let mut taken = [0.0f64; DIM];
         for (taken_val, dim_val) in taken.iter_mut().zip(self.dims.iter_mut()) {
             let exact = *dim_val * ratio;
             *taken_val = exact;
             *dim_val -= exact;
         }
-        let taken_total: f64 = taken.iter().sum();
-        let self_total: f64 = self.dims.iter().sum();
+        let taken_total: f64 = kahan_sum(&taken);
+        let self_total: f64 = kahan_sum(&self.dims);
         let correction = original_total - taken_total - self_total;
         if correction.abs() > 0.0 {
-            taken[0] += correction;
+            let per_dim = correction / DIM as f64;
+            for t in taken.iter_mut() {
+                *t += per_dim;
+            }
+        }
+        for t in taken.iter_mut() {
+            *t = t.max(0.0);
         }
         Ok(EnergyField { dims: taken })
     }
@@ -543,7 +567,7 @@ mod tests {
 
     #[test]
     fn uniform_distribution() {
-        let f = EnergyField::uniform(70.0);
+        let f = EnergyField::uniform(70.0).unwrap();
         assert!((f.total() - 70.0).abs() < 1e-10);
         assert!((f.dim(0) - 10.0).abs() < 1e-10);
         assert!((f.physical() - 30.0).abs() < 1e-10);
@@ -554,7 +578,7 @@ mod tests {
 
     #[test]
     fn physical_biased() {
-        let f = EnergyField::with_physical_bias(100.0, 0.8);
+        let f = EnergyField::with_physical_bias(100.0, 0.8).unwrap();
         assert!((f.total() - 100.0).abs() < 1e-10);
         assert!((f.physical() - 80.0).abs() < 1e-10);
         assert!((f.dark() - 20.0).abs() < 1e-10);
@@ -590,7 +614,7 @@ mod tests {
 
     #[test]
     fn flow_preserves_total() {
-        let mut f = EnergyField::uniform(70.0);
+        let mut f = EnergyField::uniform(70.0).unwrap();
         let original_total = f.total();
         for from in 0..7 {
             for to in 0..7 {
@@ -613,7 +637,7 @@ mod tests {
 
     #[test]
     fn flow_physical_to_dark() {
-        let mut f = EnergyField::with_physical_bias(100.0, 0.9);
+        let mut f = EnergyField::with_physical_bias(100.0, 0.9).unwrap();
         let total_before = f.total();
         f.flow_physical_to_dark(30.0).unwrap();
         assert!((f.total() - total_before).abs() < 1e-10);
@@ -624,7 +648,7 @@ mod tests {
 
     #[test]
     fn flow_dark_to_physical() {
-        let mut f = EnergyField::with_physical_bias(100.0, 0.1);
+        let mut f = EnergyField::with_physical_bias(100.0, 0.1).unwrap();
         let total_before = f.total();
         f.flow_dark_to_physical(20.0).unwrap();
         assert!((f.total() - total_before).abs() < 1e-10);
@@ -635,7 +659,7 @@ mod tests {
 
     #[test]
     fn split_ratio_preserves_total() {
-        let mut f = EnergyField::uniform(70.0);
+        let mut f = EnergyField::uniform(70.0).unwrap();
         let taken = f.split_ratio(0.3).unwrap();
         assert!((f.total() + taken.total() - 70.0).abs() < 1e-10);
         assert!((taken.total() - 21.0).abs() < 1e-10);
@@ -645,7 +669,7 @@ mod tests {
 
     #[test]
     fn split_amount_preserves_total() {
-        let mut f = EnergyField::uniform(70.0);
+        let mut f = EnergyField::uniform(70.0).unwrap();
         let taken = f.split_amount(35.0).unwrap();
         assert!((f.total() + taken.total() - 70.0).abs() < 1e-10);
         assert!((taken.total() - 35.0).abs() < 1e-10);
@@ -654,7 +678,7 @@ mod tests {
 
     #[test]
     fn split_more_than_total_fails() {
-        let mut f = EnergyField::uniform(10.0);
+        let mut f = EnergyField::uniform(10.0).unwrap();
         assert!(f.split_amount(20.0).is_err());
         assert!((f.total() - 10.0).abs() < 1e-10);
     }
@@ -671,7 +695,7 @@ mod tests {
 
     #[test]
     fn manifestation_threshold() {
-        let mut f = EnergyField::with_physical_bias(100.0, 0.5);
+        let mut f = EnergyField::with_physical_bias(100.0, 0.5).unwrap();
         assert!(f.is_manifested(0.5));
         assert!(!f.is_manifested(0.6));
 
@@ -684,10 +708,10 @@ mod tests {
         let mut pool = EnergyPool::new(1000.0).unwrap();
 
         let a1 = pool.allocate(300.0).unwrap();
-        let f1 = EnergyField::with_physical_bias(a1, 0.7);
+        let f1 = EnergyField::with_physical_bias(a1, 0.7).unwrap();
 
         let a2 = pool.allocate(200.0).unwrap();
-        let f2 = EnergyField::with_physical_bias(a2, 0.3);
+        let f2 = EnergyField::with_physical_bias(a2, 0.3).unwrap();
 
         assert!((pool.allocated() - 500.0).abs() < 1e-10);
         assert!(pool.verify_conservation());
@@ -716,7 +740,7 @@ mod tests {
         for i in 0..5 {
             let amount = pool.allocate(50.0).unwrap();
             let ratio = 0.3 + (i as f64) * 0.1;
-            let f = EnergyField::with_physical_bias(amount, ratio);
+            let f = EnergyField::with_physical_bias(amount, ratio).unwrap();
             assert!(f.verify_integrity());
             assert!((f.total() - 50.0).abs() < 1e-10);
             fields.push(f);

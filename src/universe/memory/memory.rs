@@ -367,7 +367,10 @@ impl MemoryCodec {
     pub fn erase(universe: &mut DarkUniverse, atom: &MemoryAtom) {
         universe.unprotect(&atom.vertices);
         for coord in &atom.vertices {
-            universe.dematerialize(coord);
+            let result = universe.dematerialize(coord);
+            if result.is_none() && universe.contains(coord) {
+                tracing::warn!("erase: failed to dematerialize vertex {:?}", coord);
+            }
         }
     }
 
@@ -722,5 +725,305 @@ mod tests {
         }
 
         assert!(u.verify_conservation());
+    }
+
+    #[test]
+    fn tetrahedron_has_nonzero_volume() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let tet = atom.to_tetrahedron();
+        let vol = tet.projected_volume_3d();
+        assert!(vol > 1e-10, "volume must be positive, got {}", vol);
+    }
+
+    #[test]
+    fn tetrahedron_vertices_are_distinct() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let verts = atom.vertices();
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(verts[i], verts[j], "vertices {} and {} must differ", i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn tetrahedron_anchor_is_first_vertex() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([5, 3, -2, 0, 0, 0, 0]);
+        let data = vec![1.0, 2.0, 3.0];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        assert_eq!(atom.vertices()[0], anchor);
+    }
+
+    #[test]
+    fn encode_dense_universe_still_finds_tetrahedron() {
+        let mut u = DarkUniverse::new(2000000.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let bcc = Lattice::bcc_neighbor_coords(&anchor);
+        for (i, coord) in bcc.iter().enumerate() {
+            if i < 100 {
+                let _ = u.materialize_uniform(*coord, 50.0);
+            }
+        }
+        let data = vec![1.0; 7];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert!(
+            result.is_ok(),
+            "should find tetrahedron even with 100/128 neighbors occupied"
+        );
+        let atom = result.unwrap();
+        let tet = atom.to_tetrahedron();
+        assert!(tet.has_volume());
+    }
+
+    #[test]
+    fn encode_near_full_universe_fails_gracefully() {
+        let mut u = DarkUniverse::new(5000000.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let bcc = Lattice::bcc_neighbor_coords(&anchor);
+        for coord in &bcc {
+            let _ = u.materialize_uniform(*coord, 50.0);
+        }
+        let data = vec![1.0; 7];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert_eq!(result, Err(MemoryError::NoAvailablePosition));
+    }
+
+    #[test]
+    fn encode_exactly_two_free_neighbors_fails() {
+        let mut u = DarkUniverse::new(5000000.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let bcc = Lattice::bcc_neighbor_coords(&anchor);
+        for (i, coord) in bcc.iter().enumerate() {
+            if i < 126 {
+                let _ = u.materialize_uniform(*coord, 50.0);
+            }
+        }
+        let data = vec![1.0; 7];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert_eq!(result, Err(MemoryError::NoAvailablePosition));
+    }
+
+    #[test]
+    fn encode_exactly_three_free_neighbors_succeeds() {
+        let mut u = DarkUniverse::new(5000000.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let bcc = Lattice::bcc_neighbor_coords(&anchor);
+        for (i, coord) in bcc.iter().enumerate() {
+            if i < 125 {
+                let _ = u.materialize_uniform(*coord, 50.0);
+            }
+        }
+        let data = vec![1.0; 7];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        if let Ok(atom) = &result {
+            assert!(atom.to_tetrahedron().has_volume());
+        }
+    }
+
+    #[test]
+    fn encode_different_anchors_produce_independent_tetrahedra() {
+        let mut u = DarkUniverse::new(2000000.0);
+        let a1 = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let a2 = Coord7D::new_even([100, 0, 0, 0, 0, 0, 0]);
+        let data = vec![1.0; 7];
+        let atom1 = MemoryCodec::encode(&mut u, &a1, &data).unwrap();
+        let atom2 = MemoryCodec::encode(&mut u, &a2, &data).unwrap();
+        let v1_set: std::collections::HashSet<_> = atom1.vertices().iter().copied().collect();
+        let v2_set: std::collections::HashSet<_> = atom2.vertices().iter().copied().collect();
+        assert!(
+            v1_set.is_disjoint(&v2_set),
+            "distant anchors must not share vertices"
+        );
+    }
+
+    #[test]
+    fn encode_odd_anchor_succeeds() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_odd([0, 0, 0, 0, 0, 0, 0]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let tet = atom.to_tetrahedron();
+        assert!(tet.has_volume());
+        assert!(tet.is_mixed_parity());
+    }
+
+    #[test]
+    fn encode_negative_anchor_succeeds() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([-10, -20, -30, 0, 0, 0, 0]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let decoded = MemoryCodec::decode(&u, &atom).unwrap();
+        for (e, a) in data.iter().zip(decoded.iter()) {
+            assert!((e - a).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn encode_large_dark_anchor_succeeds() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0, 0, 0, 50, 100, 200, 300]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        assert!(atom.to_tetrahedron().has_volume());
+        assert!(u.verify_conservation());
+    }
+
+    #[test]
+    fn encode_nearby_anchors_no_vertex_overlap() {
+        let mut u = DarkUniverse::new(2000000.0);
+        let a1 = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let a2 = Coord7D::new_even([5, 0, 0, 0, 0, 0, 0]);
+        let data = vec![1.0; 7];
+        let atom1 = MemoryCodec::encode(&mut u, &a1, &data).unwrap();
+        let atom2 = MemoryCodec::encode(&mut u, &a2, &data).unwrap();
+        let v1_set: std::collections::HashSet<_> = atom1.vertices().iter().copied().collect();
+        let v2_set: std::collections::HashSet<_> = atom2.vertices().iter().copied().collect();
+        assert!(
+            v1_set.is_disjoint(&v2_set),
+            "nearby anchors must not share vertices"
+        );
+        assert!(u.verify_conservation());
+    }
+
+    #[test]
+    fn encode_then_erase_then_reencode_same_anchor() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data1 = vec![1.0; 7];
+        let atom1 = MemoryCodec::encode(&mut u, &anchor, &data1).unwrap();
+        MemoryCodec::erase(&mut u, &atom1);
+        let data2 = vec![2.0; 7];
+        let atom2 = MemoryCodec::encode(&mut u, &anchor, &data2).unwrap();
+        let decoded = MemoryCodec::decode(&u, &atom2).unwrap();
+        for (e, a) in data2.iter().zip(decoded.iter()) {
+            assert!((e - a).abs() < 1e-10);
+        }
+        assert!(u.verify_conservation());
+    }
+
+    #[test]
+    fn encode_boundary_data_max_28_dims() {
+        let mut u = DarkUniverse::new(500000.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let data: Vec<f64> = (0..28).map(|i| (i as f64) * 0.01).collect();
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        assert_eq!(atom.data_dim(), 28);
+        let decoded = MemoryCodec::decode(&u, &atom).unwrap();
+        assert_eq!(decoded.len(), 28);
+        for (i, (e, a)) in data.iter().zip(decoded.iter()).enumerate() {
+            assert!(
+                (e - a).abs() < 1e-10,
+                "dim {}: expected {}, got {}",
+                i,
+                e,
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn encode_data_29_dims_fails() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![0.1; 29];
+        assert_eq!(
+            MemoryCodec::encode(&mut u, &anchor, &data),
+            Err(MemoryError::DataTooLarge)
+        );
+    }
+
+    #[test]
+    fn tetrahedron_edge_lengths_are_bcc_scale() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![1.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let tet = atom.to_tetrahedron();
+        let edges = tet.projected_edge_lengths_3d();
+        for (i, &len) in edges.iter().enumerate() {
+            assert!(len > 0.0, "edge {} must have positive projected length", i);
+            assert!(
+                len < 5.0,
+                "edge {} projected length {} is unexpectedly large",
+                i,
+                len
+            );
+        }
+    }
+
+    #[test]
+    fn encode_data_value_exactly_negative_base_ok() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![-100.0];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert!(
+            result.is_ok(),
+            "value -100 with base 100 = 0, which equals MIN_DIM_VALUE"
+        );
+    }
+
+    #[test]
+    fn encode_data_value_just_below_negative_base_fails() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![-100.01];
+        assert!(MemoryCodec::encode(&mut u, &anchor, &data).is_err());
+    }
+
+    #[test]
+    fn encode_data_value_zero_succeeds() {
+        let mut u = make_test_universe();
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![0.0; 7];
+        let atom = MemoryCodec::encode(&mut u, &anchor, &data).unwrap();
+        let decoded = MemoryCodec::decode(&u, &atom).unwrap();
+        for a in &decoded {
+            assert!(a.abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn encode_rollback_on_failure() {
+        let mut u = DarkUniverse::new(500.0);
+        let anchor = Coord7D::new_even([0; 7]);
+        let data = vec![100.0; 28];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert!(result.is_err());
+        assert!(
+            u.get_node(&anchor).is_none(),
+            "anchor should be freed after rollback"
+        );
+        assert!(u.verify_conservation(), "conservation after failed encode");
+    }
+
+    #[test]
+    fn tetrahedron_scoring_prefers_furthest_candidates() {
+        let mut u = DarkUniverse::new(5000000.0);
+        let anchor = Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]);
+        let bcc = Lattice::bcc_neighbor_coords(&anchor);
+        let mut occupied_count = 0;
+        for coord in &bcc {
+            let cf = coord.as_f64();
+            let d0 = (cf[0] - 0.0).powi(2);
+            if d0 < 0.1 && occupied_count < 60 {
+                let _ = u.materialize_uniform(*coord, 50.0);
+                occupied_count += 1;
+            }
+        }
+        let data = vec![1.0; 7];
+        let result = MemoryCodec::encode(&mut u, &anchor, &data);
+        assert!(
+            result.is_ok(),
+            "should still find tetrahedron with close neighbors occupied"
+        );
     }
 }

@@ -195,6 +195,19 @@ impl DreamInsightEngine {
         let mut visited = vec![false; memories.len()];
         let mut clusters = Vec::new();
 
+        let cell_size = self.cluster_radius.sqrt().max(1.0);
+        let mut grid: std::collections::HashMap<(i32, i32, i32), Vec<usize>> =
+            std::collections::HashMap::new();
+        for (idx, mem) in memories.iter().enumerate() {
+            let pos = mem.anchor().as_f64();
+            let key = (
+                (pos[0] / cell_size).floor() as i32,
+                (pos[1] / cell_size).floor() as i32,
+                (pos[2] / cell_size).floor() as i32,
+            );
+            grid.entry(key).or_default().push(idx);
+        }
+
         for i in 0..memories.len() {
             if visited[i] {
                 continue;
@@ -209,14 +222,26 @@ impl DreamInsightEngine {
                 visited[ci] = true;
                 members.push(ci);
 
-                for cj in 0..memories.len() {
-                    if visited[cj] {
-                        continue;
-                    }
-                    if memories[ci].anchor().distance_sq(memories[cj].anchor())
-                        < self.cluster_radius
-                    {
-                        stack.push(cj);
+                let pos = memories[ci].anchor().as_f64();
+                let cx = (pos[0] / cell_size).floor() as i32;
+                let cy = (pos[1] / cell_size).floor() as i32;
+                let cz = (pos[2] / cell_size).floor() as i32;
+                for dx in -1..=1i32 {
+                    for dy in -1..=1i32 {
+                        for dz in -1..=1i32 {
+                            if let Some(candidates) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
+                                for &cj in candidates {
+                                    if visited[cj] {
+                                        continue;
+                                    }
+                                    if memories[ci].anchor().distance_sq(memories[cj].anchor())
+                                        < self.cluster_radius
+                                    {
+                                        stack.push(cj);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -246,11 +246,15 @@ impl MetricTensor {
                 g[pidx][idx] = cs * 0.5;
             }
         }
-        Self { g }
+        let result = Self { g };
+        if !result.is_diagonally_dominant() {
+            tracing::warn!("MetricTensor: coupling produced non-diagonally-dominant matrix");
+        }
+        result
     }
 
     pub fn curved(local_energy_density: f64, base: &MetricTensor) -> Self {
-        let curvature_factor = 1.0 + 0.1 * local_energy_density;
+        let curvature_factor = 1.0 + 0.1 * local_energy_density.min(100.0);
         let mut g = base.g;
         for i in 0..DIM {
             g[i][i] *= curvature_factor;
@@ -259,7 +263,28 @@ impl MetricTensor {
     }
 
     pub fn get(&self, i: usize, j: usize) -> f64 {
-        self.g[i][j]
+        if i < DIM && j < DIM {
+            self.g[i][j]
+        } else {
+            0.0
+        }
+    }
+
+    pub fn is_diagonally_dominant(&self) -> bool {
+        for i in 0..DIM {
+            let diag = self.g[i][i];
+            if diag <= 0.0 {
+                return false;
+            }
+            let off_diag_sum: f64 = (0..DIM)
+                .filter(|&j| j != i)
+                .map(|j| self.g[i][j].abs())
+                .sum();
+            if off_diag_sum >= diag {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn distance_sq(&self, a: &[f64; DIM], b: &[f64; DIM]) -> f64 {
@@ -359,9 +384,12 @@ impl CouplingMatrix {
     }
 
     pub fn get(&self, i: usize, j: usize) -> f64 {
-        self.c[i][j]
+        if i < DIM && j < DIM {
+            self.c[i][j]
+        } else {
+            0.0
+        }
     }
-
     pub fn set(&mut self, i: usize, j: usize, val: f64) {
         if i < DIM && j < DIM {
             self.c[i][j] = val;
@@ -394,14 +422,24 @@ impl CouplingMatrix {
             }
         }
         if total_coupled > actual {
-            for j in 0..DIM {
-                if j != from_dim && self.c[from_dim][j] > 0.0 {
-                    dims[j] -= (total_coupled - actual) / coupled_count as f64;
+            let excess = total_coupled - actual;
+            if coupled_count > 0 {
+                let per_correction = excess / coupled_count as f64;
+                let mut corrected = 0.0;
+                for j in 0..DIM {
+                    if j != from_dim && self.c[from_dim][j] > 0.0 {
+                        let deduct = per_correction.min(dims[j]);
+                        dims[j] -= deduct;
+                        corrected += deduct;
+                    }
                 }
+                dims[from_dim] += excess - corrected;
             }
             total_coupled = actual;
         }
-        actual - total_coupled
+        let remainder = actual - total_coupled;
+        dims[from_dim] += remainder;
+        remainder
     }
 }
 
@@ -526,9 +564,11 @@ impl ProjectionMatrix {
             let cos_a = angle.cos();
             let sin_a = angle.sin();
             m[axis_i][axis_i] = cos_a;
-            m[axis_i][axis_j] = sin_a;
-            m[axis_i][if axis_i == 0 { 1 } else { 0 }] = -sin_a;
-            m[axis_i][axis_j] = cos_a;
+            m[axis_i][axis_j] = -sin_a;
+            if axis_j < PHYSICAL_DIM {
+                m[axis_j][axis_i] = sin_a;
+                m[axis_j][axis_j] = cos_a;
+            }
         }
         Self { m }
     }

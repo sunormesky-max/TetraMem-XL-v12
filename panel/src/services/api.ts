@@ -495,6 +495,62 @@ export interface ConservationResult {
   }
 }
 
+export interface PluginInfo {
+  manifest: {
+    name: string
+    version: string
+    author: string
+    description: string
+    api_version: number
+    energy_budget: number
+    permissions: {
+      memory_read: boolean
+      memory_write: boolean
+      hebbian_read: boolean
+      hebbian_write: boolean
+      pulse_fire: boolean
+      universe_read: boolean
+      event_publish: boolean
+      event_subscribe: boolean
+    }
+    tags: string[]
+  }
+  status: string
+  energy_consumed: number
+  executions: number
+  last_execution: string | null
+  installed_at: string
+}
+
+export interface PluginListResult {
+  success: boolean
+  data: PluginInfo[]
+}
+
+export interface PluginStatsResult {
+  success: boolean
+  data: {
+    total: number
+    enabled: number
+    running: number
+    suspended: number
+    total_energy_consumed: number
+    total_executions: number
+    global_energy_budget: number
+  }
+}
+
+export interface PluginExecuteResult {
+  success: boolean
+  data: {
+    output: number[]
+    energy_consumed: number
+    execution_time_us: number
+    success: boolean
+    error: string | null
+  }
+}
+
 export const api = {
   getStats: () => request<StatsData>('/stats'),
   getHealth: () => request<HealthData>('/health'),
@@ -688,4 +744,35 @@ export const api = {
   // -- Metrics / Conservation --
   getMetrics: () => request<MetricsResult>('/metrics'),
   conservationCheck: () => request<ConservationResult>('/conservation/status'),
+
+  // -- Plugins --
+  pluginList: () => request<PluginListResult>('/plugins/list'),
+  pluginStats: () => request<PluginStatsResult>('/plugins/stats'),
+  pluginStatus: (name: string) => request<PluginListResult>(`/plugins/${encodeURIComponent(name)}/status`),
+  pluginInstall: (manifest: any, wasmBase64: string) =>
+    request<{ success: boolean; data: { installed: boolean; status: string } }>('/plugins/install', {
+      method: 'POST',
+      body: JSON.stringify({ manifest, wasm_base64: wasmBase64 }),
+    }),
+  pluginUninstall: (name: string) =>
+    request<{ success: boolean; data: { uninstalled: boolean; version: string } }>(`/plugins/${encodeURIComponent(name)}/uninstall`, {
+      method: 'POST',
+    }),
+  pluginEnable: (name: string) =>
+    request<{ success: boolean; data: { name: string; status: string } }>(`/plugins/${encodeURIComponent(name)}/enable`, {
+      method: 'POST',
+    }),
+  pluginDisable: (name: string) =>
+    request<{ success: boolean; data: { name: string; status: string } }>(`/plugins/${encodeURIComponent(name)}/disable`, {
+      method: 'POST',
+    }),
+  pluginExecute: (name: string, func: string, input?: number[], energyLimit?: number) =>
+    request<PluginExecuteResult>(`/plugins/${encodeURIComponent(name)}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({ function: func, input: input || [], energy_limit: energyLimit }),
+    }),
+  pluginResetEnergy: (name: string) =>
+    request<{ success: boolean; data: { name: string; energy_reset: boolean } }>(`/plugins/${encodeURIComponent(name)}/reset-energy`, {
+      method: 'POST',
+    }),
 }

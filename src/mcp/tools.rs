@@ -663,8 +663,8 @@ fn handle_trace(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolC
         .iter()
         .map(|a| {
             json!({
-                "source": a.source,
-                "targets": a.targets,
+                "source": a.source.to_string(),
+                "targets": a.targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
                 "confidence": a.confidence,
                 "hops": a.hops,
             })
@@ -918,14 +918,14 @@ fn handle_associate(args: &Value, core: &mut TetraMemCore) -> super::protocol::T
                 let desc = core
                     .memories
                     .iter()
-                    .find(|m| format!("{}", m.anchor()) == *t)
+                    .find(|m| *m.anchor() == *t)
                     .and_then(|m| m.description().map(String::from))
                     .unwrap_or_default();
-                json!({"anchor": t, "description": desc})
+                json!({"anchor": t.to_string(), "description": desc})
             })
             .collect();
         results.push(json!({
-            "source": assoc.source,
+            "source": assoc.source.to_string(),
             "targets": targets,
             "confidence": assoc.confidence,
             "hops": assoc.hops,
@@ -1470,7 +1470,7 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
                     let desc_source = core
                         .memories
                         .iter()
-                        .find(|m| format!("{}", m.anchor()) == r.source)
+                        .find(|m| *m.anchor() == r.source)
                         .and_then(|m| m.description().map(String::from))
                         .unwrap_or_default();
                     let desc_target = r
@@ -1479,14 +1479,14 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
                         .and_then(|t| {
                             core.memories
                                 .iter()
-                                .find(|m| format!("{}", m.anchor()) == *t)
+                                .find(|m| *m.anchor() == *t)
                                 .and_then(|m| m.description().map(String::from))
                         })
                         .unwrap_or_default();
                     json!({
-                        "source": r.source,
+                        "source": r.source.to_string(),
                         "source_description": desc_source,
-                        "target": r.targets.first().unwrap_or(&"".into()),
+                        "target": r.targets.first().map(|t| t.to_string()).unwrap_or_default(),
                         "target_description": desc_target,
                         "confidence": r.confidence,
                     })
@@ -1524,7 +1524,7 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
                 max_hops,
             );
             let hops: Vec<Value> = chain.iter().map(|r| {
-                json!({ "from": r.source, "to": r.targets.first().unwrap_or(&"".into()), "confidence": r.confidence, "hop": r.hops })
+                json!({ "from": r.source.to_string(), "to": r.targets.first().map(|t| t.to_string()).unwrap_or_default(), "confidence": r.confidence, "hop": r.hops })
             }).collect();
             super::protocol::ToolCallResult::ok(
                 json!({ "method": "infer_chain", "from": format!("{}", from), "to": format!("{}", to), "chain_length": hops.len(), "found": !hops.is_empty(), "hops": hops }).to_string(),
@@ -1548,10 +1548,10 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
             );
             let results: Vec<Value> = discoveries.iter().map(|r| {
                 let desc = r.targets.first().and_then(|t| {
-                    core.memories.iter().find(|m| format!("{}", m.anchor()) == *t)
+                    core.memories.iter().find(|m| *m.anchor() == *t)
                         .and_then(|m| m.description().map(String::from))
                 }).unwrap_or_default();
-                json!({ "from": r.source, "discovered": r.targets.first().unwrap_or(&"".into()), "description": desc, "confidence": r.confidence })
+                json!({ "from": r.source.to_string(), "discovered": r.targets.first().map(|t| t.to_string()).unwrap_or_default(), "description": desc, "confidence": r.confidence })
             }).collect();
             super::protocol::ToolCallResult::ok(
                 json!({ "method": "discover", "seed": format!("{}", seed), "discoveries": results.len(), "results": results }).to_string(),

@@ -174,14 +174,11 @@ impl DreamEngine {
         let mut merged_count = 0;
 
         for result in &analogies {
-            let source_idx = memories
-                .iter()
-                .position(|m| format!("{}", m.anchor()) == result.source);
-            let target_idx = result.targets.first().and_then(|t| {
-                memories
-                    .iter()
-                    .position(|m| format!("{}", m.anchor()) == *t)
-            });
+            let source_idx = memories.iter().position(|m| m.anchor() == &result.source);
+            let target_idx = result
+                .targets
+                .first()
+                .and_then(|t| memories.iter().position(|m| m.anchor() == t));
 
             if let (Some(si), Some(ti)) = (source_idx, target_idx) {
                 if participated.contains(&si) || participated.contains(&ti) {

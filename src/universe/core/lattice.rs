@@ -54,7 +54,7 @@ impl Lattice {
     pub fn face_neighbor_coords(center: &Coord7D) -> Vec<Coord7D> {
         Coord7D::face_neighbor_offsets()
             .iter()
-            .map(|off| center.shifted(off))
+            .filter_map(|off| center.shifted(off))
             .collect()
     }
 
@@ -124,7 +124,7 @@ impl Lattice {
     pub fn edge_neighbor_coords(center: &Coord7D) -> Vec<Coord7D> {
         Self::edge_neighbor_offsets()
             .iter()
-            .map(|off| center.shifted(off))
+            .filter_map(|off| center.shifted(off))
             .collect()
     }
 

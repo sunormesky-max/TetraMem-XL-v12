@@ -21,7 +21,7 @@ impl BettiVector {
     }
 
     pub fn get(&self, dim: usize) -> usize {
-        self.values[dim]
+        self.values.get(dim).copied().unwrap_or(0)
     }
 
     pub fn values(&self) -> &[usize; 7] {
@@ -310,31 +310,32 @@ impl TopologyEngine {
         to: &Coord7D,
     ) -> Vec<Coord7D> {
         let node_set: HashSet<Coord7D> = universe.coords().into_iter().collect();
+        let mut parent: HashMap<Coord7D, Coord7D> = HashMap::new();
         let mut visited = HashSet::new();
         visited.insert(*from);
         let mut queue = VecDeque::new();
-        queue.push_back(vec![*from]);
+        queue.push_back(*from);
 
-        while let Some(path) = queue.pop_front() {
-            let current = *path.last().unwrap();
+        while let Some(current) = queue.pop_front() {
             if current == *to {
+                let mut path = vec![*to];
+                let mut cur = *to;
+                while let Some(&p) = parent.get(&cur) {
+                    path.push(p);
+                    cur = p;
+                }
+                path.reverse();
                 return path;
             }
 
-            for n in Lattice::face_neighbor_coords(&current) {
+            for n in Lattice::face_neighbor_coords(&current)
+                .into_iter()
+                .chain(Lattice::bcc_neighbor_coords(&current))
+            {
                 if node_set.contains(&n) && !visited.contains(&n) {
                     visited.insert(n);
-                    let mut new_path = path.clone();
-                    new_path.push(n);
-                    queue.push_back(new_path);
-                }
-            }
-            for n in Lattice::bcc_neighbor_coords(&current) {
-                if node_set.contains(&n) && !visited.contains(&n) {
-                    visited.insert(n);
-                    let mut new_path = path.clone();
-                    new_path.push(n);
-                    queue.push_back(new_path);
+                    parent.insert(n, current);
+                    queue.push_back(n);
                 }
             }
         }

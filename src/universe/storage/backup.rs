@@ -68,6 +68,7 @@ pub struct BackupConfig {
     pub max_total_backups: usize,
     pub conservation_checkpoint_interval: u64,
     pub rotate_on_high_memory_mb: f64,
+    pub max_heap_mb: f64,
 }
 
 impl Default for BackupConfig {
@@ -77,6 +78,7 @@ impl Default for BackupConfig {
             max_total_backups: 20,
             conservation_checkpoint_interval: 100,
             rotate_on_high_memory_mb: 100.0,
+            max_heap_mb: 50.0,
         }
     }
 }
@@ -104,6 +106,7 @@ pub struct BackupScheduler {
     operation_count: u64,
     last_backup_op_count: u64,
     current_generation: u32,
+    disk_dir: Option<std::path::PathBuf>,
 }
 
 impl BackupScheduler {
@@ -115,11 +118,16 @@ impl BackupScheduler {
             operation_count: 0,
             last_backup_op_count: 0,
             current_generation: 0,
+            disk_dir: None,
         }
     }
 
     pub fn with_defaults() -> Self {
         Self::new(BackupConfig::default())
+    }
+
+    pub fn set_disk_dir(&mut self, dir: std::path::PathBuf) {
+        self.disk_dir = Some(dir);
     }
 
     pub fn operation_count(&self) -> u64 {
@@ -210,6 +218,14 @@ impl BackupScheduler {
         };
         self.backups.push(entry);
 
+        if let Some(ref dir) = self.disk_dir {
+            let _ = std::fs::create_dir_all(dir);
+            let file_path = dir.join(format!("backup_{}.json", metadata.id));
+            if let Ok(json) = serde_json::to_string_pretty(&self.backups.last().unwrap().snapshot) {
+                let _ = std::fs::write(&file_path, json);
+            }
+        }
+
         let rotated = self.rotate();
 
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -220,8 +236,19 @@ impl BackupScheduler {
         })
     }
 
+    const ESTIMATED_BYTES_PER_ENTRY: usize = 1024 * 512;
+
     fn rotate(&mut self) -> usize {
         let before = self.backups.len();
+
+        let max_heap = (self.config.max_heap_mb * 1_048_576.0) as usize;
+        if max_heap > 0 {
+            while self.backups.len() * Self::ESTIMATED_BYTES_PER_ENTRY > max_heap
+                && self.backups.len() > 1
+            {
+                self.backups.remove(0);
+            }
+        }
 
         let max_bytes = (self.config.rotate_on_high_memory_mb * 1_048_576.0) as usize;
         if max_bytes > 0 {
@@ -301,6 +328,16 @@ impl BackupScheduler {
 
     pub fn total_backup_bytes(&self) -> usize {
         self.backups.iter().map(|e| e.metadata.bytes).sum()
+    }
+
+    pub fn restore_from_disk(
+        dir: &std::path::Path,
+        id: u64,
+    ) -> Option<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine)> {
+        let file_path = dir.join(format!("backup_{}.json", id));
+        let json = std::fs::read_to_string(&file_path).ok()?;
+        let snapshot: UniverseSnapshot = serde_json::from_str(&json).ok()?;
+        PersistEngine::deserialize(&snapshot).ok()
     }
 }
 

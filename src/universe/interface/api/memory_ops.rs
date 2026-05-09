@@ -375,8 +375,9 @@ pub async fn memory_trace(
     }
 
     for r in &associations {
-        for target_str in &r.targets {
-            if let Some(m) = mem_index.get(target_str) {
+        for target_coord in &r.targets {
+            let target_str = target_coord.to_string();
+            if let Some(m) = mem_index.get(&target_str) {
                 hops.push(TraceHop {
                     anchor: target_str.clone(),
                     created_at: m.created_at(),

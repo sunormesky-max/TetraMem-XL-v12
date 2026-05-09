@@ -761,6 +761,10 @@ pub struct ClusteringEngine {
     pub tunnels: ResonanceTunnel,
     pub bridges: TopologyBridge,
     cycle_count: u64,
+    last_tunnels_discovered: usize,
+    last_tunnels_applied: usize,
+    last_bridges_created: usize,
+    last_total_memories: usize,
 }
 
 impl ClusteringEngine {
@@ -775,6 +779,10 @@ impl ClusteringEngine {
             tunnels,
             bridges,
             cycle_count: 0,
+            last_tunnels_discovered: 0,
+            last_tunnels_applied: 0,
+            last_bridges_created: 0,
+            last_total_memories: 0,
         }
     }
 
@@ -803,12 +811,12 @@ impl ClusteringEngine {
             cycle: self.cycle_count,
             attractors: self.gravity.attractor_count(),
             memories_in_attractors: self.gravity.total_memories_in_attractors(),
-            tunnels_discovered: 0,
-            tunnels_applied: 0,
+            tunnels_discovered: self.last_tunnels_discovered,
+            tunnels_applied: self.last_tunnels_applied,
             total_tunnels: self.tunnels.tunnel_count(),
-            bridges_created: 0,
+            bridges_created: self.last_bridges_created,
             total_bridges: self.bridges.bridge_count(),
-            total_memories: 0,
+            total_memories: self.last_total_memories,
         }
     }
 
@@ -840,7 +848,7 @@ impl ClusteringEngine {
             self.bridges
                 .detect_and_bridge(memories, hebbian, universe, self.cycle_count);
 
-        ClusteringReport {
+        let report = ClusteringReport {
             cycle: self.cycle_count,
             attractors: self.gravity.attractor_count(),
             memories_in_attractors: self.gravity.total_memories_in_attractors(),
@@ -850,7 +858,14 @@ impl ClusteringEngine {
             bridges_created: new_bridges.len(),
             total_bridges: self.bridges.bridge_count(),
             total_memories: memories.len(),
-        }
+        };
+
+        self.last_tunnels_discovered = report.tunnels_discovered;
+        self.last_tunnels_applied = report.tunnels_applied;
+        self.last_bridges_created = report.bridges_created;
+        self.last_total_memories = memories.len();
+
+        report
     }
 }
 

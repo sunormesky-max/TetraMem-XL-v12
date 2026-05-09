@@ -413,9 +413,9 @@ async fn auto_forget_step(
     cycle: u64,
     ctrl: &mut ControllerState,
 ) {
+    let mut u = state.universe.write().await;
     let guard = state.identity_guard.read().await;
     let mut store = state.memory_store.write().await;
-    let mut u = state.universe.write().await;
 
     let mut to_erase: Vec<usize> = Vec::new();
     let mut over_limit_count: usize = 0;
