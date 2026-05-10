@@ -113,6 +113,8 @@ pub async fn remember(
     let created_at = atom.created_at();
     let manifested = atom.is_manifested(&u);
 
+    let deferred = state.config.maintenance.deferred_binding;
+
     sem.index_memory(&atom, &data);
     let similar = sem.search_similar(&data, 5);
     for hit in &similar {
@@ -121,7 +123,11 @@ pub async fn remember(
             mk == hit.atom_key
         }) {
             let semantic_strength = hit.similarity * 1.5;
-            h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
+            if deferred {
+                h.defer_edge(atom.anchor(), other.anchor(), semantic_strength);
+            } else {
+                h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
+            }
         }
     }
 

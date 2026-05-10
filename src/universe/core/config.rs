@@ -145,6 +145,8 @@ pub struct MaintenanceConfig {
     pub interest_default_ttl_secs: u64,
     #[serde(default = "default_max_interests")]
     pub max_interests: usize,
+    #[serde(default)]
+    pub deferred_binding: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +283,7 @@ fn default_maintenance() -> MaintenanceConfig {
         interest_ttl_enabled: default_interest_ttl_enabled(),
         interest_default_ttl_secs: default_interest_default_ttl_secs(),
         max_interests: default_max_interests(),
+        deferred_binding: false,
     }
 }
 

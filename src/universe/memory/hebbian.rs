@@ -83,11 +83,19 @@ pub struct HebbianEdgeFull {
     pub temporal_strength: f64,
 }
 
+#[derive(Debug, Clone)]
+struct PendingEdge {
+    src: Coord7D,
+    tgt: Coord7D,
+    boost: f64,
+}
+
 #[derive(Clone)]
 pub struct HebbianMemory {
     edges: HashMap<(Coord7D, Coord7D), HebbianEdge>,
     forward: HashMap<Coord7D, HashMap<Coord7D, f64>>,
     backward: HashMap<Coord7D, HashMap<Coord7D, f64>>,
+    pending: Vec<PendingEdge>,
     pub max_paths: usize,
     decay: f64,
     reinforce: f64,
@@ -107,12 +115,37 @@ impl HebbianMemory {
             edges: HashMap::new(),
             forward: HashMap::new(),
             backward: HashMap::new(),
+            pending: Vec::new(),
             max_paths: DEFAULT_MAX_PATHS,
             decay: DEFAULT_DECAY,
             reinforce: DEFAULT_REINFORCE,
             min_weight: DEFAULT_MIN_WEIGHT,
             stdp_ltd_rate: STDP_LTD_RATE,
         }
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub fn defer_edge(&mut self, a: &Coord7D, b: &Coord7D, boost: f64) {
+        self.pending.push(PendingEdge {
+            src: *a,
+            tgt: *b,
+            boost,
+        });
+    }
+
+    pub fn flush_pending_edges(&mut self) -> usize {
+        if self.pending.is_empty() {
+            return 0;
+        }
+        let edges: Vec<PendingEdge> = self.pending.drain(..).collect();
+        let count = edges.len();
+        for pe in edges {
+            self.boost_edge(&pe.src, &pe.tgt, pe.boost);
+        }
+        count
     }
 
     pub fn edge_count(&self) -> usize {

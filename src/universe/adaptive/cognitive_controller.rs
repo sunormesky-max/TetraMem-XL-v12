@@ -398,6 +398,19 @@ async fn run_maintenance_inner(
         interest_ttl_cleanup(state, cfg).await;
     }
 
+    if cfg.deferred_binding {
+        let mut h = state.hebbian.write().await;
+        let flushed = h.flush_pending_edges();
+        drop(h);
+        if flushed > 0 {
+            tracing::info!(
+                cycle,
+                flushed,
+                "cognitive controller: flushed deferred Hebbian edges"
+            );
+        }
+    }
+
     run_prediction_surprise_cycle(state, &mut ctrl.spontaneous).await;
 
     if let Some(ref mut drive) = ctrl.spontaneous {
