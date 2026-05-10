@@ -8,6 +8,7 @@ pub mod core;
 pub mod error;
 pub mod interface;
 pub mod memory;
+pub mod neural;
 pub mod plugins;
 pub mod safety;
 pub mod storage;

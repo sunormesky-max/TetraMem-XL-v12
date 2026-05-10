@@ -127,7 +127,7 @@ export default function Pulse() {
       const res = await api.firePulse(source, apiPulseType)
       const d = res.data
       const newPulse: PulseRecord = {
-        id: history.length + 1,
+        id: Date.now(),
         type: pulseType,
         origin: originNode || source.join(','),
         reach: d.visited_nodes,
@@ -137,7 +137,7 @@ export default function Pulse() {
       setHistory((prev) => [newPulse, ...prev])
     } catch {
       const newPulse: PulseRecord = {
-        id: history.length + 1,
+        id: Date.now(),
         type: pulseType,
         origin: originNode || source.join(','),
         reach: 0,

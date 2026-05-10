@@ -225,50 +225,49 @@ export default function Api() {
   const [activeTab, setActiveTab] = useState('explorer')
   const [loading, setLoading] = useState(false)
 
+  const templates: Record<string, object> = {
+    '/login': { username: 'admin', password: 'password123' },
+    '/memory/encode': { anchor: [128, 128, 128], data: [1.0, -2.5, 3.14, 0.0, 2.71] },
+    '/memory/decode': { anchor: [128, 128, 128], data_dim: 5 },
+    '/memory/remember': { content: '示例记忆内容', tags: ['示例'], category: 'general', importance: 0.5, source: 'api' },
+    '/memory/recall': { query: '示例查询', limit: 10 },
+    '/memory/associate': { topic: '示例主题', depth: 2, limit: 5 },
+    '/memory/forget': { anchor: [128, 128, 128] },
+    '/memory/annotate': { anchor: [128, 128, 128], tags: ['标注'], category: 'annotated', description: '标注描述', importance: 0.7 },
+    '/memory/trace': { anchor: [128, 128, 128], max_hops: 3 },
+    '/pulse': { source: [128, 128, 128], pulse_type: 'associative' },
+    '/dream/consolidate': { importance_threshold: 0.3 },
+    '/context': { action: 'status', role: 'user', content: '' },
+    '/dark/flow': { from: [100, 100, 100], to: [200, 200, 200], amount: 0.5 },
+    '/dark/transfer': { source: [100, 100, 100], target: [200, 200, 200], amount: 0.5 },
+    '/dark/materialize': { coord: [128, 128, 128], energy: 1.0, physical_ratio: 0.5 },
+    '/dark/dematerialize': { coord: [128, 128, 128] },
+    '/physics/distance': { from: [0, 0, 0], to: [128, 128, 128] },
+    '/physics/project': { coord: [128, 128, 128] },
+    '/semantic/search': { data: [0.1, 0.2, 0.3], k: 5 },
+    '/semantic/query': { text: '示例查询', k: 5 },
+    '/semantic/relations': { anchor: [128, 128, 128] },
+    '/emotion/pulse': { anchor: [128, 128, 128] },
+    '/cluster/init': { node_id: 1, addr: 'http://localhost:8080' },
+    '/cluster/propose': { key: 'example_key', value: 'example_value' },
+    '/cluster/add-node': { node_id: 2, addr: 'http://localhost:8081' },
+    '/cluster/remove-node': { node_id: 2 },
+    '/phase/consensus': { force: false },
+    '/phase/quorum/start': { required_energy_budget: 100 },
+    '/phase/quorum/execute': { force: false },
+    '/hebbian/neighbors/{x}/{y}/{z}': { x: 128, y: 128, z: 128 },
+  }
+
   const handleSelectEndpoint = useCallback((ep: Endpoint) => {
     setSelectedEndpoint(ep)
     setResponseBody('')
-
-    const templates: Record<string, object> = {
-      '/login': { username: 'admin', password: 'password123' },
-      '/memory/encode': { anchor: [128, 128, 128], data: [1.0, -2.5, 3.14, 0.0, 2.71] },
-      '/memory/decode': { anchor: [128, 128, 128], data_dim: 5 },
-      '/memory/remember': { content: '示例记忆内容', tags: ['示例'], category: 'general', importance: 0.5, source: 'api' },
-      '/memory/recall': { query: '示例查询', limit: 10 },
-      '/memory/associate': { topic: '示例主题', depth: 2, limit: 5 },
-      '/memory/forget': { anchor: [128, 128, 128] },
-      '/memory/annotate': { anchor: [128, 128, 128], tags: ['标注'], category: 'annotated', description: '标注描述', importance: 0.7 },
-      '/memory/trace': { anchor: [128, 128, 128], max_hops: 3 },
-      '/pulse': { source: [128, 128, 128], pulse_type: 'associative' },
-      '/dream/consolidate': { importance_threshold: 0.3 },
-      '/context': { action: 'status', role: 'user', content: '' },
-      '/dark/flow': { from: [100, 100, 100], to: [200, 200, 200], amount: 0.5 },
-      '/dark/transfer': { source: [100, 100, 100], target: [200, 200, 200], amount: 0.5 },
-      '/dark/materialize': { coord: [128, 128, 128], energy: 1.0, physical_ratio: 0.5 },
-      '/dark/dematerialize': { coord: [128, 128, 128] },
-      '/physics/distance': { from: [0, 0, 0], to: [128, 128, 128] },
-      '/physics/project': { coord: [128, 128, 128] },
-      '/semantic/search': { data: [0.1, 0.2, 0.3], k: 5 },
-      '/semantic/query': { text: '示例查询', k: 5 },
-      '/semantic/relations': { anchor: [128, 128, 128] },
-      '/emotion/pulse': { anchor: [128, 128, 128] },
-      '/cluster/init': { node_id: 1, addr: 'http://localhost:8080' },
-      '/cluster/propose': { key: 'example_key', value: 'example_value' },
-      '/cluster/add-node': { node_id: 2, addr: 'http://localhost:8081' },
-      '/cluster/remove-node': { node_id: 2 },
-      '/phase/consensus': { force: false },
-      '/phase/quorum/start': { required_energy_budget: 100 },
-      '/phase/quorum/execute': { force: false },
-      '/hebbian/neighbors/{x}/{y}/{z}': { x: 128, y: 128, z: 128 },
-    }
-
     const template = templates[ep.path]
     if (template) {
       setRequestBody(JSON.stringify(template, null, 2))
     } else {
       setRequestBody('')
     }
-  }, [])
+  }, [templates])
 
   const handleSendRequest = useCallback(async () => {
     if (!selectedEndpoint) return
@@ -491,7 +490,12 @@ export default function Api() {
                               <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={handleFormatJson}>
                                 格式化 JSON
                               </Button>
-                              <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]">
+                              <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => {
+                                if (selectedEndpoint) {
+                                  const t = templates[selectedEndpoint.path]
+                                  if (t) setRequestBody(JSON.stringify(t, null, 2))
+                                }
+                              }}>
                                 加载示例
                               </Button>
                             </div>

@@ -109,6 +109,8 @@ export default function Dream() {
   const totalWeakened = history.reduce((s, h) => s + h.weakened, 0)
   const totalConsolidated = history.reduce((s, h) => s + h.consolidated, 0)
 
+  const isRunningRef = useRef(false)
+
   const autoDreamRef = useRef(false)
   const scheduleIntervalRef = useRef('30')
 
@@ -116,6 +118,8 @@ export default function Dream() {
   useEffect(() => { scheduleIntervalRef.current = scheduleInterval }, [scheduleInterval])
 
   const handleRunDream = useCallback(async () => {
+    if (isRunningRef.current) return
+    isRunningRef.current = true
     setIsRunning(true)
     try {
       const res = await api.runDream()
@@ -145,6 +149,7 @@ export default function Dream() {
       }
       setHistory((prev) => [newDream, ...prev])
     }
+    isRunningRef.current = false
     setIsRunning(false)
   }, [])
 
@@ -448,21 +453,21 @@ export default function Dream() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
-                            <RotateCcw className="mr-1 h-3 w-3" />
-                            重放
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-[var(--accent-red)]">
-                            <TrendingDown className="mr-1 h-3 w-3" />
-                            弱化
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-[var(--accent-green)]">
-                            <TrendingUp className="mr-1 h-3 w-3" />
-                            巩固
-                          </Button>
-                        </div>
-                      </TableCell>
+                         <div className="flex items-center justify-end gap-1">
+                           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleRunDream}>
+                             <RotateCcw className="mr-1 h-3 w-3" />
+                             重放
+                           </Button>
+                           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-[var(--accent-red)]" onClick={() => api.consolidate(0.1).catch(() => {})}>
+                             <TrendingDown className="mr-1 h-3 w-3" />
+                             弱化
+                           </Button>
+                           <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-[var(--accent-green)]" onClick={() => api.consolidate().catch(() => {})}>
+                             <TrendingUp className="mr-1 h-3 w-3" />
+                             巩固
+                           </Button>
+                         </div>
+                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

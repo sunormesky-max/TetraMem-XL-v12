@@ -13,6 +13,7 @@ use tetramem_v12::universe::crystal::CrystalEngine;
 use tetramem_v12::universe::dream::DreamEngine;
 use tetramem_v12::universe::hebbian::HebbianMemory;
 use tetramem_v12::universe::memory::MemoryCodec;
+use tetramem_v12::universe::memory::SemanticEngine;
 use tetramem_v12::universe::metrics;
 use tetramem_v12::universe::node::DarkUniverse;
 use tetramem_v12::universe::persist::PersistEngine;
@@ -170,8 +171,15 @@ fn main() {
 
             let perception_budget =
                 tetramem_v12::universe::perception::PerceptionBudget::new(universe.total_energy());
+            let neural_engine = if config.neural_embed.enabled {
+                tetramem_v12::universe::neural::EmbeddingEngineHandle::try_load(
+                    std::path::Path::new(&config.neural_embed.model_dir),
+                )
+            } else {
+                tetramem_v12::universe::neural::EmbeddingEngineHandle::disabled()
+            };
             let semantic_engine =
-                tetramem_v12::universe::memory::SemanticEngine::new(Default::default());
+                SemanticEngine::new_with_neural(Default::default(), neural_engine);
             let clustering_engine = tetramem_v12::universe::memory::ClusteringEngine::new(
                 tetramem_v12::universe::memory::ClusteringConfig::default(),
             );

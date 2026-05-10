@@ -23,6 +23,8 @@ pub struct AppConfig {
     pub maintenance: MaintenanceConfig,
     #[serde(default = "default_spontaneous")]
     pub spontaneous: SpontaneousConfig,
+    #[serde(default = "default_neural_embed")]
+    pub neural_embed: NeuralEmbedConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +170,35 @@ pub struct SpontaneousConfig {
 impl Default for SpontaneousConfig {
     fn default() -> Self {
         default_spontaneous()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NeuralEmbedConfig {
+    #[serde(default = "default_neural_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_neural_model_dir")]
+    pub model_dir: String,
+}
+
+fn default_neural_enabled() -> bool {
+    false
+}
+
+fn default_neural_model_dir() -> String {
+    "models/granite-embedding-small".to_string()
+}
+
+fn default_neural_embed() -> NeuralEmbedConfig {
+    NeuralEmbedConfig {
+        enabled: default_neural_enabled(),
+        model_dir: default_neural_model_dir(),
+    }
+}
+
+impl Default for NeuralEmbedConfig {
+    fn default() -> Self {
+        default_neural_embed()
     }
 }
 
@@ -413,6 +444,7 @@ impl Default for AppConfig {
             rate_limit: default_rate_limit(),
             maintenance: default_maintenance(),
             spontaneous: default_spontaneous(),
+            neural_embed: default_neural_embed(),
         }
     }
 }

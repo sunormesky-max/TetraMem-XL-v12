@@ -10,6 +10,7 @@
 
 use crate::universe::memory::nlp::{self, TfIdfIndex};
 use crate::universe::memory::MemoryAtom;
+use crate::universe::neural::EmbeddingEngineHandle;
 use std::collections::{HashMap, HashSet};
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -25,12 +26,14 @@ const META_DIM: usize = 12;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticEmbedding {
     vector: [f64; EMBED_DIM],
+    pub(crate) neural: Option<Vec<f64>>,
 }
 
 impl SemanticEmbedding {
     pub fn zero() -> Self {
         Self {
             vector: [0.0; EMBED_DIM],
+            neural: None,
         }
     }
 
@@ -270,7 +273,10 @@ impl SemanticEmbedding {
             }
         }
 
-        Self { vector: vec }
+        Self {
+            vector: vec,
+            neural: None,
+        }
     }
 
     pub fn from_annotation(atom: &MemoryAtom) -> Self {
@@ -331,7 +337,10 @@ impl SemanticEmbedding {
             }
         }
 
-        Self { vector: vec }
+        Self {
+            vector: vec,
+            neural: None,
+        }
     }
 
     pub fn from_data_and_annotation(data: &[f64], atom: &MemoryAtom) -> Self {
@@ -350,14 +359,33 @@ impl SemanticEmbedding {
             }
         }
 
-        Self { vector: combined }
+        Self {
+            vector: combined,
+            neural: None,
+        }
     }
 
     pub fn vector(&self) -> &[f64; EMBED_DIM] {
         &self.vector
     }
 
+    pub fn with_neural(mut self, engine: &EmbeddingEngineHandle, text: &str) -> Self {
+        self.neural = engine.embed(text);
+        self
+    }
+
     pub fn cosine_similarity(&self, other: &Self) -> f64 {
+        let hc_sim = self.cosine_hc(other);
+        match (&self.neural, &other.neural) {
+            (Some(a), Some(b)) => {
+                let neural_sim = Self::cosine_vec(a, b);
+                0.3 * hc_sim + 0.7 * neural_sim
+            }
+            _ => hc_sim,
+        }
+    }
+
+    fn cosine_hc(&self, other: &Self) -> f64 {
         let mut dot = 0.0f64;
         let mut norm_a = 0.0f64;
         let mut norm_b = 0.0f64;
@@ -373,13 +401,29 @@ impl SemanticEmbedding {
         (dot / denom).clamp(0.0, 1.0)
     }
 
+    fn cosine_vec(a: &[f64], b: &[f64]) -> f64 {
+        let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let na: f64 = a.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let nb: f64 = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if na < 1e-10 || nb < 1e-10 {
+            return 0.0;
+        }
+        (dot / (na * nb)).clamp(0.0, 1.0)
+    }
+
     pub fn euclidean_distance(&self, other: &Self) -> f64 {
         let mut sum = 0.0f64;
         for i in 0..EMBED_DIM {
             let d = self.vector[i] - other.vector[i];
             sum += d * d;
         }
-        sum.sqrt()
+        match (&self.neural, &other.neural) {
+            (Some(a), Some(b)) => {
+                let neural_dist: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
+                (sum + neural_dist).sqrt()
+            }
+            _ => sum.sqrt(),
+        }
     }
 
     pub fn update_centroid(&self, centroid: &Self, n_members: usize) -> Self {
@@ -396,7 +440,10 @@ impl SemanticEmbedding {
                 *v /= norm;
             }
         }
-        Self { vector: vec }
+        Self {
+            vector: vec,
+            neural: None,
+        }
     }
 }
 
@@ -1118,6 +1165,7 @@ impl ConceptCluster {
         }
         self.centroid = SemanticEmbedding {
             vector: new_centroid,
+            neural: None,
         };
     }
 
@@ -1591,6 +1639,7 @@ pub struct SemanticEngine {
     graph: KnowledgeGraph,
     concept_extractor: ConceptExtractor,
     tfidf_index: TfIdfIndex,
+    neural_engine: EmbeddingEngineHandle,
 }
 
 impl SemanticEngine {
@@ -1604,12 +1653,31 @@ impl SemanticEngine {
             graph: KnowledgeGraph::new(),
             concept_extractor,
             tfidf_index: TfIdfIndex::new(),
+            neural_engine: EmbeddingEngineHandle::disabled(),
+        }
+    }
+
+    pub fn new_with_neural(config: SemanticConfig, neural_engine: EmbeddingEngineHandle) -> Self {
+        let concept_extractor = ConceptExtractor::new()
+            .with_similarity_threshold(config.concept_similarity_threshold)
+            .with_min_cluster_size(config.concept_min_size);
+        Self {
+            config,
+            index: EmbeddingIndex::new(),
+            graph: KnowledgeGraph::new(),
+            concept_extractor,
+            tfidf_index: TfIdfIndex::new(),
+            neural_engine,
         }
     }
 
     pub fn index_memory(&mut self, atom: &MemoryAtom, data: &[f64]) {
         let key = AtomKey::from_atom(atom);
-        let embedding = SemanticEmbedding::from_data_and_annotation(data, atom);
+        let mut embedding = SemanticEmbedding::from_data_and_annotation(data, atom);
+        let text = self.extract_atom_text(atom);
+        if !text.trim().is_empty() && self.neural_engine.is_available() {
+            embedding = embedding.with_neural(&self.neural_engine, &text);
+        }
         let category = atom.category().map(String::from);
         self.index.upsert(key, embedding, category);
         self.index_tfidf_text(atom);
@@ -1620,6 +1688,16 @@ impl SemanticEngine {
         let embedding = SemanticEmbedding::from_data(data);
         let category = atom.category().map(String::from);
         self.index.upsert(key, embedding, category);
+    }
+
+    fn extract_atom_text(&self, atom: &MemoryAtom) -> String {
+        [
+            atom.description().unwrap_or(""),
+            atom.category().unwrap_or(""),
+            atom.source().unwrap_or(""),
+            &atom.tags().join(" "),
+        ]
+        .join(" ")
     }
 
     fn index_tfidf_text(&mut self, atom: &MemoryAtom) {
@@ -1652,7 +1730,11 @@ impl SemanticEngine {
 
         for atom in atoms {
             let key = AtomKey::from_atom(atom);
-            let embedding = SemanticEmbedding::from_annotation(atom);
+            let mut embedding = SemanticEmbedding::from_annotation(atom);
+            let text = self.extract_atom_text(atom);
+            if !text.trim().is_empty() && self.neural_engine.is_available() {
+                embedding = embedding.with_neural(&self.neural_engine, &text);
+            }
             let results = self.index.search_knn(&embedding, k);
 
             for result in results {
@@ -1699,7 +1781,11 @@ impl SemanticEngine {
     }
 
     pub fn search_similar_by_annotation(&self, atom: &MemoryAtom, k: usize) -> Vec<KnnResult> {
-        let embedding = SemanticEmbedding::from_annotation(atom);
+        let mut embedding = SemanticEmbedding::from_annotation(atom);
+        let text = self.extract_atom_text(atom);
+        if !text.trim().is_empty() && self.neural_engine.is_available() {
+            embedding = embedding.with_neural(&self.neural_engine, &text);
+        }
         self.index.search_knn(&embedding, k)
     }
 
@@ -1719,7 +1805,10 @@ impl SemanticEngine {
                 *v /= norm;
             }
         }
-        let embedding = SemanticEmbedding { vector: vec };
+        let embedding = SemanticEmbedding {
+            vector: vec,
+            neural: None,
+        };
         self.index.search_knn(&embedding, k)
     }
 
@@ -2532,5 +2621,58 @@ mod tests {
         assert_eq!(EMBED_DIM, 64);
         let emb = SemanticEmbedding::zero();
         assert_eq!(emb.vector.len(), 64);
+    }
+
+    #[test]
+    fn embedding_with_neural() {
+        let a = SemanticEmbedding {
+            vector: [0.5; EMBED_DIM],
+            neural: Some(vec![1.0; 384]),
+        };
+        let b = SemanticEmbedding {
+            vector: [0.5; EMBED_DIM],
+            neural: Some(vec![1.0; 384]),
+        };
+        let sim = a.cosine_similarity(&b);
+        assert!(
+            (sim - 1.0).abs() < 1e-10,
+            "identical neural embeddings should have similarity 1.0, got {}",
+            sim
+        );
+    }
+
+    #[test]
+    fn embedding_without_neural_fallback() {
+        let a = SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]);
+        let b = SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]);
+        assert!(a.neural.is_none());
+        assert!(b.neural.is_none());
+        let sim = a.cosine_similarity(&b);
+        assert!(
+            (sim - 1.0).abs() < 1e-10,
+            "identical data without neural should have similarity 1.0, got {}",
+            sim
+        );
+    }
+
+    #[test]
+    fn embedding_neural_none_in_partial() {
+        let a = SemanticEmbedding {
+            vector: [0.5; EMBED_DIM],
+            neural: Some(vec![1.0; 384]),
+        };
+        let b = SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]);
+        assert!(b.neural.is_none());
+        let sim = a.cosine_similarity(&b);
+        assert!(
+            (0.0..=1.0).contains(&sim),
+            "partial neural should fall back to hand-crafted, got {}",
+            sim
+        );
+        let sim_reverse = b.cosine_similarity(&a);
+        assert!(
+            (sim - sim_reverse).abs() < 1e-10,
+            "similarity should be symmetric even with partial neural"
+        );
     }
 }

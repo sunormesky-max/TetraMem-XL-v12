@@ -34,3 +34,7 @@ max_generations = 10
 [rate_limit]
 requests_per_minute = 1000
 burst = 50
+
+[neural_embed]
+enabled = true
+model_dir = "models/granite-embedding-small"

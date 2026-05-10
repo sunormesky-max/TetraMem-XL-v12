@@ -132,7 +132,7 @@ export default function Regulation() {
       if (res.success) {
         const d = res.data
         const record: RegulationRecord = {
-          id: history.length + 1,
+          id: Date.now(),
           type: `自动缩放: ${d.reason}`,
           result: `+${d.nodes_added} -${d.nodes_removed}`,
           time: '刚刚',
@@ -521,7 +521,7 @@ export default function Regulation() {
                   />
                 </div>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleCreateBackup}>
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                 轮换
               </Button>

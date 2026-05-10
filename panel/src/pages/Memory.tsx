@@ -506,7 +506,7 @@ export default function Memory() {
                             onClick={() => setShowDetail(mem)}
                           >
                             <Eye className="mr-1 h-3 w-3" />
-                            解码
+                            详情
                           </Button>
                           <Button
                             variant="ghost"

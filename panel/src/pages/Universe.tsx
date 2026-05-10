@@ -143,13 +143,27 @@ export default function Universe() {
   const allocatedEnergy = stats?.allocated_energy ?? 0
   const utilization = stats?.utilization ?? 0
 
-  const handleDelete = useCallback((id: number) => {
-    setConfirmDelete(id)
-  }, [])
-
   const showFeedback = useCallback((type: 'success' | 'error', msg: string) => {
     setFeedback({ type, msg })
     setTimeout(() => setFeedback(null), 3000)
+  }, [])
+
+  const handleDematerializeNode = useCallback(async (coord: number[]) => {
+    try {
+      const res = await api.darkDematerialize(coord)
+      if (res.success) {
+        setAllNodes((prev) => prev.filter((n) => n.coord.join(',') !== coord.join(',')))
+        showFeedback('success', `去物化成功: (${coord.join(', ')})`)
+      } else {
+        showFeedback('error', '去物化失败')
+      }
+    } catch (err) {
+      showFeedback('error', `去物化错误: ${String(err)}`)
+    }
+  }, [showFeedback])
+
+  const handleViewNode = useCallback((coord: number[]) => {
+    setNodeIdInput(coord.join(','))
   }, [])
 
   const handleMaterialize = useCallback(async () => {
@@ -461,15 +475,18 @@ export default function Universe() {
                         {confirmDelete === node.id ? (
                           <div className="flex items-center justify-end gap-2">
                             <span className="font-body text-[11px] text-[var(--text-muted)]">
-                              确认删除？
+                              确认去物化？
                             </span>
                             <Button
                               variant="destructive"
                               size="sm"
                               className="h-6 px-2 text-xs"
-                              onClick={() => setConfirmDelete(null)}
+                              onClick={() => {
+                                handleDematerializeNode(node.coord)
+                                setConfirmDelete(null)
+                              }}
                             >
-                              删除
+                              确认
                             </Button>
                             <Button
                               variant="ghost"
@@ -486,7 +503,7 @@ export default function Universe() {
                               variant="ghost"
                               size="sm"
                               className="h-6 px-2 text-xs"
-                              onClick={() => handleDelete(node.id)}
+                              onClick={() => handleViewNode(node.coord)}
                             >
                               <Eye className="mr-1 h-3 w-3" />
                               查看
@@ -495,7 +512,7 @@ export default function Universe() {
                               variant="ghost"
                               size="sm"
                               className="h-6 px-2 text-xs text-[var(--accent-red)]"
-                              onClick={() => handleDelete(node.id)}
+                              onClick={() => setConfirmDelete(node.id)}
                             >
                               <Trash2 className="mr-1 h-3 w-3" />
                               去物化
@@ -526,6 +543,7 @@ export default function Universe() {
                   key={preset.label}
                   variant="outline"
                   className="flex flex-col items-start gap-1 py-3"
+                  onClick={() => setNodeIdInput(preset.coord.join(','))}
                 >
                   <span className="font-display text-sm">{preset.label}</span>
                   <span className="font-mono text-[10px] text-[var(--text-muted)]">

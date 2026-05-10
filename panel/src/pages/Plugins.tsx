@@ -48,12 +48,6 @@ const statusConfig: Record<string, { label: string; color: string; bg: string }>
   SuspendedEnergyBudgetExceeded: { label: '能量暂停', color: 'var(--accent-amber, #f59e0b)', bg: 'rgba(245,158,11,0.15)' },
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
-}
-
 function formatTime(iso: string | null): string {
   if (!iso) return '从未'
   try {
