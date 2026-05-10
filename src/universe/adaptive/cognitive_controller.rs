@@ -441,6 +441,37 @@ async fn run_prediction_surprise_cycle(
 
     let mut pred_state = state.prediction.write().await;
 
+    let hebbian = state.hebbian.read().await;
+    let old_predictions: Vec<_> = pred_state.predictions().values().cloned().collect();
+    let mut cycle_surprises: Vec<f64> = Vec::new();
+
+    for old_pred in &old_predictions {
+        let actual_successors = hebbian.get_successors(&old_pred.source);
+        if actual_successors.is_empty() {
+            continue;
+        }
+        let surprise = PredictionEngine::compute_surprise(
+            &mut pred_state,
+            &old_pred.source,
+            &actual_successors,
+        );
+        cycle_surprises.push(surprise);
+    }
+    drop(hebbian);
+
+    if !cycle_surprises.is_empty() {
+        let avg: f64 = cycle_surprises.iter().sum::<f64>() / cycle_surprises.len() as f64;
+        let high_count = cycle_surprises.iter().filter(|&&s| s > 0.5).count();
+        tracing::info!(
+            validated = cycle_surprises.len(),
+            avg_cycle_surprise = format!("{:.4}", avg),
+            high_surprise_count = high_count,
+            running_avg = format!("{:.4}", pred_state.avg_surprise()),
+            accuracy = format!("{:.1}%", pred_state.prediction_accuracy() * 100.0),
+            "prediction-surprise cycle: validated old predictions against reality"
+        );
+    }
+
     PredictionEngine::update_predictions(&mut pred_state, predictions.clone());
 
     for pred in &predictions {
