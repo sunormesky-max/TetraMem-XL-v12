@@ -37,7 +37,7 @@ impl SemanticEmbedding {
         }
     }
 
-    pub fn from_data(data: &[f64]) -> Self {
+    fn from_data_raw(data: &[f64]) -> [f64; EMBED_DIM] {
         let mut vec = [0.0f64; EMBED_DIM];
         let n = data.len().max(1) as f64;
 
@@ -77,7 +77,7 @@ impl SemanticEmbedding {
         }
 
         let nbins = 10usize;
-        let mut bins = vec![0usize; nbins];
+        let mut bins = [0usize; 10];
         let bin_range = range.max(1e-10);
         for &v in data {
             let idx = (((v - min_val) / bin_range * (nbins as f64 - 1.0)).round() as usize)
@@ -103,24 +103,24 @@ impl SemanticEmbedding {
         vec[8] = skewness / n;
         vec[9] = kurtosis / n;
 
+        let mut sorted: Vec<f64> = Vec::new();
         if data.len() >= 4 {
             let quarter = data.len() / 4;
             let q1: f64 = data[..quarter].iter().sum::<f64>() / quarter as f64;
             let q4_start = data.len() - quarter;
             let q4: f64 = data[q4_start..].iter().sum::<f64>() / quarter as f64;
             vec[10] = q4 - q1;
-
-            let mut sorted = data.to_vec();
+            sorted = data.to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             vec[11] = sorted[data.len() / 2];
         }
 
         if data.len() > 2 {
-            let mut diffs: Vec<f64> = Vec::with_capacity(data.len() - 1);
+            let mut diffs_sum = 0.0f64;
             for i in 1..data.len() {
-                diffs.push((data[i] - data[i - 1]).abs());
+                diffs_sum += (data[i] - data[i - 1]).abs();
             }
-            vec[12] = diffs.iter().sum::<f64>() / diffs.len() as f64;
+            vec[12] = diffs_sum / (data.len() - 1) as f64;
         }
 
         vec[13] = mean * mean;
@@ -128,8 +128,10 @@ impl SemanticEmbedding {
         vec[15] = range * entropy;
 
         if data.len() >= 10 {
-            let mut sorted = data.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            if sorted.is_empty() {
+                sorted = data.to_vec();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            }
             let p25 = sorted[data.len() / 4];
             let p75 = sorted[data.len() * 3 / 4];
             vec[16] = p75 - p25;
@@ -139,7 +141,7 @@ impl SemanticEmbedding {
         }
 
         let hist_bins = HIST_DIM;
-        let mut hist = vec![0usize; hist_bins];
+        let mut hist = [0usize; HIST_DIM];
         let hist_range = range.max(1e-10);
         for &v in data {
             let idx = (((v - min_val) / hist_range * (hist_bins as f64 - 1.0)).round() as usize)
@@ -153,8 +155,8 @@ impl SemanticEmbedding {
         }
 
         if data.len() >= 4 {
-            let n = data.len() as f64;
-            let two_pi_over_n = 2.0 * std::f64::consts::PI / n;
+            let n_f = data.len() as f64;
+            let two_pi_over_n = 2.0 * std::f64::consts::PI / n_f;
             let mut fft_mag = [0.0f64; FREQ_DIM];
             for (k, slot) in fft_mag
                 .iter_mut()
@@ -163,13 +165,13 @@ impl SemanticEmbedding {
             {
                 let mut re = 0.0f64;
                 let mut im = 0.0f64;
-                let k_f64 = k as f64;
+                let angle_base = two_pi_over_n * k as f64;
                 for (t, &val) in data.iter().enumerate() {
-                    let angle = two_pi_over_n * k_f64 * t as f64;
+                    let angle = angle_base * t as f64;
                     re += val * angle.cos();
                     im -= val * angle.sin();
                 }
-                *slot = (re * re + im * im).sqrt() / n;
+                *slot = (re * re + im * im).sqrt() / n_f;
             }
             for (i, &val) in fft_mag.iter().enumerate().take(FREQ_DIM) {
                 let pos = STAT_DIM + HIST_DIM + i;
@@ -203,8 +205,7 @@ impl SemanticEmbedding {
             };
             vec[freq_base + 4] = gcd_approx;
             vec[freq_base + 5] = n_f64.ln();
-            let peak_to_peak = vec[4];
-            vec[freq_base + 6] = peak_to_peak * vec[6];
+            vec[freq_base + 6] = vec[4] * vec[6];
             vec[freq_base + 7] = mean * n_f64;
             let ratio_first = if data.len() >= 2 && data[0].abs() > 1e-10 {
                 data[1] / data[0]
@@ -227,16 +228,8 @@ impl SemanticEmbedding {
             0.0
         };
         vec[meta_base + 2] = (data.len() as f64).log2();
-        vec[meta_base + 3] = if let Some(first) = data.first() {
-            first.signum()
-        } else {
-            0.0
-        };
-        vec[meta_base + 4] = if let Some(last) = data.last() {
-            last.signum()
-        } else {
-            0.0
-        };
+        vec[meta_base + 3] = data.first().map(|v| v.signum()).unwrap_or(0.0);
+        vec[meta_base + 4] = data.last().map(|v| v.signum()).unwrap_or(0.0);
         let monotone = data.windows(2).all(|w| w[0] <= w[1]);
         let mono_decr = data.windows(2).all(|w| w[0] >= w[1]);
         vec[meta_base + 5] = if monotone {
@@ -246,13 +239,18 @@ impl SemanticEmbedding {
         } else {
             0.0
         };
-        let has_zero = data.iter().any(|v| v.abs() < 1e-10);
-        vec[meta_base + 6] = if has_zero { 1.0 } else { 0.0 };
+        vec[meta_base + 6] = if data.iter().any(|v| v.abs() < 1e-10) {
+            1.0
+        } else {
+            0.0
+        };
         let integer_ratio = data.iter().filter(|v| (v.fract()).abs() < 1e-10).count() as f64 / n;
         vec[meta_base + 7] = integer_ratio;
-        let unique_count = {
-            let mut sorted = data.to_vec();
+        if sorted.is_empty() && data.len() >= 4 {
+            sorted = data.to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        let unique_count = if !sorted.is_empty() {
             let mut count = 1;
             for i in 1..sorted.len() {
                 if (sorted[i] - sorted[i - 1]).abs() > 1e-10 {
@@ -260,26 +258,18 @@ impl SemanticEmbedding {
                 }
             }
             count as f64
+        } else {
+            1.0
         };
         vec[meta_base + 8] = unique_count / n;
         vec[meta_base + 9] = mean.signum() * std_dev;
         vec[meta_base + 10] = vec[7] * vec[8];
         vec[meta_base + 11] = vec[4] / (std_dev + 1e-10);
 
-        let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
-        if norm > 1e-10 {
-            for v in &mut vec {
-                *v /= norm;
-            }
-        }
-
-        Self {
-            vector: vec,
-            neural: None,
-        }
+        vec
     }
 
-    pub fn from_annotation(atom: &MemoryAtom) -> Self {
+    fn from_annotation_raw(atom: &MemoryAtom) -> [f64; EMBED_DIM] {
         let mut vec = [0.0f64; EMBED_DIM];
 
         let text_parts: Vec<&str> = vec![
@@ -308,11 +298,8 @@ impl SemanticEmbedding {
             }
         }
         vec[0] = (cat_hash % 1000) as f64;
-
         vec[1] = atom.tags().len() as f64;
-
-        let desc_len = atom.description().map(|d| d.len() as f64).unwrap_or(0.0);
-        vec[2] = desc_len;
+        vec[2] = atom.description().map(|d| d.len() as f64).unwrap_or(0.0);
 
         let mut src_hash: u64 = 0;
         if let Some(s) = atom.source() {
@@ -321,7 +308,6 @@ impl SemanticEmbedding {
             }
         }
         vec[3] = (src_hash % 1000) as f64;
-
         vec[4] = atom.importance();
         vec[5] = atom.data_dim() as f64;
 
@@ -330,13 +316,31 @@ impl SemanticEmbedding {
         let tag_copy_len = 6.min(tag_emb.len());
         vec[6..(6 + tag_copy_len)].copy_from_slice(&tag_emb[..tag_copy_len]);
 
+        vec
+    }
+
+    pub fn from_data(data: &[f64]) -> Self {
+        let mut vec = Self::from_data_raw(data);
         let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm > 1e-10 {
             for v in &mut vec {
                 *v /= norm;
             }
         }
+        Self {
+            vector: vec,
+            neural: None,
+        }
+    }
 
+    pub fn from_annotation(atom: &MemoryAtom) -> Self {
+        let mut vec = Self::from_annotation_raw(atom);
+        let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm > 1e-10 {
+            for v in &mut vec {
+                *v /= norm;
+            }
+        }
         Self {
             vector: vec,
             neural: None,
@@ -348,7 +352,7 @@ impl SemanticEmbedding {
         let ann_emb = Self::from_annotation(atom);
 
         let mut combined = [0.0f64; EMBED_DIM];
-        for (i, slot) in combined.iter_mut().enumerate().take(EMBED_DIM) {
+        for (i, slot) in combined.iter_mut().enumerate() {
             *slot = 0.6 * data_emb.vector[i] + 0.4 * ann_emb.vector[i];
         }
 
@@ -528,22 +532,59 @@ impl EmbeddingIndex {
     }
 
     pub fn search_knn(&self, query: &SemanticEmbedding, k: usize) -> Vec<KnnResult> {
-        let mut scored: Vec<KnnResult> = self
-            .entries
-            .iter()
-            .map(|e| KnnResult {
-                atom_key: e.atom_key.clone(),
-                similarity: query.cosine_similarity(&e.embedding),
-                distance: query.euclidean_distance(&e.embedding),
-            })
-            .collect();
-        scored.sort_by(|a, b| {
+        if k == 0 || self.entries.is_empty() {
+            return Vec::new();
+        }
+        let k = k.min(self.entries.len());
+        let mut top_k: Vec<KnnResult> = Vec::with_capacity(k + 1);
+        for e in &self.entries {
+            let sim = query.cosine_similarity(&e.embedding);
+            if top_k.len() < k {
+                top_k.push(KnnResult {
+                    atom_key: e.atom_key.clone(),
+                    similarity: sim,
+                    distance: query.euclidean_distance(&e.embedding),
+                });
+                if top_k.len() == k {
+                    top_k.sort_by(|a, b| {
+                        a.similarity
+                            .partial_cmp(&b.similarity)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+            } else if sim > top_k[0].similarity {
+                top_k[0] = KnnResult {
+                    atom_key: e.atom_key.clone(),
+                    similarity: sim,
+                    distance: query.euclidean_distance(&e.embedding),
+                };
+                let mut i = 0;
+                loop {
+                    let left = 2 * i + 1;
+                    if left >= k {
+                        break;
+                    }
+                    let right = left + 1;
+                    let child = if right < k && top_k[right].similarity < top_k[left].similarity {
+                        right
+                    } else {
+                        left
+                    };
+                    if top_k[child].similarity < top_k[i].similarity {
+                        top_k.swap(i, child);
+                        i = child;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        top_k.sort_by(|a, b| {
             b.similarity
                 .partial_cmp(&a.similarity)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        scored.truncate(k);
-        scored
+        top_k
     }
 
     pub fn search_knn_with_scores(

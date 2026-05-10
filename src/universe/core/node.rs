@@ -200,13 +200,16 @@ impl DarkUniverse {
         if self.nodes.len() >= self.max_nodes {
             return Err(EnergyError::AlreadyOccupied);
         }
-        if self.nodes.contains_key(&coord) {
-            return Err(EnergyError::AlreadyOccupied);
+        use std::collections::hash_map::Entry;
+        match self.nodes.entry(coord) {
+            Entry::Occupied(_) => Err(EnergyError::AlreadyOccupied),
+            Entry::Vacant(entry) => {
+                let allocated = self.pool.allocate(energy_amount)?;
+                let field = EnergyField::uniform(allocated).unwrap();
+                entry.insert(DarkNode::new(coord, field));
+                Ok(())
+            }
         }
-        let allocated = self.pool.allocate(energy_amount)?;
-        let field = EnergyField::uniform(allocated).unwrap();
-        self.nodes.insert(coord, DarkNode::new(coord, field));
-        Ok(())
     }
 
     pub fn materialize_biased(
@@ -218,13 +221,16 @@ impl DarkUniverse {
         if self.nodes.len() >= self.max_nodes {
             return Err(EnergyError::AlreadyOccupied);
         }
-        if self.nodes.contains_key(&coord) {
-            return Err(EnergyError::AlreadyOccupied);
+        use std::collections::hash_map::Entry;
+        match self.nodes.entry(coord) {
+            Entry::Occupied(_) => Err(EnergyError::AlreadyOccupied),
+            Entry::Vacant(entry) => {
+                let allocated = self.pool.allocate(energy_amount)?;
+                let field = EnergyField::with_physical_bias(allocated, physical_ratio).unwrap();
+                entry.insert(DarkNode::new(coord, field));
+                Ok(())
+            }
         }
-        let allocated = self.pool.allocate(energy_amount)?;
-        let field = EnergyField::with_physical_bias(allocated, physical_ratio).unwrap();
-        self.nodes.insert(coord, DarkNode::new(coord, field));
-        Ok(())
     }
 
     pub fn materialize_field(
@@ -235,12 +241,15 @@ impl DarkUniverse {
         if self.nodes.len() >= self.max_nodes {
             return Err(EnergyError::AlreadyOccupied);
         }
-        if self.nodes.contains_key(&coord) {
-            return Err(EnergyError::AlreadyOccupied);
+        use std::collections::hash_map::Entry;
+        match self.nodes.entry(coord) {
+            Entry::Occupied(_) => Err(EnergyError::AlreadyOccupied),
+            Entry::Vacant(entry) => {
+                self.pool.allocate(field.total())?;
+                entry.insert(DarkNode::new(coord, field));
+                Ok(())
+            }
         }
-        self.pool.allocate(field.total())?;
-        self.nodes.insert(coord, DarkNode::new(coord, field));
-        Ok(())
     }
 
     pub fn dematerialize(&mut self, coord: &Coord7D) -> Option<EnergyField> {

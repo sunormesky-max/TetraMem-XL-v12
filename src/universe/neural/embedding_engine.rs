@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use ort::session::Session;
 use ort::value::Tensor;
@@ -20,6 +20,41 @@ use tracing::{debug, info, warn};
 
 const NEURAL_DIM: usize = 384;
 const MAX_INPUT_TOKENS: usize = 512;
+const CACHE_CAPACITY: usize = 256;
+
+struct LruCache<K, V> {
+    entries: Vec<(K, V)>,
+    capacity: usize,
+}
+
+impl<K: PartialEq, V> LruCache<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&mut self, key: &K) -> Option<&V> {
+        if let Some(idx) = self.entries.iter().position(|(k, _)| k == key) {
+            let entry = self.entries.remove(idx);
+            self.entries.push(entry);
+            Some(&self.entries.last().unwrap().1)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if let Some(idx) = self.entries.iter().position(|(k, _)| k == &key) {
+            self.entries.remove(idx);
+        }
+        if self.entries.len() >= self.capacity {
+            self.entries.remove(0);
+        }
+        self.entries.push((key, value));
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EmbeddingError {
@@ -265,8 +300,7 @@ impl BpeTokenizer {
             let mut best_pos = None;
 
             for i in 0..syms.len().saturating_sub(1) {
-                let key = (syms[i].clone(), syms[i + 1].clone());
-                if let Some(&rank) = self.merge_rank.get(&key) {
+                if let Some(&rank) = self.merge_rank.get(&(syms[i].clone(), syms[i + 1].clone())) {
                     if rank < best_rank {
                         best_rank = rank;
                         best_pos = Some(i);
@@ -509,12 +543,16 @@ fn validate_onnx_header(path: &Path) -> Result<(), EmbeddingError> {
 }
 
 pub struct EmbeddingEngineHandle {
-    inner: Option<Arc<Mutex<EmbeddingEngine>>>,
+    inner: Option<Arc<RwLock<EmbeddingEngine>>>,
+    cache: RwLock<LruCache<String, Vec<f64>>>,
 }
 
 impl EmbeddingEngineHandle {
     pub fn disabled() -> Self {
-        Self { inner: None }
+        Self {
+            inner: None,
+            cache: RwLock::new(LruCache::new(CACHE_CAPACITY)),
+        }
     }
 
     pub fn try_load(model_dir: &Path) -> Self {
@@ -522,23 +560,39 @@ impl EmbeddingEngineHandle {
             Ok(engine) => {
                 info!("Neural embedding engine loaded successfully");
                 Self {
-                    inner: Some(Arc::new(Mutex::new(engine))),
+                    inner: Some(Arc::new(RwLock::new(engine))),
+                    cache: RwLock::new(LruCache::new(CACHE_CAPACITY)),
                 }
             }
             Err(e) => {
                 warn!("Neural embedding engine unavailable: {e}");
                 warn!("Falling back to hand-crafted 64-dim features only");
-                Self { inner: None }
+                Self {
+                    inner: None,
+                    cache: RwLock::new(LruCache::new(CACHE_CAPACITY)),
+                }
             }
         }
     }
 
     pub fn embed(&self, text: &str) -> Option<Vec<f64>> {
+        {
+            let mut cache = self.cache.write().unwrap();
+            if let Some(cached) = cache.get(&text.to_string()) {
+                return Some(cached.clone());
+            }
+        }
         match &self.inner {
             Some(engine_arc) => {
-                let mut engine = engine_arc.lock().unwrap();
+                let mut engine = engine_arc.write().unwrap();
                 match engine.embed(text) {
-                    Ok(v) => Some(v),
+                    Ok(v) => {
+                        self.cache
+                            .write()
+                            .unwrap()
+                            .insert(text.to_string(), v.clone());
+                        Some(v)
+                    }
                     Err(e) => {
                         warn!("Neural embedding failed: {e}");
                         None
@@ -674,7 +728,8 @@ mod tests {
         }
         let engine = engine_result.expect("Engine should load");
         let handle = EmbeddingEngineHandle {
-            inner: Some(Arc::new(Mutex::new(engine))),
+            inner: Some(Arc::new(RwLock::new(engine))),
+            cache: RwLock::new(LruCache::new(CACHE_CAPACITY)),
         };
 
         let result = handle.embed("The weather is lovely today.");

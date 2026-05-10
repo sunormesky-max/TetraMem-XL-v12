@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::fmt::Debug;
 use std::io;
@@ -187,8 +187,10 @@ pub struct StateMachineInner {
     last_applied: Option<LogIdOf<TypeName>>,
     #[serde(skip)]
     snapshot: Option<Vec<u8>>,
-    applied_commands: Vec<(String, serde_json::Value)>,
+    applied_commands: VecDeque<(String, serde_json::Value)>,
 }
+
+const MAX_APPLIED_COMMANDS: usize = 1024;
 
 impl StateMachineInner {
     pub fn applied_count(&self) -> usize {
@@ -465,8 +467,11 @@ impl RaftStateMachine<TypeName> for StateMachineStore {
             let mut sm = self.lock().map_err(lock_failed)?;
             sm.last_applied = Some(entry.log_id());
             if let EntryPayload::Normal(ref req) = entry.payload {
+                if sm.applied_commands.len() >= MAX_APPLIED_COMMANDS {
+                    sm.applied_commands.pop_front();
+                }
                 sm.applied_commands
-                    .push((req.action.clone(), req.data.clone()));
+                    .push_back((req.action.clone(), req.data.clone()));
             }
             drop(sm);
             if let Some(r) = responder {

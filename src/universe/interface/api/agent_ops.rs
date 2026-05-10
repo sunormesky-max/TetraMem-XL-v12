@@ -21,6 +21,20 @@ pub async fn remember(
         return Err(AppError::BadRequest("content is required".to_string()));
     }
 
+    super::types::validate_field_len("content", &content, super::types::MAX_STRING_FIELD_LEN)
+        .map_err(AppError::BadRequest)?;
+
+    for tag in &req.tags {
+        super::types::validate_field_len("tag", tag, super::types::MAX_TAG_LEN)
+            .map_err(AppError::BadRequest)?;
+    }
+    if req.tags.len() > super::types::MAX_TAGS_COUNT {
+        return Err(AppError::BadRequest(format!(
+            "too many tags (max {})",
+            super::types::MAX_TAGS_COUNT
+        )));
+    }
+
     let tags = req.tags;
     let category = req.category.unwrap_or_else(|| "general".to_string());
     let importance = req.importance;
@@ -161,6 +175,12 @@ pub async fn recall(
     State(state): State<SharedState>,
     Json(req): Json<RecallRequest>,
 ) -> Result<Json<ApiResponse<Value>>, AppError> {
+    if req.query.trim().is_empty() {
+        return Err(AppError::BadRequest("query is required".to_string()));
+    }
+    super::types::validate_field_len("query", &req.query, super::types::MAX_STRING_FIELD_LEN)
+        .map_err(AppError::BadRequest)?;
+
     let limit = req.limit.clamp(1, 100);
     let query_data = nlp::text_to_embedding(&req.query, 0.5);
 
@@ -271,6 +291,12 @@ pub async fn associate(
     State(state): State<SharedState>,
     Json(req): Json<AssociateRequest>,
 ) -> Result<Json<ApiResponse<Value>>, AppError> {
+    if req.topic.trim().is_empty() {
+        return Err(AppError::BadRequest("topic is required".to_string()));
+    }
+    super::types::validate_field_len("topic", &req.topic, super::types::MAX_STRING_FIELD_LEN)
+        .map_err(AppError::BadRequest)?;
+
     let depth = req.depth.clamp(1, 20);
     let limit = req.limit.clamp(1, 50);
 
@@ -400,6 +426,12 @@ pub async fn context(
     State(state): State<SharedState>,
     Json(req): Json<ContextRequest>,
 ) -> Result<Json<ApiResponse<Value>>, AppError> {
+    super::types::validate_field_len("action", &req.action, 64).map_err(AppError::BadRequest)?;
+    if let Some(ref content) = req.content {
+        super::types::validate_field_len("content", content, super::types::MAX_STRING_FIELD_LEN)
+            .map_err(AppError::BadRequest)?;
+    }
+
     match req.action.as_str() {
         "status" => {
             let store = state.memory_store.read().await;

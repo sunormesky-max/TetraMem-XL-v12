@@ -4,7 +4,8 @@
 // NLP utilities: TF-IDF text-to-embedding, synonym buckets, contradiction detection
 
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use crate::universe::coord::Coord7D;
 use crate::universe::hebbian::HebbianMemory;
@@ -12,6 +13,12 @@ use crate::universe::memory::MemoryAtom;
 use crate::universe::node::DarkUniverse;
 
 const TFIDF_DIM: usize = 128;
+
+static STOP_WORDS_SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+fn stop_words() -> &'static HashSet<&'static str> {
+    STOP_WORDS_SET.get_or_init(|| STOP_WORDS.iter().copied().collect())
+}
 
 const STOP_WORDS: &[&str] = &[
     "the",
@@ -185,12 +192,13 @@ const STOP_WORDS: &[&str] = &[
 fn tokenize(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
     let mut tokens = Vec::new();
+    let sw = stop_words();
 
     for word in lower.split(|c: char| !c.is_alphanumeric()) {
         if word.is_empty() || word.len() < 2 {
             continue;
         }
-        if STOP_WORDS.contains(&word) {
+        if sw.contains(word) {
             continue;
         }
         tokens.push(word.to_string());
@@ -350,6 +358,7 @@ pub fn text_to_tfidf_embedding(text: &str, index: &TfIdfIndex) -> Vec<f64> {
 pub fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
     let dim = TFIDF_DIM;
     let mut vec = vec![0.0f64; dim];
+    let sw = stop_words();
 
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower
@@ -358,7 +367,7 @@ pub fn text_to_embedding(text: &str, importance: f64) -> Vec<f64> {
         .collect();
 
     for word in &words {
-        if STOP_WORDS.contains(word) {
+        if sw.contains(word) {
             continue;
         }
 
@@ -464,7 +473,249 @@ pub fn extract_subwords(word: &str) -> Vec<String> {
     subs
 }
 
-pub fn synonym_bucket(word: &str) -> Option<u64> {
+static SYNONYM_MAP: OnceLock<HashMap<String, u64>> = OnceLock::new();
+
+fn synonym_map() -> &'static HashMap<String, u64> {
+    SYNONYM_MAP.get_or_init(|| {
+        let buckets: &[&[&str]] = &[
+            &[
+                "prefer",
+                "like",
+                "love",
+                "enjoy",
+                "favor",
+                "fancy",
+                "adore",
+                "appreciate",
+            ],
+            &["dislike", "hate", "detest", "loathe", "abhor", "despise"],
+            &[
+                "good",
+                "great",
+                "excellent",
+                "fine",
+                "nice",
+                "wonderful",
+                "amazing",
+                "awesome",
+                "fantastic",
+            ],
+            &[
+                "bad", "poor", "terrible", "awful", "horrible", "dreadful", "worst",
+            ],
+            &[
+                "big", "large", "huge", "vast", "enormous", "massive", "giant", "immense",
+            ],
+            &[
+                "small", "tiny", "little", "mini", "micro", "compact", "minor",
+            ],
+            &[
+                "fast",
+                "quick",
+                "rapid",
+                "swift",
+                "speedy",
+                "prompt",
+                "efficient",
+                "hasty",
+            ],
+            &[
+                "slow",
+                "sluggish",
+                "gradual",
+                "leisurely",
+                "unhurried",
+                "steady",
+            ],
+            &[
+                "happy",
+                "glad",
+                "joyful",
+                "cheerful",
+                "pleased",
+                "delighted",
+                "content",
+            ],
+            &[
+                "sad",
+                "unhappy",
+                "sorrowful",
+                "melancholy",
+                "gloomy",
+                "depressed",
+                "miserable",
+            ],
+            &[
+                "important",
+                "significant",
+                "crucial",
+                "vital",
+                "essential",
+                "critical",
+                "key",
+            ],
+            &[
+                "think", "believe", "consider", "suppose", "assume", "guess", "reckon",
+            ],
+            &[
+                "know",
+                "understand",
+                "comprehend",
+                "grasp",
+                "realize",
+                "recognize",
+            ],
+            &["use", "utilize", "employ", "apply", "operate", "leverage"],
+            &[
+                "make",
+                "create",
+                "build",
+                "construct",
+                "produce",
+                "generate",
+                "develop",
+            ],
+            &["help", "assist", "support", "aid", "facilitate", "enable"],
+            &["need", "require", "demand", "want", "desire", "wish"],
+            &[
+                "change",
+                "modify",
+                "alter",
+                "adjust",
+                "transform",
+                "update",
+                "convert",
+            ],
+            &["start", "begin", "commence", "initiate", "launch", "open"],
+            &[
+                "stop",
+                "end",
+                "finish",
+                "complete",
+                "conclude",
+                "terminate",
+                "close",
+                "halt",
+            ],
+            &[
+                "move",
+                "shift",
+                "transfer",
+                "relocate",
+                "migrate",
+                "transition",
+            ],
+            &["grow", "expand", "increase", "enlarge", "extend", "amplify"],
+            &[
+                "reduce", "decrease", "shrink", "diminish", "minimize", "lower", "cut",
+            ],
+            &[
+                "show",
+                "display",
+                "present",
+                "reveal",
+                "exhibit",
+                "demonstrate",
+            ],
+            &["hide", "conceal", "mask", "cover", "obscure", "cloak"],
+            &[
+                "connect",
+                "link",
+                "join",
+                "associate",
+                "bind",
+                "attach",
+                "relate",
+            ],
+            &[
+                "error", "bug", "fault", "defect", "issue", "problem", "mistake",
+            ],
+            &[
+                "fix", "repair", "correct", "resolve", "patch", "solve", "debug",
+            ],
+            &[
+                "new", "fresh", "recent", "latest", "modern", "current", "novel",
+            ],
+            &[
+                "old", "ancient", "outdated", "legacy", "obsolete", "vintage",
+            ],
+            &[
+                "simple",
+                "easy",
+                "basic",
+                "straightforward",
+                "plain",
+                "elementary",
+            ],
+            &[
+                "complex",
+                "complicated",
+                "intricate",
+                "elaborate",
+                "sophisticated",
+            ],
+            &[
+                "safe",
+                "secure",
+                "protected",
+                "guarded",
+                "reliable",
+                "stable",
+            ],
+            &[
+                "danger",
+                "risk",
+                "threat",
+                "hazard",
+                "peril",
+                "vulnerability",
+            ],
+            &["work", "function", "operate", "perform", "run", "execute"],
+            &[
+                "system",
+                "platform",
+                "framework",
+                "engine",
+                "architecture",
+                "infrastructure",
+            ],
+            &[
+                "data",
+                "information",
+                "knowledge",
+                "facts",
+                "details",
+                "records",
+            ],
+            &["user", "client", "customer", "person", "human", "people"],
+            &["dark", "night", "shadow", "dim", "black", "obscure"],
+            &["light", "bright", "luminous", "clear", "vivid", "radiant"],
+            &[
+                "mode",
+                "setting",
+                "option",
+                "preference",
+                "configuration",
+                "theme",
+            ],
+            &["memory", "recall", "remember", "store", "retain", "record"],
+            &["learn", "study", "acquire", "absorb", "train", "educate"],
+            &[
+                "search", "find", "look", "seek", "discover", "explore", "query",
+            ],
+        ];
+        let mut map = HashMap::new();
+        for (i, bucket) in buckets.iter().enumerate() {
+            let val = i as u64 * 17 + 3;
+            for &word in *bucket {
+                map.insert(word.to_string(), val);
+            }
+        }
+        map
+    })
+}
+
+fn synonym_prefix_match(word: &str) -> Option<u64> {
     let buckets: &[&[&str]] = &[
         &[
             "prefer",
@@ -498,9 +749,23 @@ pub fn synonym_bucket(word: &str) -> Option<u64> {
             "small", "tiny", "little", "mini", "micro", "compact", "minor",
         ],
         &[
-            "fast", "quick", "rapid", "swift", "speedy", "prompt", "hasty",
+            "fast",
+            "quick",
+            "rapid",
+            "swift",
+            "speedy",
+            "prompt",
+            "efficient",
+            "hasty",
         ],
-        &["slow", "sluggish", "gradual", "steady", "leisurely"],
+        &[
+            "slow",
+            "sluggish",
+            "gradual",
+            "leisurely",
+            "unhurried",
+            "steady",
+        ],
         &[
             "happy",
             "glad",
@@ -513,10 +778,11 @@ pub fn synonym_bucket(word: &str) -> Option<u64> {
         &[
             "sad",
             "unhappy",
+            "sorrowful",
+            "melancholy",
+            "gloomy",
             "depressed",
             "miserable",
-            "gloomy",
-            "sorrowful",
         ],
         &[
             "important",
@@ -559,7 +825,7 @@ pub fn synonym_bucket(word: &str) -> Option<u64> {
             "update",
             "convert",
         ],
-        &["start", "begin", "launch", "initiate", "commence", "open"],
+        &["start", "begin", "commence", "initiate", "launch", "open"],
         &[
             "stop",
             "end",
@@ -567,40 +833,20 @@ pub fn synonym_bucket(word: &str) -> Option<u64> {
             "complete",
             "conclude",
             "terminate",
+            "close",
             "halt",
         ],
-        &["work", "function", "operate", "perform", "run", "execute"],
         &[
-            "system",
-            "platform",
-            "framework",
-            "engine",
-            "architecture",
-            "infrastructure",
+            "move",
+            "shift",
+            "transfer",
+            "relocate",
+            "migrate",
+            "transition",
         ],
+        &["grow", "expand", "increase", "enlarge", "extend", "amplify"],
         &[
-            "data",
-            "information",
-            "knowledge",
-            "facts",
-            "details",
-            "records",
-        ],
-        &["user", "client", "customer", "person", "human", "people"],
-        &["dark", "night", "shadow", "dim", "black", "obscure"],
-        &["light", "bright", "luminous", "clear", "vivid", "radiant"],
-        &[
-            "mode",
-            "setting",
-            "option",
-            "preference",
-            "configuration",
-            "theme",
-        ],
-        &["memory", "recall", "remember", "store", "retain", "record"],
-        &["learn", "study", "acquire", "absorb", "train", "educate"],
-        &[
-            "search", "find", "look", "seek", "discover", "explore", "query",
+            "reduce", "decrease", "shrink", "diminish", "minimize", "lower", "cut",
         ],
         &[
             "show",
@@ -663,20 +909,55 @@ pub fn synonym_bucket(word: &str) -> Option<u64> {
             "peril",
             "vulnerability",
         ],
+        &["work", "function", "operate", "perform", "run", "execute"],
+        &[
+            "system",
+            "platform",
+            "framework",
+            "engine",
+            "architecture",
+            "infrastructure",
+        ],
+        &[
+            "data",
+            "information",
+            "knowledge",
+            "facts",
+            "details",
+            "records",
+        ],
+        &["user", "client", "customer", "person", "human", "people"],
+        &["dark", "night", "shadow", "dim", "black", "obscure"],
+        &["light", "bright", "luminous", "clear", "vivid", "radiant"],
+        &[
+            "mode",
+            "setting",
+            "option",
+            "preference",
+            "configuration",
+            "theme",
+        ],
+        &["memory", "recall", "remember", "store", "retain", "record"],
+        &["learn", "study", "acquire", "absorb", "train", "educate"],
+        &[
+            "search", "find", "look", "seek", "discover", "explore", "query",
+        ],
     ];
-
     for (i, bucket) in buckets.iter().enumerate() {
-        if bucket.contains(&word) {
-            return Some(i as u64 * 17 + 3);
-        }
         if bucket.iter().any(|&w| {
             word.len() >= 4 && w.len() >= 4 && (word.starts_with(w) || w.starts_with(word))
         }) {
             return Some(i as u64 * 17 + 3);
         }
     }
-
     None
+}
+
+pub fn synonym_bucket(word: &str) -> Option<u64> {
+    synonym_map()
+        .get(word)
+        .copied()
+        .or_else(|| synonym_prefix_match(word))
 }
 
 pub fn detect_contradictions(

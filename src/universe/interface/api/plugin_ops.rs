@@ -21,6 +21,15 @@ pub async fn plugin_install(
     State(state): State<SharedState>,
     Json(req): Json<InstallRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    const MAX_BASE64_SIZE: usize = 4 * 1024 * 1024;
+
+    if req.wasm_base64.len() > MAX_BASE64_SIZE {
+        return Err(AppError::BadRequest(format!(
+            "WASM base64 payload exceeds {} bytes",
+            MAX_BASE64_SIZE
+        )));
+    }
+
     use base64::Engine;
     let wasm_bytes = base64::engine::general_purpose::STANDARD
         .decode(&req.wasm_base64)

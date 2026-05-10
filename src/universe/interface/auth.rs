@@ -241,6 +241,7 @@ pub struct LoginResponse {
 
 pub struct TokenBlocklist {
     revoked: std::collections::HashSet<String>,
+    order: std::collections::VecDeque<String>,
     max_size: usize,
 }
 
@@ -248,15 +249,22 @@ impl TokenBlocklist {
     pub fn new(max_size: usize) -> Self {
         Self {
             revoked: std::collections::HashSet::new(),
+            order: std::collections::VecDeque::new(),
             max_size,
         }
     }
 
     pub fn revoke(&mut self, jti: &str) {
+        if self.revoked.contains(jti) {
+            return;
+        }
         if self.revoked.len() >= self.max_size {
-            self.revoked.clear();
+            if let Some(oldest) = self.order.pop_front() {
+                self.revoked.remove(&oldest);
+            }
         }
         self.revoked.insert(jti.to_string());
+        self.order.push_back(jti.to_string());
     }
 
     pub fn is_revoked(&self, jti: &str) -> bool {
