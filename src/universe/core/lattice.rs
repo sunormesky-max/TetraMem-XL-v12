@@ -73,23 +73,39 @@ impl Lattice {
             Parity::Even => {
                 for mask in 0u32..128 {
                     let mut basis = center_basis;
+                    let mut valid = true;
                     for (d, b) in basis.iter_mut().enumerate() {
                         if (mask >> d) & 1 == 1 {
-                            *b -= 1;
+                            if let Some(v) = (*b).checked_sub(1) {
+                                *b = v;
+                            } else {
+                                valid = false;
+                                break;
+                            }
                         }
                     }
-                    neighbors.push(Coord7D::new_odd(basis));
+                    if valid {
+                        neighbors.push(Coord7D::new_odd(basis));
+                    }
                 }
             }
             Parity::Odd => {
                 for mask in 0u32..128 {
                     let mut basis = center_basis;
+                    let mut valid = true;
                     for (d, b) in basis.iter_mut().enumerate() {
                         if (mask >> d) & 1 == 1 {
-                            *b += 1;
+                            if let Some(v) = (*b).checked_add(1) {
+                                *b = v;
+                            } else {
+                                valid = false;
+                                break;
+                            }
                         }
                     }
-                    neighbors.push(Coord7D::new_even(basis));
+                    if valid {
+                        neighbors.push(Coord7D::new_even(basis));
+                    }
                 }
             }
         }

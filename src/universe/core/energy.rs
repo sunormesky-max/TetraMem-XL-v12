@@ -386,6 +386,7 @@ impl EnergyField {
         }
         let remainder = actual - total_coupled;
         self.dims[source_dim] += remainder;
+        self.sanitize();
         actual
     }
 }

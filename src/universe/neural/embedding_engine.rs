@@ -525,7 +525,20 @@ impl EmbeddingEngine {
     }
 }
 
+const MAX_ONNX_FILE_SIZE: u64 = 200 * 1024 * 1024;
+
 fn validate_onnx_header(path: &Path) -> Result<(), EmbeddingError> {
+    let metadata =
+        std::fs::metadata(path).map_err(|e| EmbeddingError::NotLoaded(format!("stat: {e}")))?;
+
+    if metadata.len() > MAX_ONNX_FILE_SIZE {
+        return Err(EmbeddingError::NotLoaded(format!(
+            "ONNX file too large: {} bytes (max {} bytes)",
+            metadata.len(),
+            MAX_ONNX_FILE_SIZE
+        )));
+    }
+
     let bytes = std::fs::read(path).map_err(|e| EmbeddingError::NotLoaded(format!("read: {e}")))?;
 
     if bytes.len() < 4 {

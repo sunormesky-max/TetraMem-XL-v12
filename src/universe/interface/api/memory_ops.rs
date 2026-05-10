@@ -472,6 +472,12 @@ pub async fn semantic_search(
     State(state): State<SharedState>,
     Json(req): Json<SemanticSearchRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
+    if req.data.len() > super::types::MAX_DATA_DIM {
+        return Json(ApiResponse::err(format!(
+            "data exceeds max dimension {}",
+            super::types::MAX_DATA_DIM
+        )));
+    }
     let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
     let k = req.k.clamp(1, 100);

@@ -148,10 +148,14 @@ pub async fn plugin_execute(
 
     let sandbox = crate::universe::plugins::sandbox::WasmSandbox::new();
     let req_clone = req.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        sandbox.execute(&wasm_bytes, &req_clone, &permissions, energy_limit)
-    })
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || {
+            sandbox.execute(&wasm_bytes, &req_clone, &permissions, energy_limit)
+        }),
+    )
     .await
+    .map_err(|_| AppError::Internal("plugin execution timed out (30s)".into()))?
     .map_err(|e| AppError::Internal(format!("plugin execution task failed: {}", e)))?;
 
     {
