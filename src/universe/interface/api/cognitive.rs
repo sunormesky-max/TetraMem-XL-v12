@@ -622,3 +622,14 @@ pub async fn meta_cognitive_state(
         Err(e) => Json(ApiResponse::err(e.to_string())),
     }
 }
+
+pub async fn prediction_status(
+    State(state): State<SharedState>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let pred = state.prediction.read().await;
+    Json(ApiResponse::ok(serde_json::json!({
+        "active_predictions": pred.active_prediction_count(),
+        "avg_surprise": pred.avg_surprise(),
+        "prediction_accuracy": pred.prediction_accuracy(),
+    })))
+}

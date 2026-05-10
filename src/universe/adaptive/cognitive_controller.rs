@@ -379,6 +379,8 @@ async fn run_maintenance_inner(
             .await;
     }
 
+    run_prediction_surprise_cycle(state).await;
+
     tracing::debug!(
         cycle,
         elapsed_ms = format!("{:.0}", start.elapsed().as_secs_f64() * 1000.0),
@@ -388,6 +390,70 @@ async fn run_maintenance_inner(
     );
 
     Ok(())
+}
+
+async fn run_prediction_surprise_cycle(state: &Arc<AppState>) {
+    use crate::universe::cognitive::prediction::PredictionEngine;
+    use crate::universe::cognitive::surprise::SurpriseComputer;
+
+    let hebbian = state.hebbian.read().await;
+    let store = state.memory_store.read().await;
+
+    let active_anchors: Vec<crate::universe::coord::Coord7D> =
+        store.memories.iter().map(|m| *m.anchor()).collect();
+    drop(store);
+
+    if active_anchors.is_empty() {
+        drop(hebbian);
+        return;
+    }
+
+    let predictions = PredictionEngine::generate_predictions(&hebbian, &active_anchors);
+    drop(hebbian);
+
+    let mut pred_state = state.prediction.write().await;
+
+    PredictionEngine::update_predictions(&mut pred_state, predictions.clone());
+
+    for pred in &predictions {
+        state.event_sender.publish(
+            crate::universe::safety::events::UniverseEvent::PredictionMade {
+                source: pred.source.basis(),
+                predicted_count: pred.predicted_next.len(),
+                confidence: pred.confidence,
+            },
+        );
+    }
+
+    let mut hebbian = state.hebbian.write().await;
+    let store = state.memory_store.read().await;
+    let adjustments = SurpriseComputer::apply_prediction_error_correction(
+        &mut hebbian,
+        &pred_state,
+        &store.memories,
+    );
+    drop(store);
+    drop(hebbian);
+
+    if adjustments > 0 {
+        state.event_sender.publish(
+            crate::universe::safety::events::UniverseEvent::PredictionCorrected {
+                hebbian_adjustments: adjustments,
+                accuracy: pred_state.prediction_accuracy(),
+            },
+        );
+    }
+
+    if pred_state.avg_surprise() > 0.5 {
+        tracing::info!(
+            avg_surprise = format!("{:.3}", pred_state.avg_surprise()),
+            accuracy = format!("{:.1}%", pred_state.prediction_accuracy() * 100.0),
+            predictions = pred_state.active_prediction_count(),
+            "prediction-surprise cycle: high surprise detected"
+        );
+    }
+
+    drop(pred_state);
 }
 
 async fn restore_identity_importance(state: &Arc<AppState>) {

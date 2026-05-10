@@ -32,8 +32,8 @@ use super::cognitive::{
     clustering_maintenance, clustering_status, constitution_status, detect_contradictions,
     events_status, fire_pulse, get_attention_map, get_cognitive_state, get_dream_insights,
     identity_profile, memory_aging, meta_cognitive_state, perception_replenish, perception_status,
-    reflect, regulate, run_dream, semantic_extract_concepts, semantic_index_all, semantic_status,
-    watchdog_checkup, watchdog_status,
+    prediction_status, reflect, regulate, run_dream, semantic_extract_concepts, semantic_index_all,
+    semantic_status, watchdog_checkup, watchdog_status,
 };
 use super::dark_dimension::{
     dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
@@ -370,6 +370,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/cognitive/reflect", post(reflect))
         .route("/cognitive/identity", get(identity_profile))
         .route("/cognitive/meta", get(meta_cognitive_state))
+        .route("/cognitive/prediction", get(prediction_status))
         .route("/plugins/list", get(plugin_list))
         .route("/plugins/stats", get(plugin_manager_stats))
         .route("/plugins/:name/status", get(plugin_status))

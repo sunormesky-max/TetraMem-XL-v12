@@ -59,6 +59,20 @@ pub enum UniverseEvent {
         bytes: usize,
         conservation_ok: bool,
     },
+    PredictionMade {
+        source: [i32; 7],
+        predicted_count: usize,
+        confidence: f64,
+    },
+    HighSurprise {
+        anchor: [i32; 7],
+        surprise: f64,
+        avg_surprise: f64,
+    },
+    PredictionCorrected {
+        hebbian_adjustments: usize,
+        accuracy: f64,
+    },
 }
 
 impl std::fmt::Display for UniverseEvent {
@@ -165,6 +179,38 @@ impl std::fmt::Display for UniverseEvent {
                     f,
                     "BackupCreated(id={} bytes={} cons={})",
                     backup_id, bytes, conservation_ok
+                )
+            }
+            Self::PredictionMade {
+                source,
+                predicted_count,
+                confidence,
+            } => {
+                write!(
+                    f,
+                    "PredictionMade(src={:?} count={} conf={:.2})",
+                    source, predicted_count, confidence
+                )
+            }
+            Self::HighSurprise {
+                anchor,
+                surprise,
+                avg_surprise,
+            } => {
+                write!(
+                    f,
+                    "HighSurprise(anchor={:?} s={:.2} avg={:.2})",
+                    anchor, surprise, avg_surprise
+                )
+            }
+            Self::PredictionCorrected {
+                hebbian_adjustments,
+                accuracy,
+            } => {
+                write!(
+                    f,
+                    "PredictionCorrected(adj={} acc={:.2})",
+                    hebbian_adjustments, accuracy
                 )
             }
         }

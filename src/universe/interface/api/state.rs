@@ -9,6 +9,7 @@ use tokio::sync::{Mutex, RwLock};
 use crate::universe::auth::{JwtConfig, TokenBlocklist, UserStore};
 use crate::universe::backup::BackupScheduler;
 use crate::universe::cluster::ClusterManager;
+use crate::universe::cognitive::prediction::PredictionState;
 use crate::universe::config::AppConfig;
 use crate::universe::constitution::Constitution;
 use crate::universe::crystal::CrystalEngine;
@@ -106,6 +107,7 @@ pub struct AppState {
     pub token_blocklist: RwLock<TokenBlocklist>,
     pub identity_guard: RwLock<IdentityGuard>,
     pub plugins: RwLock<PluginManager>,
+    pub prediction: RwLock<PredictionState>,
     pub shutdown: Arc<AtomicBool>,
 }
 

@@ -72,6 +72,9 @@ fn build_state() -> Arc<AppState> {
         plugins: tokio::sync::RwLock::new(tetramem_v12::universe::plugins::PluginManager::new(
             1_000_000,
         )),
+        prediction: tokio::sync::RwLock::new(
+            tetramem_v12::universe::cognitive::prediction::PredictionState::default(),
+        ),
         shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
