@@ -4,8 +4,9 @@
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-399-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-555-brightgreen.svg)]()
 [![Endpoints](https://img.shields.io/badge/REST-62-blue.svg)]()
+[![Neural](https://img.shields.io/badge/embedding-ONNX-9cf.svg)]()
 [![Stars](https://img.shields.io/github/stars/sunormesky-max/TetraMem-XL-v12?style=social)](https://github.com/sunormesky-max/TetraMem-XL-v12/stargazers)
 
 ## Why TetraMem-XL?
@@ -39,7 +40,7 @@ Each memory atom occupies a tetrahedron of 4 nodes in 7D space. The physical 3D 
                              emotion
 ```
 
-**62 modules across 8 layers**, ~26K lines of Rust.
+**62 modules across 8 layers**, ~27K lines of Rust.
 
 ## Core Innovations
 
@@ -64,7 +65,27 @@ Real numbers (including negatives, zero, and extremes like 1e-10) are encoded as
 
 Each memory atom occupies a tetrahedron of 4 nodes in 7D space. This gives every memory an intrinsic geometric structure — volume, orientation, and neighborhood relationships that enable spatial reasoning without external indexing.
 
-### 5. Semantic Understanding Without External Models
+### 5. Neural Embedding Engine
+
+An integrated ONNX Runtime neural embedding engine provides true semantic understanding alongside the hand-crafted features:
+
+- **Model**: Granite Embedding Small (int8 quantized, ~50MB)
+- **Runtime**: ONNX Runtime 1.24.2 (dynamic loading via `ort` 2.0)
+- **Dimensions**: 384-dim neural embeddings fused with 64-dim hand-crafted features
+- **Fusion**: `0.3 × hand-crafted + 0.7 × neural` (configurable)
+- **Fallback**: Graceful degradation to hand-crafted only when model unavailable
+- **Tokenizer**: Pure Rust BPE (GPT-2 byte-level), no external dependencies
+- **Safety**: ONNX header validation, 512 token limit, output dimension check, NaN/finite guard
+
+Enabled via `tetramem.toml`:
+
+```toml
+[neural_embed]
+enabled = true
+model_dir = "models/granite-embedding-small"
+```
+
+### 6. Semantic Understanding (5-Layer)
 
 A 5-layer semantic engine (S1–S5) provides text understanding using TetraMem's own spatial architecture:
 
@@ -76,17 +97,17 @@ A 5-layer semantic engine (S1–S5) provides text understanding using TetraMem's
 | S4 | Concept Abstraction | Dream-driven prototype extraction with incremental centroid updates |
 | S5 | Semantic Query | Unified query language with filter composition and KNN search |
 
-Text search uses TF-IDF embeddings projected into the same 64-dim space, enabling KNN + multi-hop Hebbian expansion for associative retrieval — no external ML model required.
+Text search uses TF-IDF embeddings projected into the same 64-dim space, with neural 384-dim embeddings fused for deeper semantic understanding. KNN + multi-hop Hebbian expansion enables associative retrieval that direct similarity would miss.
 
-### 6. Hebbian Learning & Pulse Propagation
+### 7. Hebbian Learning & Pulse Propagation
 
 Memories form connections through Hebbian reinforcement. Pulse propagation (reinforcing, exploratory, cascade) traverses the lattice, strengthening paths between related memories. Dream consolidation replays and prunes connections during idle cycles.
 
-### 7. Multi-Hop Semantic Search
+### 8. Multi-Hop Semantic Search
 
 Text queries go through TF-IDF embedding → KNN search → Hebbian edge expansion (configurable 2–3 hops), discovering associations that direct similarity would miss.
 
-### 8. 4-Layer Memory Clustering Engine
+### 9. 4-Layer Memory Clustering Engine
 
 | Layer | Strategy | Purpose |
 |-------|----------|---------|
@@ -95,7 +116,7 @@ Text queries go through TF-IDF embedding → KNN search → Hebbian edge expansi
 | L3 | Resonance Tunnel | Bridge disconnected components with tunnel edges |
 | L4 | Topology Bridge | Connect isolated clusters via Betti number analysis |
 
-### 9. Raft Consensus with Energy Quorum
+### 10. Raft Consensus with Energy Quorum
 
 Distributed clustering via Raft protocol, with a novel energy quorum: state changes require proof that energy conservation is maintained across nodes before execution.
 
@@ -226,9 +247,9 @@ cargo test --test e2e_api           # 41 E2E HTTP tests
 ### Start Server
 
 ```bash
-cargo run --release serve                    # default: 127.0.0.1:3456
-cargo run --release serve 0.0.0.0:8080       # custom address
-cargo run --release -- --config config.toml serve
+cargo test                          # 555 unit tests
+cargo test --test api_integration   # 15 HTTP integration tests
+cargo test --test e2e_api           # 50 E2E HTTP tests
 ```
 
 The server serves both the REST API (at `/api/*`) and the built-in web panel (SPA at `/`).
@@ -250,14 +271,33 @@ assert_eq!(data.len(), decoded.len());
 assert!(universe.verify_conservation());
 ```
 
+## Minimum Hardware Requirements
+
+| Component | Without Neural Engine | With Neural Engine |
+|-----------|----------------------|-------------------|
+| **CPU** | x86_64, 2 cores | x86_64, 4 cores recommended |
+| **RAM** | 512 MB | 1 GB (model loading ~200 MB) |
+| **Disk** | 50 MB (binary) | 150 MB (binary + ONNX model + ORT DLL) |
+| **OS** | Windows / Linux / macOS | Windows / Linux / macOS |
+
+### Neural Embedding Engine (Optional)
+
+- **ONNX Runtime DLL**: `lib/onnxruntime.dll` (13.5 MB) — must be in working directory or set `ORT_DYLIB_PATH`
+- **Model files**: `models/granite-embedding-small/` (~50 MB, int8 quantized)
+- **Startup**: ~1-2s cold load, <100ms warm inference per text
+- **Disabling**: Set `neural_embed.enabled = false` in `tetramem.toml` to skip loading (zero overhead)
+
 ## Test Coverage
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Unit tests | 343 | Per-module correctness across all 8 layers |
+| Unit tests | 555 | Per-module correctness across all 8 layers |
 | API integration | 15 | Full endpoint coverage via axum test harness |
-| E2E HTTP tests | 41 | Real HTTP server lifecycle tests |
-| **Total** | **399** | |
+| E2E HTTP tests | 50 | Real HTTP server lifecycle tests |
+| Full suite | 38 | Deep system-wide (energy, memory, cognitive, clustering) |
+| Proptests | 6 | Property-based conservation & roundtrip invariants |
+| Stress tests | 12 | 10K nodes, 5K memories, 100K ops, 20K longevity |
+| **Total** | **676** | |
 
 ### Stress Test Results
 
@@ -323,6 +363,8 @@ Built-in React web panel with 15 pages for real-time monitoring and control:
 | [jsonwebtoken](https://crates.io/crates/jsonwebtoken) | 9 | JWT auth |
 | [subtle](https://crates.io/crates/subtle) | 2 | Constant-time ops |
 | [prometheus](https://crates.io/crates/prometheus) | 0.13 | Metrics export |
+| [ort](https://crates.io/crates/ort) | 2.0 | ONNX Runtime (dynamic loading) |
+| [ndarray](https://crates.io/crates/ndarray) | 0.16 | N-dimensional array for neural inference |
 
 ## License
 
