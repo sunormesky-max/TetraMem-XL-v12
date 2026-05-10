@@ -205,7 +205,32 @@ async fn run_maintenance_inner(
         let mut h = state.hebbian.write().await;
 
         let dream = DreamEngine::new();
-        let report = dream.dream(&u, &mut h, &store.memories);
+        let report = {
+            let pred = state.prediction.read().await;
+            let high_surprise_anchors: Vec<crate::universe::coord::Coord7D> = pred
+                .predictions()
+                .values()
+                .filter(|p| p.confidence < 0.3)
+                .map(|p| p.source)
+                .collect();
+            drop(pred);
+
+            if high_surprise_anchors.is_empty() {
+                dream.dream(&u, &mut h, &store.memories)
+            } else {
+                tracing::debug!(
+                    cycle,
+                    surprise_anchors = high_surprise_anchors.len(),
+                    "cognitive controller: dream with prediction-surprise priority"
+                );
+                dream.dream_with_prediction_surprise(
+                    &u,
+                    &mut h,
+                    &store.memories,
+                    &high_surprise_anchors,
+                )
+            }
+        };
         drop(store);
         drop(u);
         drop(h);
@@ -373,13 +398,13 @@ async fn run_maintenance_inner(
         interest_ttl_cleanup(state, cfg).await;
     }
 
+    run_prediction_surprise_cycle(state, &mut ctrl.spontaneous).await;
+
     if let Some(ref mut drive) = ctrl.spontaneous {
         drive
             .run_cycle_with_state(state, spontaneous_cfg, vigor, &cognitive_state)
             .await;
     }
-
-    run_prediction_surprise_cycle(state).await;
 
     tracing::debug!(
         cycle,
@@ -392,7 +417,10 @@ async fn run_maintenance_inner(
     Ok(())
 }
 
-async fn run_prediction_surprise_cycle(state: &Arc<AppState>) {
+async fn run_prediction_surprise_cycle(
+    state: &Arc<AppState>,
+    drive: &mut Option<SpontaneousDrive>,
+) {
     use crate::universe::cognitive::prediction::PredictionEngine;
     use crate::universe::cognitive::surprise::SurpriseComputer;
 
@@ -442,6 +470,11 @@ async fn run_prediction_surprise_cycle(state: &Arc<AppState>) {
                 accuracy: pred_state.prediction_accuracy(),
             },
         );
+    }
+
+    if let Some(ref mut d) = drive {
+        let uncertainty = PredictionEngine::find_high_uncertainty(&pred_state);
+        d.on_correction_signal(uncertainty);
     }
 
     if pred_state.avg_surprise() > 0.5 {

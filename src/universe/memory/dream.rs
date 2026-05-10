@@ -518,6 +518,77 @@ impl DreamEngine {
         }
     }
 
+    pub fn dream_with_prediction_surprise(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        memories: &[MemoryAtom],
+        high_surprise_anchors: &[Coord7D],
+    ) -> DreamReport {
+        let edges_before = hebbian.edge_count();
+        let weight_before = hebbian.total_weight();
+
+        let replayed = if high_surprise_anchors.is_empty() {
+            self.replay_phase(universe, hebbian)
+        } else {
+            self.replay_phase_surprise(universe, hebbian, high_surprise_anchors)
+        };
+
+        let weakened = self.weaken_phase(hebbian);
+        let consolidated = self.consolidate_phase(universe, hebbian, memories);
+
+        let edges_after = hebbian.edge_count();
+        let weight_after = hebbian.total_weight();
+
+        DreamReport {
+            phase: DreamPhase::Consolidate,
+            paths_replayed: replayed,
+            paths_weakened: weakened,
+            memories_consolidated: consolidated,
+            memories_merged: 0,
+            hebbian_edges_before: edges_before,
+            hebbian_edges_after: edges_after,
+            weight_before,
+            weight_after,
+        }
+    }
+
+    fn replay_phase_surprise(
+        &self,
+        universe: &DarkUniverse,
+        hebbian: &mut HebbianMemory,
+        surprise_anchors: &[Coord7D],
+    ) -> usize {
+        let engine = PulseEngine::new();
+        let strong = hebbian.strongest_edges(10);
+        let mut replayed = 0;
+
+        let surprise_set: std::collections::HashSet<[i32; 7]> =
+            surprise_anchors.iter().map(|c| c.basis()).collect();
+
+        for anchor in surprise_anchors {
+            for _ in 0..(self.config.replay_rounds + 1) {
+                let r = engine.propagate(anchor, self.config.replay_pulse_type, universe, hebbian);
+                replayed += r.paths_recorded;
+            }
+        }
+
+        for ((a, b), w) in &strong {
+            if *w < self.config.min_replay_strength {
+                continue;
+            }
+            if surprise_set.contains(&a.basis()) || surprise_set.contains(&b.basis()) {
+                continue;
+            }
+            for _ in 0..self.config.replay_rounds {
+                let r = engine.propagate(a, self.config.replay_pulse_type, universe, hebbian);
+                replayed += r.paths_recorded;
+            }
+        }
+
+        replayed
+    }
+
     fn replay_phase_emotion(
         &self,
         universe: &DarkUniverse,

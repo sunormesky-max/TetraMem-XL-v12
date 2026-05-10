@@ -55,6 +55,7 @@ pub struct SpontaneousDrive {
     recent_pulse_origins: Vec<[i32; 7]>,
     recall_history: Vec<String>,
     probe_targets: Vec<String>,
+    high_uncertainty_targets: Vec<(Coord7D, f64)>,
 }
 
 impl SpontaneousDrive {
@@ -67,6 +68,7 @@ impl SpontaneousDrive {
             recent_pulse_origins: Vec::new(),
             recall_history: Vec::new(),
             probe_targets: Vec::new(),
+            high_uncertainty_targets: Vec::new(),
         }
     }
 
@@ -146,6 +148,18 @@ impl SpontaneousDrive {
         self.metrics.curiosity_level = self.curiosity;
     }
 
+    pub fn on_correction_signal(&mut self, uncertainty_targets: Vec<(Coord7D, f64)>) {
+        self.high_uncertainty_targets = uncertainty_targets;
+        if !self.high_uncertainty_targets.is_empty() {
+            let max_uncertainty = self
+                .high_uncertainty_targets
+                .iter()
+                .map(|(_, u)| *u)
+                .fold(0.0_f64, f64::max);
+            self.curiosity = (self.curiosity + max_uncertainty * 0.05).min(1.0);
+        }
+    }
+
     async fn spontaneous_pulse(&mut self, state: &Arc<AppState>) {
         let (seeds, cold_zones) =
             {
@@ -161,7 +175,11 @@ impl SpontaneousDrive {
 
         let mut origins: Vec<[i32; 7]> = Vec::new();
 
-        if self.curiosity > 0.6 && !cold_zones.is_empty() {
+        if !self.high_uncertainty_targets.is_empty() {
+            for (coord, _) in self.high_uncertainty_targets.iter().take(2) {
+                origins.push(coord.basis());
+            }
+        } else if self.curiosity > 0.6 && !cold_zones.is_empty() {
             let idx = (self.metrics.pulses_fired as usize) % cold_zones.len();
             origins.push(cold_zones[idx]);
         }
