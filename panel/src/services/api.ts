@@ -551,6 +551,73 @@ export interface PluginExecuteResult {
   }
 }
 
+export interface AdjustWeightResult {
+  success: boolean
+  data: {
+    from: string
+    to: string
+    old_weight: number
+    new_weight: number
+    adjustment: number
+  }
+}
+
+export interface CognitiveStateResult {
+  success: boolean
+  data: {
+    overall_vigor: number
+    dream_readiness: { should_dream: boolean; urgency: number }
+    emotion_snapshot: { pleasure: number; arousal: number; dominance: number }
+  }
+}
+
+export interface AttentionMapResult {
+  success: boolean
+  data: Record<string, number>
+}
+
+export interface DreamInsightsResult {
+  success: boolean
+  data: {
+    contradictions: string[]
+    weak_connections: number
+    clusters_found: number
+  }
+}
+
+export interface IdentityProfileResult {
+  success: boolean
+  data: {
+    identity_memories: number
+    total_importance: number
+    coherence: number
+  }
+}
+
+export interface MetaCognitiveResult {
+  success: boolean
+  data: {
+    self_awareness: number
+    domains_classified: number
+    confidence_avg: number
+  }
+}
+
+export interface PredictionStatusResult {
+  success: boolean
+  data: {
+    active_predictions: number
+    avg_confidence: number
+    surprise_avg: number
+    accuracy_avg: number
+  }
+}
+
+export interface MemoryStreamEvent {
+  event: string
+  data: Record<string, any>
+}
+
 export const api = {
   getStats: () => request<StatsData>('/stats'),
   getHealth: () => request<HealthData>('/health'),
@@ -775,4 +842,21 @@ export const api = {
     request<{ success: boolean; data: { name: string; energy_reset: boolean } }>(`/plugins/${encodeURIComponent(name)}/reset-energy`, {
       method: 'POST',
     }),
+
+  // -- Memory Advanced --
+  adjustWeight: (fromAnchor: number[], toAnchor: number[], boost: number) =>
+    request<AdjustWeightResult>('/memory/adjust_weight', {
+      method: 'POST',
+      body: JSON.stringify({ from: fromAnchor, to: toAnchor, boost }),
+    }),
+
+  // -- Cognitive --
+  getCognitiveState: () => request<CognitiveStateResult>('/cognitive/state'),
+  getAttentionMap: () => request<AttentionMapResult>('/cognitive/attention'),
+  getDreamInsights: () => request<DreamInsightsResult>('/cognitive/insights'),
+  reflect: () =>
+    request<AgentExecuteResult>('/cognitive/reflect', { method: 'POST' }),
+  getIdentityProfile: () => request<IdentityProfileResult>('/cognitive/identity'),
+  getMetaCognitive: () => request<MetaCognitiveResult>('/cognitive/meta'),
+  getPredictionStatus: () => request<PredictionStatusResult>('/cognitive/prediction'),
 }
