@@ -1,5 +1,19 @@
 # Known Issues — TetraMem-XL v12.0
 
+## Fixed in Latest
+
+### ~~7D Coordinate Support~~ (Fixed in 52fde1cd)
+- **Was**: All endpoints only accepted `[i32; 3]` anchors, dark dimensions hardcoded to `[0,0,0,0]`
+- **Now**: Accept `[x,y,z]` (backward compatible) or `[x,y,z,d4,d5,d6,d7]` (full 7D)
+
+### ~~Tag Search Missing from API~~ (Fixed in 52fde1cd)
+- **Was**: `SemanticQuery` had tag filtering but no REST endpoint exposed it
+- **Now**: `/memory/recall` accepts `tags` and `tag_mode` (any/all) parameters
+
+### ~~Weight Adjustment API~~ (Fixed in 52fde1cd)
+- **Was**: `HebbianMemory::boost_edge()` existed but no API endpoint
+- **Now**: `POST /memory/adjust_weight` with from/to anchors and boost (positive or negative)
+
 ## Architecture
 
 ### MCP / API Memory Store Isolation
