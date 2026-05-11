@@ -218,10 +218,7 @@ pub async fn encode_memory(
         Err(e) => {
             drop(u);
             tracing::warn!(error = %e, "memory encode failed");
-            Ok((
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse::err(format!("encode failed: {}", e))),
-            ))
+            Err(AppError::BadRequest(format!("encode failed: {}", e)))
         }
     };
 
@@ -254,10 +251,7 @@ pub async fn decode_memory(
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "memory decode failed");
-                        return Ok((
-                            StatusCode::BAD_REQUEST,
-                            Json(ApiResponse::err(format!("decode failed: {}", e))),
-                        ));
+                        return Err(AppError::BadRequest(format!("decode failed: {}", e)));
                     }
                 }
             }

@@ -66,16 +66,16 @@ use super::streaming_ops::{
 
 struct RateLimiter {
     count: AtomicU64,
-    max: u64,
+    burst: u64,
     window_secs: u64,
     last_reset: std::sync::Mutex<std::time::Instant>,
 }
 
 impl RateLimiter {
-    fn new(max: u64, _burst: u64, window_secs: u64) -> Self {
+    fn new(max: u64, burst: u64, window_secs: u64) -> Self {
         Self {
             count: AtomicU64::new(0),
-            max,
+            burst: burst.max(max),
             window_secs,
             last_reset: std::sync::Mutex::new(std::time::Instant::now()),
         }
@@ -91,7 +91,7 @@ impl RateLimiter {
             }
         }
         let current = self.count.fetch_add(1, Ordering::SeqCst);
-        current < self.max
+        current < self.burst
     }
 }
 
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn rate_limiter_blocks_after_max() {
-        let limiter = RateLimiter::new(5, 10, 60);
+        let limiter = RateLimiter::new(5, 5, 60);
         for _ in 0..5 {
             assert!(limiter.check_and_increment());
         }
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn rate_limiter_resets_after_window() {
-        let limiter = RateLimiter::new(2, 10, 60);
+        let limiter = RateLimiter::new(2, 2, 60);
         assert!(limiter.check_and_increment());
         assert!(limiter.check_and_increment());
         assert!(!limiter.check_and_increment());

@@ -33,7 +33,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D anchor coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "data": {
                             "type": "array",
@@ -55,7 +55,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D anchor coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         }
                     },
                     "required": ["anchor"]
@@ -76,7 +76,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D source coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "pulse_type": {
                             "type": "string",
@@ -112,7 +112,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D anchor coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "max_hops": {
                             "type": "integer",
@@ -137,7 +137,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "energy": {
                             "type": "number",
@@ -283,19 +283,19 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "Start anchor for infer_chain [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "to_anchor": {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "End anchor for infer_chain [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "seed_anchor": {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "Seed anchor for discover [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         },
                         "max_hops": {
                             "type": "integer",
@@ -344,7 +344,7 @@ impl TetraMemTools {
                             "type": "array",
                             "items": {"type": "integer"},
                             "description": "3D anchor coordinate [x, y, z]",
-                            "minItems": 3, "maxItems": 3
+                            "minItems": 3, "maxItems": 7
                         }
                     },
                     "required": ["anchor"]
@@ -454,24 +454,31 @@ impl TetraMemTools {
     }
 }
 
-fn parse_3d_coord(args: &Value, key: &str) -> Result<Coord7D, String> {
+fn parse_coord(args: &Value, key: &str) -> Result<Coord7D, String> {
     match args.get(key).and_then(|v| v.as_array()) {
-        Some(a) if a.len() == 3 => {
+        Some(a) if a.len() == 3 || a.len() == 7 => {
             let coords: Result<Vec<i32>, _> = a
                 .iter()
                 .map(|v| {
                     v.as_i64()
-                        .filter(|&n| n >= i32::MIN as i64 && n <= i32::MAX as i64)
+                        .filter(|&n| (-10000..=10000).contains(&(n as i32)))
                         .map(|n| n as i32)
                         .ok_or(())
                 })
                 .collect();
             match coords {
-                Ok(c) => Ok(Coord7D::new_even([c[0], c[1], c[2], 0, 0, 0, 0])),
-                Err(_) => Err(format!("{} must be 3 integers", key)),
+                Ok(c) => {
+                    let basis = match c.len() {
+                        3 => [c[0], c[1], c[2], 0, 0, 0, 0],
+                        7 => [c[0], c[1], c[2], c[3], c[4], c[5], c[6]],
+                        _ => return Err(format!("{} must be 3 or 7 integers", key)),
+                    };
+                    Ok(Coord7D::new_even(basis))
+                }
+                Err(_) => Err(format!("{} must be integers in [-10000, 10000]", key)),
             }
         }
-        _ => Err(format!("{} must be array of 3 integers", key)),
+        _ => Err(format!("{} must be array of 3 or 7 integers", key)),
     }
 }
 
@@ -497,7 +504,7 @@ fn handle_health(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
 }
 
 fn handle_encode(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let anchor = match parse_3d_coord(args, "anchor") {
+    let anchor = match parse_coord(args, "anchor") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
@@ -528,7 +535,7 @@ fn handle_encode(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
 }
 
 fn handle_decode(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let anchor = match parse_3d_coord(args, "anchor") {
+    let anchor = match parse_coord(args, "anchor") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
@@ -566,7 +573,7 @@ fn handle_list_memories(core: &TetraMemCore) -> super::protocol::ToolCallResult 
 }
 
 fn handle_pulse(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let source = match parse_3d_coord(args, "source") {
+    let source = match parse_coord(args, "source") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
@@ -647,11 +654,11 @@ fn handle_regulate(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
 }
 
 fn handle_trace(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let anchor = match parse_3d_coord(args, "anchor") {
+    let anchor = match parse_coord(args, "anchor") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
-    let max_hops = args.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+    let max_hops = (args.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(10) as usize).min(100);
     let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
         &core.universe,
         &core.hebbian,
@@ -692,7 +699,7 @@ fn handle_phase_detect(core: &mut TetraMemCore) -> super::protocol::ToolCallResu
 }
 
 fn handle_materialize(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let coord = match parse_3d_coord(args, "coord") {
+    let coord = match parse_coord(args, "coord") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
@@ -1497,7 +1504,7 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
             )
         }
         "infer_chain" => {
-            let from = match parse_3d_coord(args, "from_anchor") {
+            let from = match parse_coord(args, "from_anchor") {
                 Ok(c) => c,
                 Err(e) => {
                     return super::protocol::ToolCallResult::err(format!(
@@ -1506,7 +1513,7 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
                     ))
                 }
             };
-            let to = match parse_3d_coord(args, "to_anchor") {
+            let to = match parse_coord(args, "to_anchor") {
                 Ok(c) => c,
                 Err(e) => {
                     return super::protocol::ToolCallResult::err(format!(
@@ -1515,7 +1522,8 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
                     ))
                 }
             };
-            let max_hops = args.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
+            let max_hops =
+                (args.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(15) as usize).min(100);
             let chain = crate::universe::reasoning::ReasoningEngine::infer_chain(
                 &core.universe,
                 &core.hebbian,
@@ -1531,7 +1539,7 @@ fn handle_reason(args: &Value, core: &mut TetraMemCore) -> super::protocol::Tool
             )
         }
         "discover" => {
-            let seed = match parse_3d_coord(args, "seed_anchor") {
+            let seed = match parse_coord(args, "seed_anchor") {
                 Ok(c) => c,
                 Err(e) => {
                     return super::protocol::ToolCallResult::err(format!(
@@ -1683,7 +1691,7 @@ fn handle_watchdog(core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
 }
 
 fn handle_forget(args: &Value, core: &mut TetraMemCore) -> super::protocol::ToolCallResult {
-    let anchor = match parse_3d_coord(args, "anchor") {
+    let anchor = match parse_coord(args, "anchor") {
         Ok(c) => c,
         Err(e) => return super::protocol::ToolCallResult::err(e),
     };
@@ -1792,28 +1800,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_3d_coord_valid() {
+    fn parse_coord_valid() {
         let args = json!({"anchor": [1, 2, 3]});
-        let c = parse_3d_coord(&args, "anchor").unwrap();
+        let c = parse_coord(&args, "anchor").unwrap();
         assert_eq!(c.basis(), [1, 2, 3, 0, 0, 0, 0]);
     }
 
     #[test]
-    fn parse_3d_coord_missing() {
+    fn parse_coord_missing() {
         let args = json!({});
-        assert!(parse_3d_coord(&args, "anchor").is_err());
+        assert!(parse_coord(&args, "anchor").is_err());
     }
 
     #[test]
-    fn parse_3d_coord_wrong_len() {
+    fn parse_coord_wrong_len() {
         let args = json!({"anchor": [1, 2]});
-        assert!(parse_3d_coord(&args, "anchor").is_err());
+        assert!(parse_coord(&args, "anchor").is_err());
     }
 
     #[test]
-    fn parse_3d_coord_non_integer() {
+    fn parse_coord_non_integer() {
         let args = json!({"anchor": [1.5, 2.0, 3.0]});
-        assert!(parse_3d_coord(&args, "anchor").is_err());
+        assert!(parse_coord(&args, "anchor").is_err());
     }
 
     #[test]
