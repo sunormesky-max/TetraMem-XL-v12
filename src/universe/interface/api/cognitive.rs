@@ -6,6 +6,7 @@ use axum::{extract::State, Json};
 use crate::universe::cognitive::agent::{
     AgentContext, AgentContextMut, CognitiveAgent, CrystalAgent, EmotionAgent, ObserverAgent,
 };
+use crate::universe::coord::Coord7D;
 use crate::universe::dream::DreamEngine;
 use crate::universe::error::AppError;
 use crate::universe::events::UniverseEvent;
@@ -16,23 +17,10 @@ use crate::universe::pulse::{PulseEngine, PulseType};
 use super::state::SharedState;
 use super::types::*;
 
-fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
-    for &v in c {
-        if !(-10000..=10000).contains(&v) {
-            return Err(AppError::BadRequest(format!(
-                "coordinate value {} out of range [-10000, 10000]",
-                v
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub async fn fire_pulse(
     State(state): State<SharedState>,
     Json(req): Json<PulseRequest>,
 ) -> Result<Json<ApiResponse<PulseResponse>>, AppError> {
-    validate_coord_3(&req.source)?;
     {
         let con = state.constitution.read().await;
         let check = con.validate_operation("pulse_fire");
@@ -49,15 +37,7 @@ pub async fn fire_pulse(
     if let Some(c) = metrics::API_PULSE_TOTAL.get() {
         c.inc();
     }
-    let source = crate::universe::coord::Coord7D::new_even([
-        req.source[0],
-        req.source[1],
-        req.source[2],
-        0,
-        0,
-        0,
-        0,
-    ]);
+    let source = req.source;
     let pt = match req.pulse_type.to_lowercase().as_str() {
         "reinforcing" => PulseType::Reinforcing,
         "cascade" => PulseType::Cascade,
@@ -213,16 +193,9 @@ pub async fn assess_novelty(
         }
     }
 
-    let anchor = crate::universe::coord::Coord7D::new_even(
-        req.anchor
-            .unwrap_or([0, 0, 0])
-            .into_iter()
-            .chain(std::iter::repeat(0))
-            .take(7)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap_or([0i32; 7]),
-    );
+    let anchor = req
+        .anchor
+        .unwrap_or_else(|| Coord7D::new_even([0, 0, 0, 0, 0, 0, 0]));
 
     let (report, should_store) = {
         let sem = state.semantic.read().await;

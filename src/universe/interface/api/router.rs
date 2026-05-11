@@ -22,7 +22,7 @@ use crate::universe::auth::Claims;
 use crate::universe::error::AppError;
 use crate::universe::metrics;
 
-use super::agent_ops::{associate, consolidate, context, forget, recall, remember};
+use super::agent_ops::{adjust_weight, associate, consolidate, context, forget, recall, remember};
 use super::backup_ops::{create_backup, list_backups};
 use super::cluster_ops::{
     cluster_add_node, cluster_init, cluster_propose, cluster_remove_node, cluster_status,
@@ -340,6 +340,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/memory/recall", post(recall))
         .route("/memory/associate", post(associate))
         .route("/memory/forget", post(forget))
+        .route("/memory/adjust_weight", post(adjust_weight))
         .route("/dream/consolidate", post(consolidate))
         .route("/context", post(context))
         .route("/semantic/search", post(semantic_search))

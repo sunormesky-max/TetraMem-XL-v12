@@ -6,7 +6,6 @@ use axum::http::StatusCode;
 use axum::{extract::State, Json};
 use serde::Deserialize;
 
-use crate::universe::coord::Coord7D;
 use crate::universe::error::AppError;
 use crate::universe::events::UniverseEvent;
 use crate::universe::memory::{MemoryAtom, MemoryCodec};
@@ -23,18 +22,6 @@ pub struct ListMemoriesParams {
     pub limit: Option<usize>,
 }
 
-fn validate_coord_3(c: &[i32; 3]) -> Result<(), AppError> {
-    for &v in c {
-        if !(-10000..=10000).contains(&v) {
-            return Err(AppError::BadRequest(format!(
-                "coordinate value {} out of range [-10000, 10000]",
-                v
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub async fn encode_memory(
     State(state): State<SharedState>,
     Json(req): Json<EncodeRequest>,
@@ -45,7 +32,6 @@ pub async fn encode_memory(
             req.data.len()
         )));
     }
-    validate_coord_3(&req.anchor)?;
     validate_tags(&req.tags).map_err(AppError::BadRequest)?;
     if let Some(ref desc) = req.description {
         validate_field_len("description", desc, MAX_STRING_FIELD_LEN)
@@ -81,7 +67,7 @@ pub async fn encode_memory(
         }
     }
 
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
 
     tracing::info!(anchor = %anchor, dims = req.data.len(), "encoding memory");
     if let Some(c) = metrics::API_ENCODE_TOTAL.get() {
@@ -232,14 +218,13 @@ pub async fn decode_memory(
     State(state): State<SharedState>,
     Json(req): Json<DecodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), AppError> {
-    validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
     let store = state.memory_store.read().await;
 
     if let Some(c) = metrics::API_DECODE_TOTAL.get() {
         c.inc();
     }
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
     if let Some(&i) = store.index.get(&anchor_str) {
@@ -342,13 +327,12 @@ pub async fn memory_trace(
     State(state): State<SharedState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<ApiResponse<Vec<TraceHop>>>, AppError> {
-    validate_coord_3(&req.anchor)?;
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
     let store = state.memory_store.read().await;
 
-    let source = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let source = req.anchor;
     let max_hops = req.max_hops.unwrap_or(10).min(100);
 
     let associations = crate::universe::reasoning::ReasoningEngine::find_associations(
@@ -396,7 +380,6 @@ pub async fn annotate_memory(
     State(state): State<SharedState>,
     Json(req): Json<AnnotateRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<AnnotateResponse>>), AppError> {
-    validate_coord_3(&req.anchor)?;
     validate_tags(&req.tags).map_err(AppError::BadRequest)?;
     if let Some(ref desc) = req.description {
         validate_field_len("description", desc, MAX_STRING_FIELD_LEN)
@@ -409,7 +392,7 @@ pub async fn annotate_memory(
         validate_field_len("source", source, MAX_STRING_FIELD_LEN).map_err(AppError::BadRequest)?;
     }
     let mut store = state.memory_store.write().await;
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
     if let Some(&i) = store.index.get(&anchor_str) {
@@ -557,10 +540,9 @@ pub async fn semantic_relations(
     State(state): State<SharedState>,
     Json(req): Json<SemanticRelationRequest>,
 ) -> Result<Json<ApiResponse<SemanticRelationResponse>>, AppError> {
-    validate_coord_3(&req.anchor)?;
     let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
     if let Some(&i) = store.index.get(&anchor_str) {
@@ -611,9 +593,8 @@ pub async fn temporal_predict(
     State(state): State<SharedState>,
     Json(req): Json<PredictRequest>,
 ) -> Result<Json<ApiResponse<PredictResponse>>, AppError> {
-    validate_coord_3(&req.anchor)?;
     let max_steps = req.max_steps.unwrap_or(5).min(20);
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
 
     let h = state.hebbian.read().await;
     let store = state.memory_store.read().await;
@@ -641,9 +622,8 @@ pub async fn reconstruct(
     State(state): State<SharedState>,
     Json(req): Json<ReconstructRequest>,
 ) -> Result<Json<ApiResponse<ReconstructResponse>>, AppError> {
-    validate_coord_3(&req.anchor)?;
     let max_hops = req.max_hops.unwrap_or(5).min(20);
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
     let h = state.hebbian.read().await;

@@ -295,6 +295,23 @@ impl HebbianMemory {
         self.update_dir_adj_weight(a, b, new_weight);
     }
 
+    pub fn adjust_edge_weight(&mut self, a: &Coord7D, b: &Coord7D, delta: f64) -> f64 {
+        let key = (*a, *b);
+        if let Some(edge) = self.edges.get_mut(&key) {
+            edge.weight = (edge.weight + delta).clamp(self.min_weight, MAX_EDGE_WEIGHT);
+            let w = edge.weight;
+            self.update_dir_adj_weight(a, b, w);
+            w
+        } else if delta > 0.0 {
+            let w = delta.min(MAX_EDGE_WEIGHT);
+            self.edges.insert(key, HebbianEdge::new(w));
+            self.add_dir_adj_entry(a, b, w);
+            w
+        } else {
+            0.0
+        }
+    }
+
     fn add_dir_adj_entry(&mut self, src: &Coord7D, tgt: &Coord7D, weight: f64) {
         self.forward.entry(*src).or_default().insert(*tgt, weight);
         self.backward.entry(*tgt).or_default().insert(*src, weight);

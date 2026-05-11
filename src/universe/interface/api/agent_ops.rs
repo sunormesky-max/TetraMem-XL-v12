@@ -189,6 +189,14 @@ pub async fn recall(
 
     let limit = req.limit.clamp(1, 100);
     let query_data = nlp::text_to_embedding(&req.query, 0.5);
+    let tag_filter = if req.tags.is_empty() {
+        None
+    } else {
+        match req.tag_mode.as_deref().unwrap_or("any") {
+            "all" => Some(("all", req.tags.clone())),
+            _ => Some(("any", req.tags.clone())),
+        }
+    };
 
     let ideal_anchor = {
         let u = state.universe.read().await;
@@ -205,6 +213,15 @@ pub async fn recall(
     for (i, mem) in store.memories.iter().enumerate() {
         if let Some(ref src) = req.source {
             if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
+                continue;
+            }
+        }
+        if let Some((mode, ref tags)) = tag_filter {
+            let matches = match mode {
+                "all" => tags.iter().all(|t| mem.has_tag(t)),
+                _ => tags.iter().any(|t| mem.has_tag(t)),
+            };
+            if !matches {
                 continue;
             }
         }
@@ -269,6 +286,15 @@ pub async fn recall(
             {
                 if let Some(ref src) = req.source {
                     if mem.source().map(|s| s != src.as_str()).unwrap_or(true) {
+                        continue;
+                    }
+                }
+                if let Some((mode, ref tags)) = tag_filter {
+                    let matches = match mode {
+                        "all" => tags.iter().all(|t| mem.has_tag(t)),
+                        _ => tags.iter().any(|t| mem.has_tag(t)),
+                    };
+                    if !matches {
                         continue;
                     }
                 }
@@ -587,13 +613,7 @@ pub async fn forget(
     State(state): State<SharedState>,
     Json(req): Json<ForgetRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<Value>>), AppError> {
-    if req.anchor.iter().any(|&v| !(-10000..=10000).contains(&v)) {
-        return Err(AppError::BadRequest(
-            "coordinate values must be in [-10000, 10000]".to_string(),
-        ));
-    }
-
-    let anchor = Coord7D::new_even([req.anchor[0], req.anchor[1], req.anchor[2], 0, 0, 0, 0]);
+    let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
     let mut u = state.universe.write().await;
@@ -629,4 +649,28 @@ pub async fn forget(
             Json(ApiResponse::err("memory not found")),
         )),
     }
+}
+
+pub async fn adjust_weight(
+    State(state): State<SharedState>,
+    Json(req): Json<AdjustWeightRequest>,
+) -> Result<Json<ApiResponse<Value>>, AppError> {
+    let boost = req.boost.clamp(-5.0, 5.0);
+    if boost == 0.0 {
+        return Err(AppError::BadRequest("boost must be non-zero".to_string()));
+    }
+
+    let mut h = state.hebbian.write().await;
+    let old_weight = h.get_bias(&req.from, &req.to);
+    let new_weight = h.adjust_edge_weight(&req.from, &req.to, boost);
+    drop(h);
+
+    Ok(Json(ApiResponse::ok(json!({
+        "success": true,
+        "from": format!("{}", req.from),
+        "to": format!("{}", req.to),
+        "old_weight": old_weight,
+        "new_weight": new_weight,
+        "adjustment": boost,
+    }))))
 }

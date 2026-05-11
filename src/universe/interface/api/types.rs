@@ -3,6 +3,38 @@
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use serde::{Deserialize, Serialize};
 
+use crate::universe::coord::Coord7D;
+
+fn parse_anchor_7d(arr: &[i32]) -> Result<Coord7D, String> {
+    if arr.iter().any(|&v| !(-10000..=10000).contains(&v)) {
+        return Err("coordinate values must be in [-10000, 10000]".to_string());
+    }
+    match arr.len() {
+        3 => Ok(Coord7D::new_even([arr[0], arr[1], arr[2], 0, 0, 0, 0])),
+        7 => Ok(Coord7D::new_even([
+            arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6],
+        ])),
+        n => Err(format!("anchor must have 3 or 7 elements, got {}", n)),
+    }
+}
+
+fn deserialize_anchor7d<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Coord7D, D::Error> {
+    let arr: Vec<i32> = Vec::deserialize(de)?;
+    parse_anchor_7d(&arr).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_anchor7d_opt<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Option<Coord7D>, D::Error> {
+    let opt: Option<Vec<i32>> = Option::deserialize(de)?;
+    match opt {
+        Some(arr) => Ok(Some(
+            parse_anchor_7d(&arr).map_err(serde::de::Error::custom)?,
+        )),
+        None => Ok(None),
+    }
+}
+
 #[derive(Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub success: bool,
@@ -69,7 +101,8 @@ pub struct StatsResponse {
 
 #[derive(Deserialize)]
 pub struct EncodeRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     pub data: Vec<f64>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -107,7 +140,8 @@ pub struct NoveltyInfo {
 #[derive(Deserialize)]
 pub struct NoveltyAssessRequest {
     pub data: Vec<f64>,
-    pub anchor: Option<[i32; 3]>,
+    #[serde(deserialize_with = "deserialize_anchor7d_opt")]
+    pub anchor: Option<Coord7D>,
 }
 
 #[derive(Serialize)]
@@ -123,7 +157,8 @@ pub struct NoveltyAssessResponse {
 
 #[derive(Deserialize)]
 pub struct AnnotateRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -180,7 +215,8 @@ pub struct SemanticTextQueryRequest {
 
 #[derive(Deserialize)]
 pub struct SemanticRelationRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
 }
 
 #[derive(Serialize)]
@@ -207,7 +243,8 @@ fn default_importance() -> f64 {
 
 #[derive(Deserialize)]
 pub struct DecodeRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     pub data_dim: usize,
 }
 
@@ -241,7 +278,8 @@ pub struct CreateBackupResponse {
 
 #[derive(Deserialize)]
 pub struct PulseRequest {
-    pub source: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub source: Coord7D,
     #[serde(default = "default_pulse_type")]
     pub pulse_type: String,
 }
@@ -345,7 +383,8 @@ pub struct MemoryListItem {
 
 #[derive(Deserialize)]
 pub struct TraceRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     pub max_hops: Option<usize>,
 }
 
@@ -460,6 +499,10 @@ pub struct RecallRequest {
     pub limit: usize,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub tag_mode: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -494,7 +537,22 @@ pub struct ContextRequest {
 
 #[derive(Deserialize)]
 pub struct ForgetRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
+}
+
+#[derive(Deserialize)]
+pub struct AdjustWeightRequest {
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub from: Coord7D,
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub to: Coord7D,
+    #[serde(default = "default_boost")]
+    pub boost: f64,
+}
+
+fn default_boost() -> f64 {
+    0.5
 }
 
 pub const MAX_STRING_FIELD_LEN: usize = 4096;
@@ -542,13 +600,15 @@ pub struct UnregisterInterestRequest {
 
 #[derive(Deserialize)]
 pub struct PredictRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     pub max_steps: Option<usize>,
 }
 
 #[derive(Deserialize)]
 pub struct ReconstructRequest {
-    pub anchor: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub anchor: Coord7D,
     pub max_hops: Option<usize>,
 }
 
