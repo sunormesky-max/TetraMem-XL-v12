@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::universe::cognitive::emotion::PadVector;
 use crate::universe::cognitive::functional_emotion::{EmotionSource, FunctionalEmotion};
+use crate::universe::coord::Coord7D;
 use crate::universe::dream::DreamEngine;
 use crate::universe::error::AppError;
 use crate::universe::events::UniverseEvent;
@@ -17,7 +18,8 @@ use super::types::*;
 
 #[derive(Deserialize)]
 pub struct EmotionPulseRequest {
-    pub source: [i32; 3],
+    #[serde(deserialize_with = "deserialize_anchor7d")]
+    pub source: Coord7D,
     #[serde(default = "default_pulse_type")]
     pub pulse_type: String,
     pub pleasure: f64,
@@ -46,7 +48,7 @@ pub async fn emotion_pulse(
     State(state): State<SharedState>,
     Json(req): Json<EmotionPulseRequest>,
 ) -> Result<Json<ApiResponse<EmotionPulseResponse>>, AppError> {
-    for &v in &req.source {
+    for v in req.source.basis() {
         if !(-10000..=10000).contains(&v) {
             return Err(AppError::BadRequest(format!(
                 "coordinate value {} out of range [-10000, 10000]",
@@ -58,15 +60,7 @@ pub async fn emotion_pulse(
     let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
 
-    let source = crate::universe::coord::Coord7D::new_even([
-        req.source[0],
-        req.source[1],
-        req.source[2],
-        0,
-        0,
-        0,
-        0,
-    ]);
+    let source = req.source;
     let pt = match req.pulse_type.to_lowercase().as_str() {
         "reinforcing" => PulseType::Reinforcing,
         "cascade" => PulseType::Cascade,

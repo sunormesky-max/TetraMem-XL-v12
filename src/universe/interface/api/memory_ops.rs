@@ -51,8 +51,22 @@ pub async fn encode_memory(
         }
         if v.abs() > MAX_DATA_VALUE {
             return Err(AppError::BadRequest(format!(
-                "data value {} exceeds maximum allowed magnitude",
-                v
+                "data value {} exceeds max {}",
+                v, MAX_DATA_VALUE
+            )));
+        }
+    }
+    if !req.importance.is_finite() || !(0.0..=1.0).contains(&req.importance) {
+        return Err(AppError::BadRequest(
+            "importance must be a finite number between 0.0 and 1.0".to_string(),
+        ));
+    }
+    {
+        let store = state.memory_store.read().await;
+        if store.memories.len() >= state.config.maintenance.max_memories {
+            return Err(AppError::BadRequest(format!(
+                "memory limit reached ({} memories)",
+                state.config.maintenance.max_memories
             )));
         }
     }

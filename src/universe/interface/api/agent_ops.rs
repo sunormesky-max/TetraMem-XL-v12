@@ -71,6 +71,23 @@ pub async fn remember(
         detector.assess(&data, &knn_distances, &anchor, &h, &store.memories)
     };
 
+    let importance = req.importance;
+    if !importance.is_finite() || !(0.0..=1.0).contains(&importance) {
+        return Err(AppError::BadRequest(
+            "importance must be a finite number between 0.0 and 1.0".to_string(),
+        ));
+    }
+
+    {
+        let store = state.memory_store.read().await;
+        if store.memories.len() >= state.config.maintenance.max_memories {
+            return Err(AppError::BadRequest(format!(
+                "memory limit reached ({} memories)",
+                state.config.maintenance.max_memories
+            )));
+        }
+    }
+
     let adjusted_importance = if importance < 0.01 {
         novelty_report.suggested_importance
     } else {
@@ -78,11 +95,6 @@ pub async fn remember(
     };
 
     let mut u = state.universe.write().await;
-    let mut store = state.memory_store.write().await;
-    let mut sem = state.semantic.write().await;
-    let mut h = state.hebbian.write().await;
-    let mut cl = state.clustering.write().await;
-
     let encode_result = crate::universe::memory::MemoryCodec::encode(&mut u, &anchor, &data);
 
     let (_final_anchor, mut atom) = match encode_result {
@@ -112,8 +124,15 @@ pub async fn remember(
     let anchor_str = format!("{}", atom.anchor());
     let created_at = atom.created_at();
     let manifested = atom.is_manifested(&u);
+    let conservation_ok = u.verify_conservation();
+    drop(u);
 
     let deferred = state.config.maintenance.deferred_binding;
+
+    let mut sem = state.semantic.write().await;
+    let mut store = state.memory_store.write().await;
+    let mut h = state.hebbian.write().await;
+    let mut cl = state.clustering.write().await;
 
     sem.index_memory(&atom, &data);
     let similar = sem.search_similar(&data, 5);
@@ -135,8 +154,6 @@ pub async fn remember(
 
     store.push(atom);
 
-    let conservation_ok = u.verify_conservation();
-
     {
         let interests = state.interests.read().await;
         let surfacer = crate::universe::memory::MemorySurfacer::default();
@@ -155,6 +172,11 @@ pub async fn remember(
             let _ = state.memory_stream.send(sm);
         }
     }
+
+    drop(cl);
+    drop(h);
+    drop(store);
+    drop(sem);
 
     Ok((
         StatusCode::OK,
@@ -602,8 +624,44 @@ pub async fn context(
                 "total": recent.len(),
             }))))
         }
+        "add" => {
+            let content = req.content.unwrap_or_default();
+            let role = req.role.unwrap_or_else(|| "user".to_string());
+            if content.trim().is_empty() {
+                return Err(AppError::BadRequest(
+                    "content is required for add action".to_string(),
+                ));
+            }
+            let tags = vec!["context".to_string(), format!("role:{}", role)];
+            let query_data = nlp::text_to_embedding(&content, 0.5);
+            let data: Vec<f64> = query_data.into_iter().take(28).collect();
+            let anchor = {
+                let u = state.universe.read().await;
+                let cl = state.clustering.read().await;
+                cl.compute_ideal_anchor(&data, &u)
+            };
+            let mut u = state.universe.write().await;
+            let mut store = state.memory_store.write().await;
+            let encode_result =
+                crate::universe::memory::MemoryCodec::encode(&mut u, &anchor, &data);
+            if let Ok(mut atom) = encode_result {
+                for tag in &tags {
+                    atom.add_tag(tag);
+                }
+                atom.set_description(&content);
+                atom.set_importance(0.3);
+                store.push(atom);
+            }
+            drop(store);
+            drop(u);
+            Ok(Json(ApiResponse::ok(json!({
+                "added": true,
+                "role": role,
+                "content_length": content.len(),
+            }))))
+        }
         _ => Err(AppError::BadRequest(format!(
-            "unknown context action: '{}'. Use: status, reconstruct, pre_work",
+            "unknown context action: '{}'. Use: status, reconstruct, pre_work, add",
             req.action
         ))),
     }

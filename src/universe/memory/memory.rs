@@ -80,6 +80,9 @@ impl MemoryAtom {
     }
 
     pub fn set_importance(&mut self, importance: f64) {
+        if !importance.is_finite() {
+            return;
+        }
         self.importance = importance.clamp(0.0, 1.0);
     }
 

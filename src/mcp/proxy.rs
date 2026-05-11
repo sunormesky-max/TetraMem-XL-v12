@@ -149,22 +149,22 @@ impl McpProxy {
             "tetramem_list_memories" => "/api/memory/list",
             "tetramem_pulse" => "/api/pulse",
             "tetramem_dream" => "/api/dream",
-            "tetramem_topology" => "/api/topology",
+            "tetramem_topology" => "/api/stats",
             "tetramem_regulate" => "/api/regulate",
             "tetramem_trace" => "/api/memory/trace",
             "tetramem_phase_detect" => "/api/phase/detect",
             "tetramem_materialize" => "/api/dark/materialize",
-            "tetramem_conservation_check" => "/api/conservation",
+            "tetramem_conservation_check" => "/api/stats",
             "tetramem_remember" => "/api/memory/remember",
             "tetramem_recall" => "/api/memory/recall",
             "tetramem_associate" => "/api/memory/associate",
-            "tetramem_consolidate" => "/api/consolidate",
+            "tetramem_consolidate" => "/api/dream/consolidate",
             "tetramem_context" => {
                 return Ok(ToolCallResult::ok(String::from(
                     "context: proxy mode — use REST directly",
                 )))
             }
-            "tetramem_reason" => "/api/reason",
+            "tetramem_reason" => "/api/memory/associate",
             "tetramem_emotion" => "/api/emotion/status",
             "tetramem_scale" => "/api/scale",
             "tetramem_watchdog" => "/api/watchdog/checkup",

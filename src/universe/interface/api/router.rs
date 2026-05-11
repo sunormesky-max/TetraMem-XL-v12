@@ -83,10 +83,11 @@ impl RateLimiter {
 
     fn check_and_increment(&self) -> bool {
         {
-            let mut last = self.last_reset.lock().unwrap();
-            if last.elapsed() >= std::time::Duration::from_secs(self.window_secs) {
-                self.count.store(0, Ordering::SeqCst);
-                *last = std::time::Instant::now();
+            if let Ok(mut last) = self.last_reset.lock() {
+                if last.elapsed() >= std::time::Duration::from_secs(self.window_secs) {
+                    self.count.store(0, Ordering::SeqCst);
+                    *last = std::time::Instant::now();
+                }
             }
         }
         let current = self.count.fetch_add(1, Ordering::SeqCst);

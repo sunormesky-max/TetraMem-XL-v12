@@ -18,12 +18,14 @@ fn parse_anchor_7d(arr: &[i32]) -> Result<Coord7D, String> {
     }
 }
 
-fn deserialize_anchor7d<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Coord7D, D::Error> {
+pub(crate) fn deserialize_anchor7d<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Coord7D, D::Error> {
     let arr: Vec<i32> = Vec::deserialize(de)?;
     parse_anchor_7d(&arr).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_anchor7d_opt<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_anchor7d_opt<'de, D: serde::Deserializer<'de>>(
     de: D,
 ) -> Result<Option<Coord7D>, D::Error> {
     let opt: Option<Vec<i32>> = Option::deserialize(de)?;
