@@ -147,6 +147,8 @@ pub struct MaintenanceConfig {
     pub max_interests: usize,
     #[serde(default)]
     pub deferred_binding: bool,
+    #[serde(default = "default_hebbian_target_avg")]
+    pub hebbian_target_avg: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,6 +286,7 @@ fn default_maintenance() -> MaintenanceConfig {
         interest_default_ttl_secs: default_interest_default_ttl_secs(),
         max_interests: default_max_interests(),
         deferred_binding: false,
+        hebbian_target_avg: default_hebbian_target_avg(),
     }
 }
 
@@ -397,6 +400,9 @@ fn default_interest_default_ttl_secs() -> u64 {
 }
 fn default_max_interests() -> usize {
     1000
+}
+fn default_hebbian_target_avg() -> f64 {
+    2.0
 }
 fn default_spontaneous_enabled() -> bool {
     true

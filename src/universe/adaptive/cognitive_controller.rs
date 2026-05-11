@@ -328,8 +328,9 @@ async fn run_maintenance_inner(
         let mut crystal = state.crystal.write().await;
         let store = state.memory_store.read().await;
 
-        let report =
-            RegulationEngine::new().regulate(&mut u, &mut h, &mut crystal, &store.memories);
+        let report = RegulationEngine::new()
+            .with_target_avg(cfg.hebbian_target_avg)
+            .regulate(&mut u, &mut h, &mut crystal, &store.memories);
         drop(store);
         drop(crystal);
         drop(h);

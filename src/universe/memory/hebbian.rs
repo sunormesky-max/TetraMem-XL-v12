@@ -479,6 +479,37 @@ impl HebbianMemory {
         }
     }
 
+    pub fn normalize_weights(&mut self, target_avg: f64) {
+        let n = self.edges.len();
+        if n == 0 {
+            return;
+        }
+        let total: f64 = self.edges.values().map(|e| e.weight).sum();
+        let current_avg = total / n as f64;
+        if current_avg <= target_avg || !current_avg.is_finite() {
+            return;
+        }
+        let scale = target_avg / current_avg;
+        let min_w = self.min_weight;
+        let mut to_remove = Vec::new();
+        for e in self.edges.values_mut() {
+            e.weight *= scale;
+            if e.weight < min_w {
+                e.weight = min_w;
+            }
+        }
+        for ((src, tgt), e) in &self.edges {
+            if e.weight <= min_w * 1.01 && e.traversal_count <= 1 {
+                to_remove.push((*src, *tgt));
+            }
+        }
+        for (src, tgt) in &to_remove {
+            self.edges.remove(&(*src, *tgt));
+            self.remove_dir_adj_entry(src, tgt);
+        }
+        self.rebuild_adj_from_edges();
+    }
+
     pub fn prune(&mut self) {
         let target = self.max_paths * 4 / 5;
         if self.edges.len() <= target {
@@ -908,5 +939,78 @@ mod tests {
 
         assert!(h.get_bias(&a, &b) > 0.0, "A→B should exist");
         assert_eq!(h.get_bias(&b, &a), 0.0, "B→A should not exist");
+    }
+
+    #[test]
+    fn normalize_weights_caps_average() {
+        let mut h = HebbianMemory::new();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([2, 0, 0, 0, 0, 0, 0]);
+        let d = Coord7D::new_even([3, 0, 0, 0, 0, 0, 0]);
+
+        for _ in 0..50 {
+            h.record_path(&[a, b], 1.0);
+            h.record_path(&[c, d], 1.0);
+        }
+
+        let avg_before = h.total_weight() / h.edge_count() as f64;
+        assert!(avg_before > 2.0, "avg should be high before normalization");
+
+        h.normalize_weights(2.0);
+
+        let avg_after = h.total_weight() / h.edge_count() as f64;
+        assert!(
+            (avg_after - 2.0).abs() < 0.2,
+            "avg should be near target: got {}",
+            avg_after
+        );
+        assert!(h.get_bias(&a, &b) > 0.0, "edges should still exist");
+    }
+
+    #[test]
+    fn normalize_weights_preserves_ordering() {
+        let mut h = HebbianMemory::new();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+        let c = Coord7D::new_even([2, 0, 0, 0, 0, 0, 0]);
+
+        for _ in 0..30 {
+            h.record_path(&[a, b], 1.0);
+        }
+        h.record_path(&[a, c], 1.0);
+
+        let ab_before = h.get_bias(&a, &b);
+        let ac_before = h.get_bias(&a, &c);
+        assert!(ab_before > ac_before);
+
+        h.normalize_weights(2.0);
+
+        let ab_after = h.get_bias(&a, &b);
+        let ac_after = h.get_bias(&a, &c);
+        assert!(
+            ab_after > ac_after,
+            "relative ordering should be preserved: ab={} ac={}",
+            ab_after,
+            ac_after
+        );
+    }
+
+    #[test]
+    fn normalize_weights_noop_when_below_target() {
+        let mut h = HebbianMemory::new();
+        let a = Coord7D::new_even([0; 7]);
+        let b = Coord7D::new_even([1, 0, 0, 0, 0, 0, 0]);
+
+        h.record_path(&[a, b], 0.5);
+        let w_before = h.get_bias(&a, &b);
+
+        h.normalize_weights(5.0);
+
+        let w_after = h.get_bias(&a, &b);
+        assert!(
+            (w_before - w_after).abs() < 1e-10,
+            "should not change when below target"
+        );
     }
 }

@@ -51,6 +51,7 @@ pub struct RegulationEngine {
     pub entropy_target: f64,
     pub stress_threshold: f64,
     pub crystal_decay_threshold: usize,
+    pub hebbian_target_avg: f64,
 }
 
 impl Default for RegulationEngine {
@@ -66,7 +67,13 @@ impl RegulationEngine {
             entropy_target: 0.5,
             stress_threshold: 0.8,
             crystal_decay_threshold: 5000,
+            hebbian_target_avg: 2.0,
         }
+    }
+
+    pub fn with_target_avg(mut self, target: f64) -> Self {
+        self.hebbian_target_avg = target;
+        self
     }
 
     pub fn regulate(
@@ -129,6 +136,19 @@ impl RegulationEngine {
                     ),
                 });
             }
+        }
+
+        hebbian.normalize_weights(self.hebbian_target_avg);
+        let avg_w = if hebbian.edge_count() > 0 {
+            hebbian.total_weight() / hebbian.edge_count() as f64
+        } else {
+            0.0
+        };
+        if avg_w > self.hebbian_target_avg * 1.1 {
+            actions.push(RegAction {
+                action: "hebbian_normalization".to_string(),
+                detail: format!("avg_weight normalized to {:.2}", avg_w),
+            });
         }
 
         RegulationReport {
