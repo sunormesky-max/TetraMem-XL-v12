@@ -486,6 +486,20 @@ impl AppConfig {
         Ok(config)
     }
 
+    pub fn load_without_validation(path: &Path) -> Result<Self, ConfigError> {
+        if !path.exists() {
+            return Err(ConfigError::Io(format!(
+                "config file not found: {}",
+                path.display()
+            )));
+        }
+        let content = fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
+        let mut config: Self =
+            toml::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        config.resolve_env_overrides();
+        Ok(config)
+    }
+
     fn resolve_env_overrides(&mut self) {
         if let Ok(secret) = std::env::var("TETRAMEM_JWT_SECRET") {
             if !secret.is_empty() {

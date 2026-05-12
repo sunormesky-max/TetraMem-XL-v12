@@ -58,6 +58,50 @@ impl TetraMemCore {
         Self::new(config.universe.total_energy)
     }
 
+    pub fn from_parts(
+        universe: DarkUniverse,
+        hebbian: HebbianMemory,
+        memories: Vec<MemoryAtom>,
+        crystal: CrystalEngine,
+    ) -> Self {
+        let mut core = Self {
+            universe,
+            hebbian,
+            memories,
+            crystal,
+            semantic: SemanticEngine::new(SemanticConfig::default()),
+            clustering: ClusteringEngine::with_default_config(),
+            context_window: Vec::new(),
+            context_max_tokens: 4096,
+        };
+        core.rebuild_derived_indexes();
+        core
+    }
+
+    pub fn rebuild_derived_indexes(&mut self) -> usize {
+        self.semantic = SemanticEngine::new(SemanticConfig::default());
+        self.clustering = ClusteringEngine::with_default_config();
+
+        let mut rebuilt = 0usize;
+        for mem in &self.memories {
+            match MemoryCodec::decode(&self.universe, mem) {
+                Ok(data) => {
+                    self.semantic.index_memory(mem, &data);
+                    self.clustering.register_memory(*mem.anchor(), &data);
+                    rebuilt += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        anchor = %mem.anchor(),
+                        error = %e,
+                        "failed to rebuild MCP derived indexes for memory"
+                    );
+                }
+            }
+        }
+        rebuilt
+    }
+
     // -- Core memory operations --
 
     pub fn remember(
@@ -371,5 +415,24 @@ mod tests {
         }
         assert!(!core.memories.is_empty());
         assert!(core.universe.verify_conservation());
+    }
+
+    #[test]
+    fn from_parts_rebuilds_semantic_index() {
+        let mut universe = DarkUniverse::new(1_000_000.0);
+        let anchor = Coord7D::new_even([8, 0, 0, 0, 0, 0, 0]);
+        let data = vec![0.1, 0.2, 0.3];
+        let memory = MemoryCodec::encode(&mut universe, &anchor, &data).unwrap();
+
+        let core = TetraMemCore::from_parts(
+            universe,
+            HebbianMemory::new(),
+            vec![memory],
+            CrystalEngine::new(),
+        );
+
+        let hits = core.semantic.search_similar(&data, 1);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].atom_key.vertices_basis[0], anchor.basis());
     }
 }

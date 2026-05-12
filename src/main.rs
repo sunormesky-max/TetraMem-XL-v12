@@ -178,11 +178,23 @@ fn main() {
             } else {
                 tetramem_v12::universe::neural::EmbeddingEngineHandle::disabled()
             };
-            let semantic_engine =
+            let mut semantic_engine =
                 SemanticEngine::new_with_neural(Default::default(), neural_engine);
-            let clustering_engine = tetramem_v12::universe::memory::ClusteringEngine::new(
+            let mut clustering_engine = tetramem_v12::universe::memory::ClusteringEngine::new(
                 tetramem_v12::universe::memory::ClusteringConfig::default(),
             );
+            let rebuilt_indexes = tetramem_v12::universe::api::rebuild_derived_memory_indexes(
+                &universe,
+                &memories,
+                &mut semantic_engine,
+                &mut clustering_engine,
+            );
+            if rebuilt_indexes > 0 {
+                tracing::info!(
+                    memories = rebuilt_indexes,
+                    "rebuilt semantic and clustering indexes from restored memories"
+                );
+            }
             let constitution =
                 tetramem_v12::universe::constitution::Constitution::tetramem_default();
             let (event_sender, event_rx) =
@@ -362,9 +374,17 @@ fn main() {
                         let mut interval = tokio::time::interval(std::time::Duration::from_secs(
                             conservation_interval,
                         ));
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                         interval.tick().await;
                         loop {
                             interval.tick().await;
+                            if state_bg
+                                .shutdown
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                tracing::info!("conservation monitor: shutdown signal received");
+                                break;
+                            }
                             if !tracing_on {
                                 continue;
                             }
@@ -400,9 +420,17 @@ fn main() {
                     let handle = tokio::spawn(async move {
                         let mut interval =
                             tokio::time::interval(std::time::Duration::from_secs(persist_interval));
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                         interval.tick().await;
                         loop {
                             interval.tick().await;
+                            if state_clone
+                                .shutdown
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                tracing::info!("auto-persist: shutdown signal received");
+                                break;
+                            }
                             if use_sqlite_clone {
                                 let sqlite_path = persist_path_clone.with_extension("db");
                                 let u = state_clone.universe.read().await;
@@ -498,7 +526,25 @@ fn main() {
             }
         }
         Some(Commands::Mcp { energy }) => {
-            let server = tetramem_v12::mcp::server::McpServer::new(energy);
+            let mcp_config = match AppConfig::load(&cli.config) {
+                Ok(config) => Ok(config),
+                Err(strict_err) => {
+                    AppConfig::load_without_validation(&cli.config).map_err(|lenient_err| {
+                        format!("strict: {}; lenient: {}", strict_err, lenient_err)
+                    })
+                }
+            };
+            let server = match mcp_config {
+                Ok(config) => tetramem_v12::mcp::server::McpServer::from_config(&config),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        energy,
+                        "MCP config load failed; starting isolated in-memory MCP state"
+                    );
+                    tetramem_v12::mcp::server::McpServer::new(energy)
+                }
+            };
             if let Err(e) = server.run() {
                 tracing::error!("MCP server error: {}", e);
             }

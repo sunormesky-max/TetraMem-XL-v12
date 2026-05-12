@@ -126,6 +126,10 @@ pub async fn start_server(
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
+    state
+        .shutdown
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+
     if state.config.backup.auto_persist {
         let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);
         let u = state.universe.read().await;

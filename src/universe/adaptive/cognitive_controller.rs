@@ -68,6 +68,7 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
         loop {
             let adaptive_interval = compute_adaptive_interval(base_interval, &ctrl);
             let mut interval = tokio::time::interval(Duration::from_secs(adaptive_interval));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             interval.tick().await;
             interval.tick().await;
             cycle += 1;

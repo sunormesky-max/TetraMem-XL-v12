@@ -22,5 +22,7 @@ pub mod types;
 
 pub use router::create_router;
 pub use server::start_server;
-pub use state::{AppState, MemoryStore, SharedState};
+pub use state::{
+    build_shared_state, rebuild_derived_memory_indexes, AppState, MemoryStore, SharedState,
+};
 pub use types::ApiResponse;
