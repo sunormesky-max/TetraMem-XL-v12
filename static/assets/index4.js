@@ -1,0 +1,1 @@
+import{a as r,a2 as s}from"./vendor-react.js";import{b as o}from"./index3.js";function d(t){const e=r.useRef(t);return r.useEffect(()=>{e.current=t}),r.useMemo(()=>(...a)=>e.current?.(...a),[])}var c=s[" useId ".trim().toString()]||(()=>{}),n=0;function m(t){const[e,a]=r.useState(c());return o(()=>{a(u=>u??String(n++))},[t]),t||(e?`radix-${e}`:"")}export{m as a,d as u};
