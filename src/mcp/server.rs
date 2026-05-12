@@ -363,9 +363,9 @@ impl McpServer {
             let total_energy = universe.total_energy();
             let mut core = TetraMemCore {
                 universe: std::mem::replace(&mut *universe, DarkUniverse::new(total_energy)),
-                hebbian: std::mem::replace(&mut *hebbian, HebbianMemory::new()),
+                hebbian: std::mem::take(&mut *hebbian),
                 memories: std::mem::take(&mut store.memories),
-                crystal: std::mem::replace(&mut *crystal, CrystalEngine::new()),
+                crystal: std::mem::take(&mut *crystal),
                 semantic: std::mem::replace(
                     &mut *semantic,
                     SemanticEngine::new(Default::default()),
