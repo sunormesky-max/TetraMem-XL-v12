@@ -297,6 +297,12 @@ impl PersistEngine {
         Self::deserialize_inner(snapshot, false)
     }
 
+    pub fn deserialize_relaxed(
+        snapshot: &UniverseSnapshot,
+    ) -> Result<(DarkUniverse, HebbianMemory, Vec<MemoryAtom>, CrystalEngine), PersistError> {
+        Self::deserialize_inner(snapshot, true)
+    }
+
     fn deserialize_inner(
         snapshot: &UniverseSnapshot,
         skip_checksum: bool,

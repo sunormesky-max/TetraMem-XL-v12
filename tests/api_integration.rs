@@ -377,3 +377,368 @@ async fn test_login() {
     assert!(!body["data"]["token"].as_str().unwrap().is_empty());
     assert!(body["data"]["expires_in"].as_u64().unwrap() > 0);
 }
+
+#[tokio::test]
+async fn test_remember_recall_workflow() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    let resp = app
+        .oneshot(post(
+            "/memory/remember",
+            json!({
+                "content": "The sky is blue on clear days",
+                "tags": ["weather", "observation"],
+                "category": "knowledge",
+                "importance": 0.8
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+    assert!(body["data"]["anchor"].is_string());
+
+    let app = create_router(state.clone());
+    let resp = app
+        .oneshot(post(
+            "/memory/recall",
+            json!({
+                "query": "sky blue",
+                "limit": 5
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+    assert!(!body["data"]["results"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_forget_preserves_conservation() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    let encode_resp = app
+        .oneshot(post(
+            "/memory/encode",
+            json!({"anchor": [30, 0, 0], "data": [42.0, 3.15]}),
+        ))
+        .await
+        .unwrap();
+    assert!(encode_resp.status().is_success());
+
+    let app = create_router(state.clone());
+    let forget_resp = app
+        .oneshot(post("/memory/forget", json!({"anchor": [30, 0, 0]})))
+        .await
+        .unwrap();
+    assert!(forget_resp.status().is_success());
+
+    let u = state.universe.read().await;
+    assert!(
+        u.verify_conservation(),
+        "conservation violated after forget"
+    );
+}
+
+#[tokio::test]
+async fn test_annotate_memory() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [40, 0, 0], "data": [1.0, 2.0], "tags": ["initial"]}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state.clone());
+    let resp = app
+        .oneshot(post(
+            "/memory/annotate",
+            json!({
+                "anchor": [40, 0, 0],
+                "tags": ["updated", "annotated"],
+                "description": "annotated memory",
+                "importance": 0.9
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_dark_flow_conservation() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/dark/materialize",
+        json!({"coord": [10, 0, 0, 0, 0, 0, 0], "energy": 500.0, "physical_ratio": 0.7}),
+    ))
+    .await
+    .unwrap();
+
+    let energy_before = {
+        let u = state.universe.read().await;
+        assert!(u.verify_conservation());
+        u.total_energy()
+    };
+
+    let app = create_router(state.clone());
+    let resp = app
+        .oneshot(post(
+            "/dark/flow",
+            json!({"coord": [10, 0, 0, 0, 0, 0, 0], "direction": "to_dark", "amount": 50.0}),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+
+    let u = state.universe.read().await;
+    assert!(
+        u.verify_conservation(),
+        "conservation violated after dark flow"
+    );
+    let energy_after = u.total_energy();
+    assert!((energy_after - energy_before).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn test_dark_dematerialize() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/dark/materialize",
+        json!({"coord": [50, 0, 0, 0, 0, 0, 0], "energy": 300.0, "physical_ratio": 0.6}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state.clone());
+    let resp = app
+        .oneshot(post(
+            "/dark/dematerialize",
+            json!({"coord": [50, 0, 0, 0, 0, 0, 0]}),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+
+    let u = state.universe.read().await;
+    assert!(
+        u.verify_conservation(),
+        "conservation violated after dematerialize"
+    );
+}
+
+#[tokio::test]
+async fn test_semantic_search() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [60, 0, 0], "data": [1.0, 2.0, 3.0], "description": "alpha vector"}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state.clone());
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [80, 0, 0], "data": [100.0, 200.0, 300.0], "description": "beta vector"}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state);
+    let resp = app
+        .oneshot(post(
+            "/semantic/search",
+            json!({"data": [1.0, 2.0, 3.0], "k": 2}),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_semantic_text_query() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [70, 0, 0], "data": [5.0], "description": "quantum entanglement experiment", "tags": ["physics"]}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state);
+    let resp = app
+        .oneshot(post("/semantic/query", json!({"text": "quantum", "k": 5})))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_memory_timeline() {
+    let state = build_state();
+
+    for i in 0..3 {
+        let app_clone = create_router(state.clone());
+        app_clone
+            .oneshot(post(
+                "/memory/encode",
+                json!({"anchor": [100 + i * 20, 0, 0], "data": [i as f64]}),
+            ))
+            .await
+            .unwrap();
+    }
+
+    let app = create_router(state);
+    let resp = app.oneshot(get("/memory/timeline")).await.unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_physics_status_and_distance() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    let resp = app.oneshot(get("/physics/status")).await.unwrap();
+    assert!(resp.status().is_success());
+
+    let app = create_router(state);
+    let resp = app
+        .oneshot(post(
+            "/physics/distance",
+            json!({"from": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "to": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+    assert!(body["data"]["distance_sq"].is_f64());
+}
+
+#[tokio::test]
+async fn test_cognitive_status_endpoints() {
+    let state = build_state();
+    let endpoints = vec![
+        "/cognitive/state",
+        "/cognitive/identity",
+        "/cognitive/meta",
+        "/cognitive/prediction",
+        "/semantic/status",
+        "/clustering/status",
+        "/constitution/status",
+        "/perception/status",
+        "/events/status",
+        "/watchdog/status",
+    ];
+    for endpoint in endpoints {
+        let app = create_router(state.clone());
+        let resp = app.oneshot(get(endpoint)).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "GET {} returned {}",
+            endpoint,
+            resp.status()
+        );
+        let body = body_json(resp.into_body()).await;
+        assert!(body["success"].as_bool().unwrap(), "GET {}", endpoint);
+    }
+}
+
+#[tokio::test]
+async fn test_context_endpoint() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    let resp = app
+        .oneshot(post("/context", json!({"action": "status"})))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+}
+
+#[tokio::test]
+async fn test_dream_consolidate() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [120, 0, 0], "data": [1.0, 2.0], "importance": 0.9}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state);
+    let resp = app
+        .oneshot(post(
+            "/dream/consolidate",
+            json!({"importance_threshold": 0.3}),
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = body_json(resp.into_body()).await;
+    assert!(body["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_phase_detect() {
+    let state = build_state();
+    let app = create_router(state);
+    let resp = app.oneshot(get("/phase/detect")).await.unwrap();
+    assert!(resp.status().is_success());
+}
+
+#[tokio::test]
+async fn test_hebbian_neighbors() {
+    let state = build_state();
+    let app = create_router(state.clone());
+
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [10, 0, 0], "data": [1.0]}),
+    ))
+    .await
+    .unwrap();
+    let app = create_router(state.clone());
+    app.oneshot(post(
+        "/memory/encode",
+        json!({"anchor": [30, 0, 0], "data": [2.0]}),
+    ))
+    .await
+    .unwrap();
+
+    let app = create_router(state);
+    let resp = app.oneshot(get("/hebbian/neighbors/10/0/0")).await.unwrap();
+    assert!(resp.status().is_success());
+}

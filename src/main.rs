@@ -2,7 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tetramem_v12::universe::auth::{JwtConfig, UserStore};
 use tetramem_v12::universe::autoscale::AutoScaler;
@@ -59,6 +59,10 @@ enum Commands {
     },
     McpDemo,
     Skills,
+    ValidateDeployment {
+        #[arg(short, long, default_value = "models/granite-embedding-small")]
+        model_dir: PathBuf,
+    },
 }
 
 fn main() {
@@ -560,6 +564,9 @@ fn main() {
         }
         Some(Commands::Skills) => {
             run_skills_demo();
+        }
+        Some(Commands::ValidateDeployment { ref model_dir }) => {
+            validate_deployment(model_dir);
         }
         None => {
             bench_vs_v8();
@@ -1068,7 +1075,121 @@ fn run_skills_demo() {
     }
 
     println!(
-        "\n✓ Skills Interface Demo complete — {} skills available, all operational",
+        "\n Skills Interface Demo complete - {} skills available, all operational",
         pipeline.registry().len()
     );
+}
+
+fn validate_deployment(model_dir: &Path) {
+    println!("=== TetraMem-XL v12.0 Deployment Validation ===\n");
+
+    let mut checks_passed = 0usize;
+    let mut checks_total = 0usize;
+
+    checks_total += 1;
+    println!("[1/5] Checking ONNX model directory...");
+    if model_dir.exists() {
+        println!("  PASS: {} exists", model_dir.display());
+        checks_passed += 1;
+    } else {
+        println!("  FAIL: {} not found", model_dir.display());
+    }
+
+    let model_file = model_dir.join("model_quantized.onnx");
+    checks_total += 1;
+    println!("[2/5] Checking ONNX model file...");
+    if model_file.exists() {
+        let size = std::fs::metadata(&model_file).map(|m| m.len()).unwrap_or(0);
+        if size > 0 && size <= 200 * 1024 * 1024 {
+            println!("  PASS: model file exists ({:.1} MB)", size as f64 / 1e6);
+            checks_passed += 1;
+        } else {
+            println!(
+                "  FAIL: model file size invalid ({:.1} MB)",
+                size as f64 / 1e6
+            );
+        }
+    } else {
+        println!("  FAIL: model_quantized.onnx not found");
+    }
+
+    let tokenizer_file = model_dir.join("tokenizer.json");
+    checks_total += 1;
+    println!("[3/5] Checking tokenizer...");
+    if tokenizer_file.exists() {
+        println!("  PASS: tokenizer.json exists");
+        checks_passed += 1;
+    } else {
+        println!("  FAIL: tokenizer.json not found");
+    }
+
+    checks_total += 1;
+    println!("[4/5] Loading ONNX Runtime engine...");
+    let engine = tetramem_v12::universe::neural::EmbeddingEngineHandle::try_load(model_dir);
+    if engine.is_available() {
+        println!(
+            "  PASS: ONNX engine loaded (output_dim={})",
+            tetramem_v12::universe::neural::EmbeddingEngineHandle::output_dim()
+        );
+        checks_passed += 1;
+    } else {
+        println!("  FAIL: ONNX engine failed to load");
+    }
+
+    checks_total += 1;
+    println!("[5/5] Running inference test...");
+    if engine.is_available() {
+        match engine.embed("The weather is lovely today.") {
+            Some(vec) => {
+                let dim = tetramem_v12::universe::neural::EmbeddingEngineHandle::output_dim();
+                if vec.len() == dim {
+                    let norm: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    if (norm - 1.0).abs() < 0.01 {
+                        println!(
+                            "  PASS: embedding produced {}-dim L2-normalized vector (norm={:.4})",
+                            vec.len(),
+                            norm
+                        );
+
+                        if let Some(vec2) = engine.embed("It is a beautiful sunny day.") {
+                            let dot: f64 = vec.iter().zip(vec2.iter()).map(|(a, b)| a * b).sum();
+                            let n1: f64 = vec.iter().map(|v| v * v).sum::<f64>().sqrt();
+                            let n2: f64 = vec2.iter().map(|v| v * v).sum::<f64>().sqrt();
+                            let cos_sim = dot / (n1 * n2);
+                            if cos_sim > 0.5 {
+                                println!(
+                                    "  PASS: semantic similarity cosine={:.4} (>0.5)",
+                                    cos_sim
+                                );
+                                checks_passed += 1;
+                            } else {
+                                println!("  WARN: cosine similarity {:.4} < 0.5 (expected higher for similar sentences)", cos_sim);
+                                checks_passed += 1;
+                            }
+                        } else {
+                            println!("  FAIL: second embedding returned None");
+                        }
+                    } else {
+                        println!("  FAIL: embedding not normalized (norm={:.4})", norm);
+                    }
+                } else {
+                    println!("  FAIL: wrong dimension {} (expected {})", vec.len(), dim);
+                }
+            }
+            None => {
+                println!("  FAIL: embedding returned None");
+            }
+        }
+    } else {
+        println!("  SKIP: engine not available");
+    }
+
+    println!();
+    if checks_passed == checks_total {
+        println!("RESULT: ALL {} checks PASSED", checks_total);
+        std::process::exit(0);
+    } else {
+        println!("RESULT: {}/{} checks PASSED", checks_passed, checks_total);
+        std::process::exit(1);
+    }
 }

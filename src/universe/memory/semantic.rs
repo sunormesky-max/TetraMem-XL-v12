@@ -486,10 +486,356 @@ pub struct KnnResult {
     pub distance: f64,
 }
 
-#[derive(Debug, Clone)]
+const HNSW_DEFAULT_M: usize = 12;
+const HNSW_DEFAULT_EF_CONSTRUCTION: usize = 50;
+const HNSW_DEFAULT_EF_SEARCH: usize = 100;
+const HNSW_ACTIVATION_THRESHOLD: usize = 200;
+const HNSW_TOMBSTONE_REBUILD_RATIO: f64 = 0.3;
+
+struct HnswLayer {
+    layers: Vec<HashMap<usize, Vec<usize>>>,
+    entry_point: Option<usize>,
+    max_layer: usize,
+    node_layer: HashMap<usize, usize>,
+    tombstones: HashSet<usize>,
+    m: usize,
+    m0: usize,
+    ef_construction: usize,
+    rng_state: u64,
+}
+
+impl std::fmt::Debug for HnswLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HnswLayer")
+            .field("num_layers", &self.layers.len())
+            .field("entry_point", &self.entry_point)
+            .field("max_layer", &self.max_layer)
+            .field("active_nodes", &self.node_layer.len())
+            .field("tombstones", &self.tombstones.len())
+            .finish()
+    }
+}
+
+impl HnswLayer {
+    fn new(m: usize, ef_construction: usize) -> Self {
+        Self {
+            layers: Vec::new(),
+            entry_point: None,
+            max_layer: 0,
+            node_layer: HashMap::new(),
+            tombstones: HashSet::new(),
+            m,
+            m0: m * 2,
+            ef_construction,
+            rng_state: 0x1234_5678_9ABC_DEF0u64,
+        }
+    }
+
+    fn random_level(&mut self) -> usize {
+        let mul = self.m as f64;
+        let ml = 1.0 / mul.ln();
+        let x = self.xorshift64();
+        let unit = (x as f64) / (u64::MAX as f64);
+        let level = (-unit.ln() * ml).floor() as usize;
+        level.min(16)
+    }
+
+    fn xorshift64(&mut self) -> u64 {
+        let mut x = self.rng_state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng_state = x;
+        x
+    }
+
+    fn needs_rebuild(&self, total: usize) -> bool {
+        if total == 0 || self.tombstones.is_empty() {
+            return false;
+        }
+        (self.tombstones.len() as f64) / (total as f64) > HNSW_TOMBSTONE_REBUILD_RATIO
+    }
+
+    fn insert(
+        &mut self,
+        node_id: usize,
+        similarity_fn: &dyn Fn(usize) -> f64,
+        _all_embeddings: &dyn Fn(usize) -> Option<usize>,
+        _total_entries: usize,
+    ) {
+        let level = self.random_level();
+
+        while self.layers.len() <= level {
+            self.layers.push(HashMap::new());
+        }
+
+        self.node_layer.insert(node_id, level);
+
+        match self.entry_point {
+            None => {
+                for l in 0..=level {
+                    self.layers[l].insert(node_id, Vec::new());
+                }
+                self.entry_point = Some(node_id);
+                self.max_layer = level;
+            }
+            Some(ep) => {
+                let ep_sim = similarity_fn(ep);
+                let mut cur = ep;
+                let mut cur_sim = ep_sim;
+
+                for l in (level + 1..=self.max_layer).rev() {
+                    let changed = self.search_layer_greedy(cur, cur_sim, l, similarity_fn);
+                    cur = changed.0;
+                    cur_sim = changed.1;
+                }
+
+                for l in (0..=level.min(self.max_layer)).rev() {
+                    let max_conn = if l == 0 { self.m0 } else { self.m };
+                    let candidates = self.search_layer_beam(
+                        cur,
+                        cur_sim,
+                        l,
+                        self.ef_construction,
+                        similarity_fn,
+                    );
+
+                    let neighbors: Vec<usize> = candidates
+                        .into_iter()
+                        .filter(|&(id, _)| id != node_id && !self.tombstones.contains(&id))
+                        .take(max_conn)
+                        .map(|(id, _)| id)
+                        .collect();
+
+                    if let Some(layer) = self.layers.get_mut(l) {
+                        layer.insert(node_id, neighbors.clone());
+                    }
+
+                    for &neighbor in &neighbors {
+                        let needs_prune = {
+                            let layer = self.layers.get_mut(l).unwrap();
+                            let conn_list = layer.entry(neighbor).or_insert_with(Vec::new);
+                            if conn_list.contains(&node_id) {
+                                continue;
+                            }
+                            conn_list.push(node_id);
+                            conn_list.len() > max_conn
+                        };
+                        if needs_prune {
+                            let scored: Vec<usize> = {
+                                let layer = self.layers.get(l).unwrap();
+                                let conn_list = layer.get(&neighbor).unwrap();
+                                let mut pairs: Vec<(usize, f64)> = conn_list
+                                    .iter()
+                                    .filter(|id| !self.tombstones.contains(id))
+                                    .map(|&id| (id, similarity_fn(id)))
+                                    .collect();
+                                pairs.sort_by(|a, b| {
+                                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                pairs.into_iter().take(max_conn).map(|(id, _)| id).collect()
+                            };
+                            if let Some(layer) = self.layers.get_mut(l) {
+                                if let Some(conn_list) = layer.get_mut(&neighbor) {
+                                    *conn_list = scored;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(&best_id) = neighbors.first() {
+                        let best_sim = similarity_fn(best_id);
+                        if best_sim > cur_sim {
+                            cur = best_id;
+                            cur_sim = best_sim;
+                        }
+                    }
+                }
+
+                if level > self.max_layer {
+                    for l in self.max_layer + 1..=level {
+                        if let Some(layer) = self.layers.get_mut(l) {
+                            layer.insert(node_id, Vec::new());
+                        }
+                    }
+                    self.entry_point = Some(node_id);
+                    self.max_layer = level;
+                }
+            }
+        }
+    }
+
+    fn search_layer_greedy(
+        &self,
+        start: usize,
+        start_sim: f64,
+        layer: usize,
+        similarity_fn: &dyn Fn(usize) -> f64,
+    ) -> (usize, f64) {
+        let mut cur = start;
+        let mut cur_sim = start_sim;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            if let Some(neighbors) = self.layers.get(layer).and_then(|l| l.get(&cur)) {
+                for &neighbor in neighbors {
+                    if self.tombstones.contains(&neighbor) {
+                        continue;
+                    }
+                    let sim = similarity_fn(neighbor);
+                    if sim > cur_sim {
+                        cur = neighbor;
+                        cur_sim = sim;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        (cur, cur_sim)
+    }
+
+    fn search_layer_beam(
+        &self,
+        start: usize,
+        start_sim: f64,
+        layer: usize,
+        ef: usize,
+        similarity_fn: &dyn Fn(usize) -> f64,
+    ) -> Vec<(usize, f64)> {
+        let mut visited: HashSet<usize> = HashSet::new();
+        visited.insert(start);
+
+        let mut candidates: Vec<(usize, f64)> = vec![(start, start_sim)];
+        let mut result: Vec<(usize, f64)> = vec![(start, start_sim)];
+
+        while !candidates.is_empty() {
+            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let (closest_id, closest_sim) = candidates.remove(0);
+
+            let worst_result_sim = result.iter().map(|r| r.1).fold(f64::INFINITY, f64::min);
+
+            if result.len() >= ef && closest_sim < worst_result_sim {
+                break;
+            }
+
+            if let Some(neighbors) = self.layers.get(layer).and_then(|l| l.get(&closest_id)) {
+                for &neighbor in neighbors {
+                    if visited.contains(&neighbor) || self.tombstones.contains(&neighbor) {
+                        continue;
+                    }
+                    visited.insert(neighbor);
+                    let sim = similarity_fn(neighbor);
+
+                    if result.len() < ef
+                        || sim > result.iter().map(|r| r.1).fold(f64::INFINITY, f64::min)
+                    {
+                        candidates.push((neighbor, sim));
+                        result.push((neighbor, sim));
+                        result.sort_by(|a, b| {
+                            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        if result.len() > ef {
+                            let min_idx = result
+                                .iter()
+                                .enumerate()
+                                .min_by(|(_, a), (_, b)| {
+                                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|(i, _)| i);
+                            if let Some(idx) = min_idx {
+                                result.remove(idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        result
+    }
+
+    fn mark_tombstone(&mut self, node_id: usize) {
+        self.tombstones.insert(node_id);
+    }
+
+    fn is_tombstone(&self, node_id: usize) -> bool {
+        self.tombstones.contains(&node_id)
+    }
+
+    fn search(
+        &self,
+        query_sim_fn: &dyn Fn(usize) -> f64,
+        k: usize,
+        ef_search: usize,
+    ) -> Vec<(usize, f64)> {
+        let ep = match self.entry_point {
+            Some(ep) if !self.tombstones.contains(&ep) => ep,
+            Some(_) => {
+                let mut found = None;
+                for layer in self.layers.iter() {
+                    for &node_id in layer.keys() {
+                        if !self.tombstones.contains(&node_id) {
+                            found = Some(node_id);
+                            break;
+                        }
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                match found {
+                    Some(n) => n,
+                    None => return Vec::new(),
+                }
+            }
+            None => return Vec::new(),
+        };
+
+        let ep_sim = query_sim_fn(ep);
+        let mut cur = ep;
+        let mut cur_sim = ep_sim;
+
+        for l in (1..=self.max_layer).rev() {
+            let improved = self.search_layer_greedy(cur, cur_sim, l, query_sim_fn);
+            cur = improved.0;
+            cur_sim = improved.1;
+        }
+
+        let ef = ef_search.max(k);
+        let mut candidates = self.search_layer_beam(cur, cur_sim, 0, ef, query_sim_fn);
+
+        candidates.retain(|(id, _)| !self.tombstones.contains(id));
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(k);
+        candidates
+    }
+}
+
 pub struct EmbeddingIndex {
     entries: Vec<EmbeddingEntry>,
     key_to_idx: HashMap<AtomKey, usize>,
+    hnsw: HnswConfig,
+    hnsw_layer: Option<Box<HnswLayer>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HnswConfig {
+    pub enabled: bool,
+    pub m: usize,
+    pub ef_construction: usize,
+    pub ef_search: usize,
+}
+
+impl Default for HnswConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            m: HNSW_DEFAULT_M,
+            ef_construction: HNSW_DEFAULT_EF_CONSTRUCTION,
+            ef_search: HNSW_DEFAULT_EF_SEARCH,
+        }
+    }
 }
 
 impl EmbeddingIndex {
@@ -497,13 +843,25 @@ impl EmbeddingIndex {
         Self {
             entries: Vec::new(),
             key_to_idx: HashMap::new(),
+            hnsw: HnswConfig::default(),
+            hnsw_layer: None,
         }
+    }
+
+    pub fn with_hnsw_config(mut self, config: HnswConfig) -> Self {
+        self.hnsw = config;
+        self
     }
 
     pub fn upsert(&mut self, key: AtomKey, embedding: SemanticEmbedding, category: Option<String>) {
         if let Some(&idx) = self.key_to_idx.get(&key) {
             self.entries[idx].embedding = embedding;
             self.entries[idx].category = category;
+            if let Some(ref layer) = self.hnsw_layer {
+                if !layer.is_tombstone(idx) {
+                    self.rebuild_hnsw_if_needed();
+                }
+            }
         } else {
             let idx = self.entries.len();
             self.key_to_idx.insert(key.clone(), idx);
@@ -512,11 +870,22 @@ impl EmbeddingIndex {
                 embedding,
                 category,
             });
+
+            if self.hnsw.enabled && self.entries.len() >= HNSW_ACTIVATION_THRESHOLD {
+                if self.hnsw_layer.is_none() {
+                    self.rebuild_hnsw();
+                } else {
+                    self.insert_into_hnsw(idx);
+                }
+            }
         }
     }
 
     pub fn remove(&mut self, key: &AtomKey) {
         if let Some(idx) = self.key_to_idx.remove(key) {
+            if let Some(ref mut layer) = self.hnsw_layer {
+                layer.mark_tombstone(idx);
+            }
             self.entries.swap_remove(idx);
             if idx < self.entries.len() {
                 let swapped_key = self.entries[idx].atom_key.clone();
@@ -531,7 +900,64 @@ impl EmbeddingIndex {
             .map(|&idx| &self.entries[idx].embedding)
     }
 
-    pub fn search_knn(&self, query: &SemanticEmbedding, k: usize) -> Vec<KnnResult> {
+    fn insert_into_hnsw(&mut self, node_id: usize) {
+        let entries = &self.entries;
+        let query_emb = match entries.get(node_id) {
+            Some(e) => e.embedding.clone(),
+            None => return,
+        };
+
+        let similarity_fn = |other_id: usize| -> f64 {
+            entries
+                .get(other_id)
+                .map(|e| query_emb.cosine_similarity(&e.embedding))
+                .unwrap_or(0.0)
+        };
+        let all_emb = |_id: usize| -> Option<usize> { None };
+
+        if let Some(ref mut layer) = self.hnsw_layer {
+            layer.insert(node_id, &similarity_fn, &all_emb, entries.len());
+        }
+    }
+
+    fn rebuild_hnsw_if_needed(&mut self) {
+        if let Some(ref layer) = self.hnsw_layer {
+            if layer.needs_rebuild(self.entries.len()) {
+                self.rebuild_hnsw();
+            }
+        }
+    }
+
+    fn rebuild_hnsw(&mut self) {
+        if !self.hnsw.enabled || self.entries.len() < HNSW_ACTIVATION_THRESHOLD {
+            self.hnsw_layer = None;
+            return;
+        }
+
+        let mut new_layer = Box::new(HnswLayer::new(self.hnsw.m, self.hnsw.ef_construction));
+        let entries = &self.entries;
+
+        for node_id in 0..entries.len() {
+            let query_emb = entries[node_id].embedding.clone();
+            let similarity_fn = |other_id: usize| -> f64 {
+                entries
+                    .get(other_id)
+                    .map(|e| query_emb.cosine_similarity(&e.embedding))
+                    .unwrap_or(0.0)
+            };
+            let all_emb = |_id: usize| -> Option<usize> { None };
+
+            new_layer.insert(node_id, &similarity_fn, &all_emb, entries.len());
+        }
+
+        self.hnsw_layer = Some(new_layer);
+    }
+
+    pub fn rebuild_hnsw_index(&mut self) {
+        self.rebuild_hnsw();
+    }
+
+    fn search_knn_brute_force(&self, query: &SemanticEmbedding, k: usize) -> Vec<KnnResult> {
         if k == 0 || self.entries.is_empty() {
             return Vec::new();
         }
@@ -587,6 +1013,37 @@ impl EmbeddingIndex {
         top_k
     }
 
+    pub fn search_knn(&self, query: &SemanticEmbedding, k: usize) -> Vec<KnnResult> {
+        if k == 0 || self.entries.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(ref layer) = self.hnsw_layer {
+            let entries = &self.entries;
+            let query_clone = query.clone();
+            let sim_fn = |id: usize| -> f64 {
+                entries
+                    .get(id)
+                    .map(|e| query_clone.cosine_similarity(&e.embedding))
+                    .unwrap_or(0.0)
+            };
+
+            let candidates = layer.search(&sim_fn, k, self.hnsw.ef_search);
+            if !candidates.is_empty() {
+                return candidates
+                    .into_iter()
+                    .map(|(id, sim)| KnnResult {
+                        atom_key: entries[id].atom_key.clone(),
+                        similarity: sim,
+                        distance: query.euclidean_distance(&entries[id].embedding),
+                    })
+                    .collect();
+            }
+        }
+
+        self.search_knn_brute_force(query, k)
+    }
+
     pub fn search_knn_with_scores(
         &self,
         query: &SemanticEmbedding,
@@ -619,6 +1076,16 @@ impl EmbeddingIndex {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub fn hnsw_stats(&self) -> Option<(usize, usize, usize)> {
+        self.hnsw_layer.as_ref().map(|layer| {
+            (
+                layer.layers.len(),
+                layer.node_layer.len(),
+                layer.tombstones.len(),
+            )
+        })
     }
 }
 
@@ -1652,6 +2119,10 @@ pub struct SemanticConfig {
     pub concept_similarity_threshold: f64,
     pub concept_min_size: usize,
     pub auto_link_similarity: f64,
+    pub hnsw_m: usize,
+    pub hnsw_ef_construction: usize,
+    pub hnsw_ef_search: usize,
+    pub hnsw_enabled: bool,
 }
 
 impl Default for SemanticConfig {
@@ -1662,6 +2133,10 @@ impl Default for SemanticConfig {
             concept_similarity_threshold: 0.85,
             concept_min_size: 2,
             auto_link_similarity: 0.9,
+            hnsw_m: HNSW_DEFAULT_M,
+            hnsw_ef_construction: HNSW_DEFAULT_EF_CONSTRUCTION,
+            hnsw_ef_search: HNSW_DEFAULT_EF_SEARCH,
+            hnsw_enabled: true,
         }
     }
 }
@@ -1688,9 +2163,15 @@ impl SemanticEngine {
         let concept_extractor = ConceptExtractor::new()
             .with_similarity_threshold(config.concept_similarity_threshold)
             .with_min_cluster_size(config.concept_min_size);
+        let hnsw_cfg = HnswConfig {
+            enabled: config.hnsw_enabled,
+            m: config.hnsw_m,
+            ef_construction: config.hnsw_ef_construction,
+            ef_search: config.hnsw_ef_search,
+        };
         Self {
             config,
-            index: EmbeddingIndex::new(),
+            index: EmbeddingIndex::new().with_hnsw_config(hnsw_cfg),
             graph: KnowledgeGraph::new(),
             concept_extractor,
             tfidf_index: TfIdfIndex::new(),
@@ -1702,9 +2183,15 @@ impl SemanticEngine {
         let concept_extractor = ConceptExtractor::new()
             .with_similarity_threshold(config.concept_similarity_threshold)
             .with_min_cluster_size(config.concept_min_size);
+        let hnsw_cfg = HnswConfig {
+            enabled: config.hnsw_enabled,
+            m: config.hnsw_m,
+            ef_construction: config.hnsw_ef_construction,
+            ef_search: config.hnsw_ef_search,
+        };
         Self {
             config,
-            index: EmbeddingIndex::new(),
+            index: EmbeddingIndex::new().with_hnsw_config(hnsw_cfg),
             graph: KnowledgeGraph::new(),
             concept_extractor,
             tfidf_index: TfIdfIndex::new(),
@@ -2714,6 +3201,209 @@ mod tests {
         assert!(
             (sim - sim_reverse).abs() < 1e-10,
             "similarity should be symmetric even with partial neural"
+        );
+    }
+
+    #[test]
+    fn hnsw_small_dataset_uses_brute_force() {
+        let mut index = EmbeddingIndex::new();
+        for i in 0..10 {
+            let key = AtomKey {
+                vertices_basis: [[i; 7]; 4],
+                vertices_even: [true; 4],
+            };
+            let data: Vec<f64> = (0..5).map(|d| (i * 5 + d) as f64).collect();
+            index.upsert(key, SemanticEmbedding::from_data(&data), None);
+        }
+        assert!(index.hnsw_layer.is_none());
+        let query = SemanticEmbedding::from_data(&[0.0, 1.0, 2.0, 3.0, 4.0]);
+        let results = index.search_knn(&query, 3);
+        assert_eq!(results.len(), 3);
+        assert!(results[0].similarity >= results[1].similarity);
+    }
+
+    #[test]
+    fn hnsw_activates_at_threshold() {
+        let mut index = EmbeddingIndex::new();
+        for i in 0..HNSW_ACTIVATION_THRESHOLD {
+            let key = AtomKey {
+                vertices_basis: [[i as i32; 7]; 4],
+                vertices_even: [i % 2 == 0; 4],
+            };
+            let data: Vec<f64> = (0..8).map(|d| ((i * 8 + d) as f64).sin()).collect();
+            index.upsert(key, SemanticEmbedding::from_data(&data), None);
+        }
+        assert!(
+            index.hnsw_layer.is_some(),
+            "HNSW should activate at {} entries",
+            HNSW_ACTIVATION_THRESHOLD
+        );
+        let query = SemanticEmbedding::from_data(&[0.5; 8]);
+        let results = index.search_knn(&query, 5);
+        assert_eq!(results.len(), 5);
+        for i in 1..results.len() {
+            assert!(results[i - 1].similarity >= results[i].similarity);
+        }
+    }
+
+    #[test]
+    fn hnsw_recall_vs_brute_force() {
+        let mut index = EmbeddingIndex::new();
+        let n = 300;
+        for i in 0..n {
+            let key = AtomKey {
+                vertices_basis: [[i; 7]; 4],
+                vertices_even: [i % 2 == 0; 4],
+            };
+            let mut data = vec![0.0f64; 8];
+            for (d, slot) in data.iter_mut().enumerate() {
+                *slot = ((i as f64) * 0.1 + (d as f64) * 0.05).sin();
+            }
+            index.upsert(key, SemanticEmbedding::from_data(&data), None);
+        }
+        assert!(index.hnsw_layer.is_some());
+
+        let query = SemanticEmbedding::from_data(&[0.3, 0.2, 0.1, 0.05, -0.1, -0.2, 0.4, 0.15]);
+        let k = 10;
+
+        let hnsw_results = index.search_knn(&query, k);
+        let brute_results = index.search_knn_brute_force(&query, k);
+
+        assert_eq!(hnsw_results.len(), k);
+        assert_eq!(brute_results.len(), k);
+
+        let hnsw_keys: HashSet<_> = hnsw_results.iter().map(|r| r.atom_key.clone()).collect();
+        let brute_keys: HashSet<_> = brute_results.iter().map(|r| r.atom_key.clone()).collect();
+        let overlap = hnsw_keys.intersection(&brute_keys).count();
+        let recall = overlap as f64 / k as f64;
+        assert!(
+            recall >= 0.8,
+            "HNSW recall@{} should be >= 0.8, got {} (overlap={})",
+            k,
+            recall,
+            overlap
+        );
+    }
+
+    #[test]
+    fn hnsw_upsert_existing_updates_index() {
+        let mut index = EmbeddingIndex::new();
+        for i in 0..HNSW_ACTIVATION_THRESHOLD {
+            let key = AtomKey {
+                vertices_basis: [[i as i32; 7]; 4],
+                vertices_even: [true; 4],
+            };
+            index.upsert(key, SemanticEmbedding::from_data(&[i as f64]), None);
+        }
+        assert!(index.hnsw_layer.is_some());
+        let key0 = AtomKey {
+            vertices_basis: [[0; 7]; 4],
+            vertices_even: [true; 4],
+        };
+        index.upsert(key0.clone(), SemanticEmbedding::from_data(&[999.0]), None);
+        assert_eq!(index.len(), HNSW_ACTIVATION_THRESHOLD);
+        let query = SemanticEmbedding::from_data(&[999.0]);
+        let results = index.search_knn(&query, 1);
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn hnsw_remove_uses_tombstone() {
+        let mut index = EmbeddingIndex::new();
+        let mut keys = Vec::new();
+        for i in 0..HNSW_ACTIVATION_THRESHOLD {
+            let key = AtomKey {
+                vertices_basis: [[i as i32; 7]; 4],
+                vertices_even: [true; 4],
+            };
+            index.upsert(key.clone(), SemanticEmbedding::from_data(&[i as f64]), None);
+            keys.push(key);
+        }
+        assert!(index.hnsw_layer.is_some());
+        index.remove(&keys[0]);
+        assert_eq!(index.len(), HNSW_ACTIVATION_THRESHOLD - 1);
+        let stats = index.hnsw_stats().unwrap();
+        assert_eq!(stats.2, 1, "should have 1 tombstone");
+    }
+
+    #[test]
+    fn hnsw_returns_empty_for_empty_index() {
+        let index = EmbeddingIndex::new();
+        let query = SemanticEmbedding::from_data(&[1.0, 2.0, 3.0]);
+        assert!(index.search_knn(&query, 5).is_empty());
+    }
+
+    #[test]
+    fn hnsw_returns_empty_for_k_zero() {
+        let mut index = EmbeddingIndex::new();
+        let key = AtomKey {
+            vertices_basis: [[0; 7]; 4],
+            vertices_even: [true; 4],
+        };
+        index.upsert(key, SemanticEmbedding::from_data(&[1.0]), None);
+        let query = SemanticEmbedding::from_data(&[1.0]);
+        assert!(index.search_knn(&query, 0).is_empty());
+    }
+
+    #[test]
+    fn hnsw_exact_recall_on_clustered_data() {
+        let mut index = EmbeddingIndex::new();
+        let n_per_cluster = 80;
+        let n_clusters = 3;
+        let mut cluster_centers: Vec<Vec<f64>> = Vec::new();
+        for c in 0..n_clusters {
+            let center: Vec<f64> = (0..8).map(|d| ((c * 100 + d) as f64 * 1.5).cos()).collect();
+            cluster_centers.push(center);
+        }
+        for (c, center) in cluster_centers.iter().enumerate() {
+            for j in 0..n_per_cluster {
+                let idx = c * n_per_cluster + j;
+                let key = AtomKey {
+                    vertices_basis: [[idx as i32; 7]; 4],
+                    vertices_even: [idx % 2 == 0; 4],
+                };
+                let noise: Vec<f64> = center
+                    .iter()
+                    .enumerate()
+                    .map(|(d, v)| v + (((j * 7 + d * 3) as f64).sin() * 0.1))
+                    .collect();
+                index.upsert(key, SemanticEmbedding::from_data(&noise), None);
+            }
+        }
+
+        let query = SemanticEmbedding::from_data(&cluster_centers[0]);
+        let hnsw_results = index.search_knn(&query, 10);
+        let brute_results = index.search_knn_brute_force(&query, 10);
+
+        let hnsw_keys: HashSet<_> = hnsw_results.iter().map(|r| r.atom_key.clone()).collect();
+        let brute_keys: HashSet<_> = brute_results.iter().map(|r| r.atom_key.clone()).collect();
+        let overlap = hnsw_keys.intersection(&brute_keys).count();
+        assert!(
+            overlap >= 7,
+            "clustered data recall should be >= 7/10, got {}/10",
+            overlap
+        );
+    }
+
+    #[test]
+    fn hnsw_config_customization() {
+        let cfg = HnswConfig {
+            enabled: false,
+            m: 8,
+            ef_construction: 30,
+            ef_search: 50,
+        };
+        let mut index = EmbeddingIndex::new().with_hnsw_config(cfg);
+        for i in 0..500 {
+            let key = AtomKey {
+                vertices_basis: [[i; 7]; 4],
+                vertices_even: [true; 4],
+            };
+            index.upsert(key, SemanticEmbedding::from_data(&[i as f64]), None);
+        }
+        assert!(
+            index.hnsw_layer.is_none(),
+            "HNSW should not activate when disabled"
         );
     }
 }
