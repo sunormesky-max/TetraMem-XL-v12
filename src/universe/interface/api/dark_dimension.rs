@@ -100,6 +100,39 @@ pub async fn dark_query(
     }
 }
 
+#[derive(Serialize)]
+pub struct DarkNodeSummary {
+    pub coord: String,
+    pub is_manifested: bool,
+    pub energy: f64,
+}
+
+#[derive(Serialize)]
+pub struct DarkListResponse {
+    pub nodes: Vec<DarkNodeSummary>,
+    pub total: usize,
+}
+
+pub async fn dark_list(
+    State(state): State<SharedState>,
+) -> Result<Json<ApiResponse<DarkListResponse>>, AppError> {
+    let u = state.universe.read().await;
+    let threshold = u.manifestation_threshold();
+
+    let nodes: Vec<DarkNodeSummary> = u
+        .get_all_nodes()
+        .iter()
+        .map(|(coord, node)| DarkNodeSummary {
+            coord: format!("{:?}", coord.basis()),
+            is_manifested: node.is_manifested_with(threshold),
+            energy: node.energy().total(),
+        })
+        .collect();
+
+    let total = nodes.len();
+    Ok(Json(ApiResponse::ok(DarkListResponse { nodes, total })))
+}
+
 #[derive(Deserialize)]
 pub struct DarkFlowRequest {
     pub coord: [i32; 7],
@@ -309,6 +342,10 @@ pub struct DarkPressureResponse {
     pub avg_physical_ratio: f64,
     pub dark_node_count: usize,
     pub physical_node_count: usize,
+    pub total_dark_energy: f64,
+    pub total_physical_energy: f64,
+    pub pressure_ratio: f64,
+    pub dimension_balance_ok: bool,
 }
 
 pub async fn dark_dimension_pressure(
@@ -340,10 +377,27 @@ pub async fn dark_dimension_pressure(
         0.0
     };
 
+    let total_physical = stats.physical_energy;
+    let total_dark = stats.dark_energy;
+    let pressure_ratio = if total_physical > 0.0 {
+        total_dark / total_physical
+    } else if total_dark > 0.0 {
+        f64::INFINITY
+    } else {
+        1.0
+    };
+    let max_dim = dim_totals.iter().cloned().fold(0.0_f64, f64::max);
+    let min_dim = dim_totals.iter().cloned().fold(f64::MAX, f64::min);
+    let dimension_balance_ok = max_dim - min_dim < stats.total_energy * 0.1;
+
     Ok(Json(ApiResponse::ok(DarkPressureResponse {
         dimension_spread: dim_totals,
         avg_physical_ratio,
         dark_node_count: stats.dark_nodes,
         physical_node_count: stats.manifested_nodes,
+        total_dark_energy: total_dark,
+        total_physical_energy: total_physical,
+        pressure_ratio,
+        dimension_balance_ok,
     })))
 }

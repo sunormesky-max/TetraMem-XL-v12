@@ -213,30 +213,80 @@ pub async fn emotion_crystallize(
 
 #[derive(Serialize)]
 pub struct EmotionStatusResponse {
-    pub hebbian_edges_functional: usize,
-    pub hebbian_edges_perceived: usize,
+    pub pad: PadSummary,
+    pub quadrant: String,
+    pub functional_cluster: String,
+    pub recommendations: Vec<String>,
     pub hebbian_edges_total: usize,
-    pub clusters: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct PadSummary {
+    pub pleasure: f64,
+    pub arousal: f64,
+    pub dominance: f64,
 }
 
 pub async fn emotion_status(
     State(state): State<SharedState>,
 ) -> Json<ApiResponse<EmotionStatusResponse>> {
+    let u = state.universe.read().await;
     let h = state.hebbian.read().await;
 
-    let functional = h.edges_by_emotion(EmotionSource::Functional).len();
-    let perceived = h.edges_by_emotion(EmotionSource::Perceived).len();
-    let total = h.edge_count();
+    let reading = crate::universe::cognitive::emotion::EmotionMapper::read(&u);
+    let pad = reading.pad;
+    let quadrant = reading.quadrant.to_string();
 
-    let clusters: Vec<String> = crate::universe::functional_emotion::EmotionCluster::all()
-        .iter()
-        .map(|c| format!("{} ({:?}/{:?})", c.name(), c.valence(), c.arousal()))
-        .collect();
+    let func = crate::universe::cognitive::functional_emotion::FunctionalEmotion::from_pad(
+        pad,
+        EmotionSource::Functional,
+    );
+    let functional_cluster = func.cluster.name().to_string();
+
+    let recommendations = generate_recommendations(&pad, &quadrant, &functional_cluster);
+
+    let hebbian_edges_total = h.edge_count();
 
     Json(ApiResponse::ok(EmotionStatusResponse {
-        hebbian_edges_functional: functional,
-        hebbian_edges_perceived: perceived,
-        hebbian_edges_total: total,
-        clusters,
+        pad: PadSummary {
+            pleasure: pad.pleasure,
+            arousal: pad.arousal,
+            dominance: pad.dominance,
+        },
+        quadrant,
+        functional_cluster,
+        recommendations,
+        hebbian_edges_total,
     }))
+}
+
+fn generate_recommendations(
+    pad: &crate::universe::cognitive::emotion::PadVector,
+    quadrant: &str,
+    cluster: &str,
+) -> Vec<String> {
+    let mut recs = Vec::new();
+
+    if pad.pleasure < -0.3 {
+        recs.push("愉悦度偏低，建议注入正向记忆以稳定情绪平衡".to_string());
+    }
+    if pad.pleasure > 0.5 {
+        recs.push("愉悦度较高，适合进行高强度学习与记忆整合".to_string());
+    }
+    if pad.arousal > 0.5 {
+        recs.push("唤醒度偏高，推荐使用探索性脉冲扩展知识边界".to_string());
+    }
+    if pad.arousal < -0.3 {
+        recs.push("唤醒度偏低，建议触发梦境循环激活潜在记忆路径".to_string());
+    }
+    if pad.dominance < -0.3 {
+        recs.push("支配度不足，系统不确定性较高，建议运行认知反思".to_string());
+    }
+    if pad.dominance > 0.3 {
+        recs.push("支配度良好，系统处于高置信状态，可执行巩固操作".to_string());
+    }
+
+    recs.push(format!("当前情绪聚类: {} — 象限: {}", cluster, quadrant));
+
+    recs
 }

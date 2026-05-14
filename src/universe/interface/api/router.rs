@@ -36,8 +36,8 @@ use super::cognitive::{
     semantic_status, watchdog_checkup, watchdog_status,
 };
 use super::dark_dimension::{
-    dark_dematerialize, dark_dimension_pressure, dark_flow, dark_materialize, dark_query,
-    dark_transfer,
+    dark_dematerialize, dark_dimension_pressure, dark_flow, dark_list, dark_materialize,
+    dark_query, dark_transfer,
 };
 use super::emotion_ops::{emotion_crystallize, emotion_dream, emotion_pulse, emotion_status};
 use super::health::{get_health, get_metrics, get_openapi, get_stats};
@@ -320,7 +320,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/pulse", post(fire_pulse))
         .route("/dream", post(run_dream))
         .route("/hebbian/neighbors/:x/:y/:z", get(get_hebbian_neighbors))
-        .route("/dark/query", post(dark_query))
+        .route("/dark/query", get(dark_list).post(dark_query))
         .route("/dark/flow", post(dark_flow))
         .route("/dark/transfer", post(dark_transfer))
         .route("/dark/materialize", post(dark_materialize))
