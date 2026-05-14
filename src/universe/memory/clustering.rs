@@ -643,9 +643,15 @@ impl TopologyBridge {
         }
 
         fn find(parent: &mut HashMap<Coord7D, Coord7D>, x: Coord7D) -> Coord7D {
+            let max_iters = parent.len() + 1;
             let mut root = x;
+            let mut iters = 0;
             while parent[&root] != root {
                 root = parent[&root];
+                iters += 1;
+                if iters > max_iters {
+                    break;
+                }
             }
             let mut curr = x;
             while curr != root {

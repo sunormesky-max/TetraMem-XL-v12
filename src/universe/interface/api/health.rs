@@ -10,9 +10,9 @@ use super::state::SharedState;
 use super::types::*;
 
 pub async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<HealthResponse>> {
-    let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let report = UniverseObserver::inspect(&u, &h, &store.memories);
 
@@ -35,9 +35,9 @@ pub async fn get_health(State(state): State<SharedState>) -> Json<ApiResponse<He
 }
 
 pub async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<StatsResponse>> {
-    let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
     let stats = u.stats();
 
     tracing::debug!(nodes = stats.active_nodes, utilization = %format!("{:.1}%", stats.utilization * 100.0), "stats requested");
@@ -64,9 +64,9 @@ pub async fn get_stats(State(state): State<SharedState>) -> Json<ApiResponse<Sta
 }
 
 pub async fn get_metrics(State(state): State<SharedState>) -> String {
-    let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
     let stats = u.stats();
     metrics::update_universe_metrics(
         stats.active_nodes,

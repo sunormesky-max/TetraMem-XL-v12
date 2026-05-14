@@ -25,11 +25,15 @@ const FORGET_THRESHOLD: f64 = 0.05;
 const IDENTITY_RESTORE_MIN: f64 = 0.85;
 const MIN_INTERVAL_SECS: u64 = 30;
 const MAX_INTERVAL_SECS: u64 = 600;
+const MAX_CONSECUTIVE_DREAMS: u32 = 5;
+const DREAM_COOLDOWN_CYCLES: u32 = 3;
 
 struct ControllerState {
     forget_tracker: HashMap<String, u32>,
     last_elapsed_ms: f64,
     consecutive_failures: u32,
+    consecutive_dreams: u32,
+    expanded_this_cycle: bool,
     spontaneous: Option<SpontaneousDrive>,
 }
 
@@ -58,6 +62,8 @@ pub fn spawn_cognitive_controller(state: Arc<AppState>) -> Option<tokio::task::J
             forget_tracker: HashMap::new(),
             last_elapsed_ms: 0.0,
             consecutive_failures: 0,
+            consecutive_dreams: 0,
+            expanded_this_cycle: false,
             spontaneous: if spontaneous_cfg.enabled {
                 Some(SpontaneousDrive::new(&spontaneous_cfg))
             } else {
@@ -148,10 +154,12 @@ async fn run_maintenance_inner(
 ) -> Result<(), String> {
     let start = std::time::Instant::now();
 
+    ctrl.expanded_this_cycle = false;
+
     let (cognitive_state, mem_count) = {
-        let u = state.universe.read().await;
         let h = state.hebbian.read().await;
         let store = state.memory_store.read().await;
+        let u = state.universe.read().await;
         let cs = CognitiveStateEngine::assess(&u, &h, &store.memories);
         let mc = store.memories.len();
         (cs, mc)
@@ -161,8 +169,11 @@ async fn run_maintenance_inner(
         return Ok(());
     }
 
+    let dream_on_cooldown = ctrl.consecutive_dreams > MAX_CONSECUTIVE_DREAMS
+        && ctrl.consecutive_dreams < MAX_CONSECUTIVE_DREAMS + DREAM_COOLDOWN_CYCLES;
     let should_dream = cognitive_state.dream_readiness.should_dream
-        && cognitive_state.dream_readiness.urgency >= cfg.dream_min_urgency;
+        && cognitive_state.dream_readiness.urgency >= cfg.dream_min_urgency
+        && !dream_on_cooldown;
     let vigor = cognitive_state.overall_vigor;
 
     restore_identity_importance(state).await;
@@ -201,9 +212,9 @@ async fn run_maintenance_inner(
     }
 
     if should_dream {
-        let u = state.universe.read().await;
-        let store = state.memory_store.read().await;
         let mut h = state.hebbian.write().await;
+        let store = state.memory_store.read().await;
+        let u = state.universe.read().await;
 
         let dream = DreamEngine::new();
         let report = {
@@ -257,6 +268,12 @@ async fn run_maintenance_inner(
         );
     }
 
+    if should_dream {
+        ctrl.consecutive_dreams += 1;
+    } else if ctrl.consecutive_dreams > MAX_CONSECUTIVE_DREAMS + DREAM_COOLDOWN_CYCLES {
+        ctrl.consecutive_dreams = 0;
+    }
+
     if cfg.aging_enabled {
         let accessed: Vec<String> = {
             let store = state.memory_store.read().await;
@@ -285,10 +302,10 @@ async fn run_maintenance_inner(
     }
 
     if cfg.clustering_enabled {
-        let u = state.universe.read().await;
-        let store = state.memory_store.read().await;
         let mut clustering = state.clustering.write().await;
         let mut h = state.hebbian.write().await;
+        let store = state.memory_store.read().await;
+        let u = state.universe.read().await;
 
         let report = clustering.run_maintenance_cycle(&store.memories, &mut h, &u);
         drop(h);
@@ -324,14 +341,17 @@ async fn run_maintenance_inner(
     }
 
     if cfg.regulation_enabled && mem_count > 100 {
-        let mut u = state.universe.write().await;
-        let mut h = state.hebbian.write().await;
         let mut crystal = state.crystal.write().await;
+        let mut h = state.hebbian.write().await;
         let store = state.memory_store.read().await;
+        let mut u = state.universe.write().await;
 
         let report = RegulationEngine::new()
             .with_target_avg(cfg.hebbian_target_avg)
             .regulate(&mut u, &mut h, &mut crystal, &store.memories);
+        if report.stress_level > 0.7 {
+            ctrl.expanded_this_cycle = true;
+        }
         drop(store);
         drop(crystal);
         drop(h);
@@ -353,13 +373,13 @@ async fn run_maintenance_inner(
         }
     }
 
-    if cfg.watchdog_enabled && cycle.is_multiple_of(5) {
-        let mut u = state.universe.write().await;
-        let mut h = state.hebbian.write().await;
-        let mut crystal = state.crystal.write().await;
-        let store = state.memory_store.read().await;
+    if cfg.watchdog_enabled && cycle.is_multiple_of(5) && !ctrl.expanded_this_cycle {
         let mut watchdog = state.watchdog.write().await;
         let mut backup = state.backup.write().await;
+        let mut crystal = state.crystal.write().await;
+        let mut h = state.hebbian.write().await;
+        let store = state.memory_store.read().await;
+        let mut u = state.universe.write().await;
 
         let report = watchdog.checkup_with_backup(
             &mut u,
@@ -558,9 +578,9 @@ async fn auto_forget_step(
     cycle: u64,
     ctrl: &mut ControllerState,
 ) {
-    let mut u = state.universe.write().await;
     let guard = state.identity_guard.read().await;
     let mut store = state.memory_store.write().await;
+    let mut u = state.universe.write().await;
 
     let mut to_erase: Vec<usize> = Vec::new();
     let mut over_limit_count: usize = 0;

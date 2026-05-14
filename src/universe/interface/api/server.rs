@@ -132,10 +132,10 @@ pub async fn start_server(
 
     if state.config.backup.auto_persist {
         let persist_path = std::path::PathBuf::from(&state.config.backup.persist_path);
-        let u = state.universe.read().await;
+        let c = state.crystal.read().await;
         let h = state.hebbian.read().await;
         let store = state.memory_store.read().await;
-        let c = state.crystal.read().await;
+        let u = state.universe.read().await;
         if state.config.backup.persist_backend == "sqlite" {
             let sqlite_path = persist_path.with_extension("db");
             match crate::universe::persist_sqlite::PersistSqlite::save(

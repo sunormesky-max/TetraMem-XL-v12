@@ -15,11 +15,11 @@ pub async fn create_backup(
     State(state): State<SharedState>,
 ) -> Result<(StatusCode, Json<ApiResponse<CreateBackupResponse>>), AppError> {
     let report = {
-        let u = state.universe.read().await;
+        let mut bs = state.backup.write().await;
+        let c = state.crystal.read().await;
         let h = state.hebbian.read().await;
         let store = state.memory_store.read().await;
-        let c = state.crystal.read().await;
-        let mut bs = state.backup.write().await;
+        let u = state.universe.read().await;
         bs.create_backup(BackupTrigger::Manual, &u, &h, &store.memories, &c)
             .map_err(|e| AppError::Internal(e.to_string()))?
     };

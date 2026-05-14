@@ -57,8 +57,8 @@ pub async fn emotion_pulse(
         }
     }
 
-    let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
+    let u = state.universe.read().await;
 
     let source = req.source;
     let pt = match req.pulse_type.to_lowercase().as_str() {
@@ -120,9 +120,9 @@ pub async fn emotion_dream(
     State(state): State<SharedState>,
     Json(req): Json<EmotionDreamRequest>,
 ) -> Result<Json<ApiResponse<EmotionDreamResponse>>, AppError> {
-    let u = state.universe.read().await;
     let mut h = state.hebbian.write().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let es = match req.emotion_source.as_str() {
         "Perceived" => EmotionSource::Perceived,
@@ -182,9 +182,9 @@ pub async fn emotion_crystallize(
             )));
         }
     }
-    let u = state.universe.read().await;
-    let h = state.hebbian.read().await;
     let mut crystal = state.crystal.write().await;
+    let h = state.hebbian.read().await;
+    let u = state.universe.read().await;
 
     let es = match req.emotion_source.as_str() {
         "Perceived" => EmotionSource::Perceived,

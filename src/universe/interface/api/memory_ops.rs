@@ -90,8 +90,8 @@ pub async fn encode_memory(
 
     let (novelty_report, knn_cache) = {
         let sem = state.semantic.read().await;
-        let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
+        let store = state.memory_store.read().await;
         let knn = sem.search_similar(&req.data, 5);
         let knn_distances: Vec<(f64, usize)> = knn
             .iter()
@@ -121,6 +121,9 @@ pub async fn encode_memory(
         req.importance * 0.7 + novelty_report.suggested_importance * 0.3
     };
 
+    let interests = state.interests.read().await;
+    let mut sem = state.semantic.write().await;
+    let mut h = state.hebbian.write().await;
     let mut store = state.memory_store.write().await;
     let mut u = state.universe.write().await;
 
@@ -149,21 +152,16 @@ pub async fn encode_memory(
 
             drop(u);
 
-            {
-                let mut sem = state.semantic.write().await;
-                sem.index_memory(&atom, &req.data);
-                drop(sem);
+            sem.index_memory(&atom, &req.data);
 
-                if !knn_cache.is_empty() {
-                    let mut h = state.hebbian.write().await;
-                    for (hit_key, hit_sim) in &knn_cache {
-                        if let Some(other) = store.memories.iter().find(|m| {
-                            let mk = crate::universe::memory::AtomKey::from_atom(m);
-                            mk == *hit_key
-                        }) {
-                            let semantic_strength = hit_sim * 1.5;
-                            h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
-                        }
+            if !knn_cache.is_empty() {
+                for (hit_key, hit_sim) in &knn_cache {
+                    if let Some(other) = store.memories.iter().find(|m| {
+                        let mk = crate::universe::memory::AtomKey::from_atom(m);
+                        mk == *hit_key
+                    }) {
+                        let semantic_strength = hit_sim * 1.5;
+                        h.boost_edge(atom.anchor(), other.anchor(), semantic_strength);
                     }
                 }
             }
@@ -175,25 +173,19 @@ pub async fn encode_memory(
                 importance,
             });
 
-            {
-                let interests = state.interests.read().await;
-                let h_surf = state.hebbian.read().await;
-                let surfacer = crate::universe::memory::MemorySurfacer::default();
-                let surfaced = surfacer.surface(
-                    &anchor,
-                    &h_surf,
-                    &store.memories,
-                    &interests,
-                    novelty_report.score,
-                );
-                drop(interests);
-                drop(h_surf);
-                for mut sm in surfaced {
-                    sm.seq = state
-                        .surfaced_seq
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let _ = state.memory_stream.send(sm);
-                }
+            let surfacer = crate::universe::memory::MemorySurfacer::default();
+            let surfaced = surfacer.surface(
+                &anchor,
+                &h,
+                &store.memories,
+                &interests,
+                novelty_report.score,
+            );
+            for mut sm in surfaced {
+                sm.seq = state
+                    .surfaced_seq
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let _ = state.memory_stream.send(sm);
             }
 
             Ok((
@@ -229,8 +221,8 @@ pub async fn decode_memory(
     State(state): State<SharedState>,
     Json(req): Json<DecodeRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<DecodeResponse>>), AppError> {
-    let u = state.universe.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     if let Some(c) = metrics::API_DECODE_TOTAL.get() {
         c.inc();
@@ -335,10 +327,10 @@ pub async fn memory_trace(
     State(state): State<SharedState>,
     Json(req): Json<TraceRequest>,
 ) -> Result<Json<ApiResponse<Vec<TraceHop>>>, AppError> {
-    let u = state.universe.read().await;
-    let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
+    let h = state.hebbian.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let source = req.anchor;
     let max_hops = req.max_hops.unwrap_or(10).min(100);
@@ -399,6 +391,7 @@ pub async fn annotate_memory(
     if let Some(ref source) = req.source {
         validate_field_len("source", source, MAX_STRING_FIELD_LEN).map_err(AppError::BadRequest)?;
     }
+    let mut guard = state.identity_guard.write().await;
     let mut store = state.memory_store.write().await;
     let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
@@ -417,23 +410,20 @@ pub async fn annotate_memory(
             if let Some(ref src) = req.source {
                 mem.set_source(src);
             }
-            {
-                let mut guard = state.identity_guard.write().await;
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let report = guard.check_importance_change(mem, req.importance, now_ms);
-                mem.set_importance(report.allowed_importance);
-                if report.protected {
-                    tracing::warn!(
-                        anchor = %anchor_str,
-                        requested = req.importance,
-                        allowed = report.allowed_importance,
-                        reason = %report.reason,
-                        "identity guard: importance change protected"
-                    );
-                }
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let report = guard.check_importance_change(mem, req.importance, now_ms);
+            mem.set_importance(report.allowed_importance);
+            if report.protected {
+                tracing::warn!(
+                    anchor = %anchor_str,
+                    requested = req.importance,
+                    allowed = report.allowed_importance,
+                    reason = %report.reason,
+                    "identity guard: importance change protected"
+                );
             }
 
             let resp = AnnotateResponse {
@@ -469,8 +459,8 @@ pub async fn semantic_search(
             super::types::MAX_DATA_DIM
         )));
     }
-    let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
+    let store = state.memory_store.read().await;
     let k = req.k.clamp(1, 100);
 
     let results = sem.search_similar(&req.data, k);
@@ -506,8 +496,8 @@ pub async fn semantic_text_query(
     State(state): State<SharedState>,
     Json(req): Json<SemanticTextQueryRequest>,
 ) -> Json<ApiResponse<SemanticSearchResponse>> {
-    let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
+    let store = state.memory_store.read().await;
     let k = req.k.clamp(1, 100);
     let text = if req.text.len() > MAX_STRING_FIELD_LEN {
         let mut end = MAX_STRING_FIELD_LEN;
@@ -548,8 +538,8 @@ pub async fn semantic_relations(
     State(state): State<SharedState>,
     Json(req): Json<SemanticRelationRequest>,
 ) -> Result<Json<ApiResponse<SemanticRelationResponse>>, AppError> {
-    let store = state.memory_store.read().await;
     let sem = state.semantic.read().await;
+    let store = state.memory_store.read().await;
     let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 

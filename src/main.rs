@@ -437,10 +437,10 @@ fn main() {
                             }
                             if use_sqlite_clone {
                                 let sqlite_path = persist_path_clone.with_extension("db");
-                                let u = state_clone.universe.read().await;
+                                let c = state_clone.crystal.read().await;
                                 let h = state_clone.hebbian.read().await;
                                 let store = state_clone.memory_store.read().await;
-                                let c = state_clone.crystal.read().await;
+                                let u = state_clone.universe.read().await;
                                 match tetramem_v12::universe::persist_sqlite::PersistSqlite::save(
                                     &sqlite_path, &u, &h, &store.memories, &c,
                                 ) {
@@ -453,10 +453,10 @@ fn main() {
                                 }
                             } else {
                                 let json = {
-                                    let u = state_clone.universe.read().await;
+                                    let c = state_clone.crystal.read().await;
                                     let h = state_clone.hebbian.read().await;
                                     let store = state_clone.memory_store.read().await;
-                                    let c = state_clone.crystal.read().await;
+                                    let u = state_clone.universe.read().await;
                                     tetramem_v12::universe::persist::PersistEngine::to_json(
                                         &u, &h, &store.memories, &c,
                                     )

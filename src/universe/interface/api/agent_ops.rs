@@ -51,8 +51,8 @@ pub async fn remember(
 
     let novelty_report = {
         let sem = state.semantic.read().await;
-        let store = state.memory_store.read().await;
         let h = state.hebbian.read().await;
+        let store = state.memory_store.read().await;
         let knn = sem.search_similar(&data, 5);
         let knn_distances: Vec<(f64, usize)> = knn
             .iter()
@@ -129,10 +129,11 @@ pub async fn remember(
 
     let deferred = state.config.maintenance.deferred_binding;
 
+    let interests = state.interests.read().await;
     let mut sem = state.semantic.write().await;
-    let mut store = state.memory_store.write().await;
-    let mut h = state.hebbian.write().await;
     let mut cl = state.clustering.write().await;
+    let mut h = state.hebbian.write().await;
+    let mut store = state.memory_store.write().await;
 
     sem.index_memory(&atom, &data);
     let similar = sem.search_similar(&data, 5);
@@ -155,7 +156,6 @@ pub async fn remember(
     store.push(atom);
 
     {
-        let interests = state.interests.read().await;
         let surfacer = crate::universe::memory::MemorySurfacer::default();
         let surfaced = surfacer.surface(
             &anchor,
@@ -164,7 +164,6 @@ pub async fn remember(
             &interests,
             novelty_report.score,
         );
-        drop(interests);
         for mut sm in surfaced {
             sm.seq = state
                 .surfaced_seq
@@ -227,9 +226,9 @@ pub async fn recall(
     };
     let ideal_phys = ideal_anchor.physical();
 
-    let u = state.universe.read().await;
-    let store = state.memory_store.read().await;
     let h = state.hebbian.read().await;
+    let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let mut spatial_hits: Vec<(usize, f64)> = Vec::new();
     for (i, mem) in store.memories.iter().enumerate() {
@@ -361,10 +360,10 @@ pub async fn associate(
         cl.compute_ideal_anchor(&topic_data, &u)
     };
 
-    let u = state.universe.read().await;
-    let store = state.memory_store.read().await;
-    let h = state.hebbian.read().await;
     let crystal = state.crystal.read().await;
+    let h = state.hebbian.read().await;
+    let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let seed_anchor = store
         .memories
@@ -424,24 +423,24 @@ pub async fn consolidate(
     let importance_threshold = req.importance_threshold;
 
     let report = {
-        let u = state.universe.read().await;
         let mut h = state.hebbian.write().await;
         let store = state.memory_store.read().await;
+        let u = state.universe.read().await;
         crate::universe::dream::DreamEngine::new().dream(&u, &mut h, &store.memories)
     };
 
     let maintenance_report = {
-        let u = state.universe.read().await;
-        let store = state.memory_store.read().await;
-        let mut h = state.hebbian.write().await;
         let mut cl = state.clustering.write().await;
+        let mut h = state.hebbian.write().await;
+        let store = state.memory_store.read().await;
+        let u = state.universe.read().await;
         cl.run_maintenance_cycle(&store.memories, &mut h, &u);
         (cl, h)
     };
     let (_cl, h) = maintenance_report;
 
-    let u = state.universe.read().await;
     let store = state.memory_store.read().await;
+    let u = state.universe.read().await;
 
     let mut weakened = 0usize;
     let mut strengthened = 0usize;
@@ -640,8 +639,8 @@ pub async fn context(
                 let cl = state.clustering.read().await;
                 cl.compute_ideal_anchor(&data, &u)
             };
-            let mut u = state.universe.write().await;
             let mut store = state.memory_store.write().await;
+            let mut u = state.universe.write().await;
             let encode_result =
                 crate::universe::memory::MemoryCodec::encode(&mut u, &anchor, &data);
             if let Ok(mut atom) = encode_result {
@@ -674,8 +673,8 @@ pub async fn forget(
     let anchor = req.anchor;
     let anchor_str = format!("{}", &anchor);
 
-    let mut u = state.universe.write().await;
     let mut store = state.memory_store.write().await;
+    let mut u = state.universe.write().await;
 
     let pos = store.index.get(&anchor_str).copied();
     match pos {

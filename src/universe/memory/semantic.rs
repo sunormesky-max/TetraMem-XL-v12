@@ -675,15 +675,18 @@ impl HnswLayer {
         let mut cur = start;
         let mut cur_sim = start_sim;
         let mut changed = true;
+        let mut visited = HashSet::new();
+        visited.insert(start);
         while changed {
             changed = false;
             if let Some(neighbors) = self.layers.get(layer).and_then(|l| l.get(&cur)) {
                 for &neighbor in neighbors {
-                    if self.tombstones.contains(&neighbor) {
+                    if self.tombstones.contains(&neighbor) || visited.contains(&neighbor) {
                         continue;
                     }
                     let sim = similarity_fn(neighbor);
                     if sim > cur_sim {
+                        visited.insert(neighbor);
                         cur = neighbor;
                         cur_sim = sim;
                         changed = true;

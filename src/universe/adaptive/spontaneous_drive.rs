@@ -163,9 +163,9 @@ impl SpontaneousDrive {
     async fn spontaneous_pulse(&mut self, state: &Arc<AppState>) {
         let (seeds, cold_zones) =
             {
-                let u = state.universe.read().await;
                 let h = state.hebbian.read().await;
                 let store = state.memory_store.read().await;
+                let u = state.universe.read().await;
                 let attention = crate::universe::cognitive::attention::AttentionEngine::new()
                     .compute(&u, &h, &store.memories);
                 let seeds = attention.recommendation.suggested_pulse_anchors;
@@ -199,8 +199,8 @@ impl SpontaneousDrive {
             };
 
             let visited = {
-                let u = state.universe.read().await;
                 let mut h = state.hebbian.write().await;
+                let u = state.universe.read().await;
                 let engine = PulseEngine::new();
                 let report = engine.propagate(&coord, pulse_type, &u, &mut h);
                 drop(h);
@@ -242,8 +242,8 @@ impl SpontaneousDrive {
         }
 
         let candidates = {
-            let store = state.memory_store.read().await;
             let h = state.hebbian.read().await;
+            let store = state.memory_store.read().await;
             let mut scored: Vec<(usize, f64)> = Vec::new();
             for (i, mem) in store.memories.iter().enumerate() {
                 let anchor_str = format!("{}", mem.anchor());
@@ -278,8 +278,8 @@ impl SpontaneousDrive {
         }
 
         let contradictions = {
-            let store = state.memory_store.read().await;
             let h = state.hebbian.read().await;
+            let store = state.memory_store.read().await;
             let mut found = 0usize;
             for &(idx, _score) in &candidates {
                 let mem = &store.memories[idx];
@@ -324,9 +324,9 @@ impl SpontaneousDrive {
 
     async fn curiosity_probe(&mut self, state: &Arc<AppState>) {
         let self_model = {
-            let u = state.universe.read().await;
             let h = state.hebbian.read().await;
             let store = state.memory_store.read().await;
+            let u = state.universe.read().await;
             MetaCognitiveEngine::assess(&u, &h, &store.memories)
         };
 

@@ -353,12 +353,12 @@ impl McpServer {
         let state = self.state.clone();
         let context_window = &mut self.context_window;
         self.runtime.block_on(async move {
-            let mut universe = state.universe.write().await;
+            let mut semantic = state.semantic.write().await;
+            let mut crystal = state.crystal.write().await;
+            let mut clustering = state.clustering.write().await;
             let mut hebbian = state.hebbian.write().await;
             let mut store = state.memory_store.write().await;
-            let mut crystal = state.crystal.write().await;
-            let mut semantic = state.semantic.write().await;
-            let mut clustering = state.clustering.write().await;
+            let mut universe = state.universe.write().await;
 
             let total_energy = universe.total_energy();
             let mut core = TetraMemCore {
