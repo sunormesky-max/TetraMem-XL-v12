@@ -258,8 +258,10 @@ pub struct DarkMaterializeRequest {
 #[derive(Serialize)]
 pub struct DarkMaterializeResponse {
     pub success: bool,
+    pub coord: String,
     pub manifested: bool,
     pub energy: f64,
+    pub physical_ratio: f64,
 }
 
 pub async fn dark_materialize(
@@ -277,6 +279,7 @@ pub async fn dark_materialize(
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
     };
+    let coord_str = format!("{:?}", coord.basis());
 
     let mut u = state.universe.write().await;
 
@@ -291,8 +294,10 @@ pub async fn dark_materialize(
             };
             Ok(Json(ApiResponse::ok(DarkMaterializeResponse {
                 success: true,
+                coord: coord_str,
                 manifested,
                 energy,
+                physical_ratio: req.physical_ratio,
             })))
         }
         Err(e) => Err(AppError::Energy(e)),
@@ -309,6 +314,8 @@ pub struct DarkDematerializeRequest {
 #[derive(Serialize)]
 pub struct DarkDematerializeResponse {
     pub success: bool,
+    pub coord: String,
+    pub energy: f64,
     pub recovered_energy: f64,
 }
 
@@ -321,12 +328,15 @@ pub async fn dark_dematerialize(
         "odd" => Coord7D::new_odd(req.coord),
         _ => Coord7D::new_even(req.coord),
     };
+    let coord_str = format!("{:?}", coord.basis());
 
     let mut u = state.universe.write().await;
 
     match u.dematerialize(&coord) {
         Some(field) => Ok(Json(ApiResponse::ok(DarkDematerializeResponse {
             success: true,
+            coord: coord_str,
+            energy: field.total(),
             recovered_energy: field.total(),
         }))),
         None => Err(AppError::NotFound(format!(

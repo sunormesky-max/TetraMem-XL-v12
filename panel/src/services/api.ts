@@ -401,7 +401,7 @@ export const api = {
     post<TraceHop[]>("/memory/trace", { anchor, max_hops: maxHops }),
   getTimeline: () => get<TimelineDay[]>("/memory/timeline"),
   semanticRelations: (anchor: number[]) =>
-    post<SemanticSearchResult["data"]>("/memory/semantic_relations", { anchor }),
+    post<SemanticSearchResult["data"]>("/semantic/relations", { anchor }),
 
   firePulse: (source: number[], pulseType?: string) =>
     post<PulseResult["data"]>("/pulse", {
@@ -442,9 +442,9 @@ export const api = {
   getClusterStatus: () => get<ClusterStatusResult["data"]>("/cluster/status"),
   initCluster: () => post<ClusterStatusResult["data"]>("/cluster/init", {}),
   addClusterNode: (nodeId: number, addr: string) =>
-    post<ClusterStatusResult["data"]>("/cluster/add", { node_id: nodeId, addr }),
+    post<ClusterStatusResult["data"]>("/cluster/add-node", { node_id: nodeId, addr }),
   removeClusterNode: (nodeId: number) =>
-    post<unknown>("/cluster/remove", { node_id: nodeId }),
+    post<unknown>("/cluster/remove-node", { node_id: nodeId }),
   clusterPropose: (key: string, value: string) =>
     post<{ log_index: number }>("/cluster/propose", { key, value }),
 

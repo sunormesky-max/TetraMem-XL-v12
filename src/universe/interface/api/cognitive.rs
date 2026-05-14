@@ -116,6 +116,9 @@ pub async fn run_dream(State(state): State<SharedState>) -> Json<ApiResponse<Dre
         memories_consolidated: report.memories_consolidated,
         edges_before: report.hebbian_edges_before,
         edges_after: report.hebbian_edges_after,
+        new_edges: report
+            .hebbian_edges_after
+            .saturating_sub(report.hebbian_edges_before),
         weight_before: report.weight_before,
         weight_after: report.weight_after,
     }))

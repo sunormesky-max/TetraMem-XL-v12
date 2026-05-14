@@ -2,6 +2,7 @@
 // Copyright (c) 2025 sunormesky-max (Liu Qihang)
 // TetraMem-XL v12.0 — 7D Dark Universe Memory System
 use axum::{extract::State, Json};
+use serde::Serialize;
 
 use crate::universe::cluster::{EnergyQuorumEntry, H6PhaseTransitionProposal, QuorumStatus};
 use crate::universe::error::AppError;
@@ -9,9 +10,22 @@ use crate::universe::error::AppError;
 use super::state::SharedState;
 use super::types::*;
 
+#[derive(Serialize)]
+pub struct PhaseDetectResponse {
+    pub phase: String,
+    pub crystal_count: usize,
+    pub amorphous_count: usize,
+    pub transition_ongoing: bool,
+    pub super_channel_candidates: usize,
+    pub existing_super_channels: usize,
+    pub avg_edge_weight: f64,
+    pub phase_coherent: bool,
+    pub requires_consensus: bool,
+}
+
 pub async fn detect_phase_transition(
     State(state): State<SharedState>,
-) -> Result<Json<ApiResponse<crate::universe::crystal::PhaseTransitionReport>>, AppError> {
+) -> Result<Json<ApiResponse<PhaseDetectResponse>>, AppError> {
     let u = state.universe.read().await;
     let h = state.hebbian.read().await;
     let c = state.crystal.read().await;
@@ -26,7 +40,25 @@ pub async fn detect_phase_transition(
         );
     }
 
-    Ok(Json(ApiResponse::ok(report)))
+    let phase = if report.phase_coherent {
+        "crystalline"
+    } else if report.requires_consensus {
+        "transitioning"
+    } else {
+        "amorphous"
+    };
+
+    Ok(Json(ApiResponse::ok(PhaseDetectResponse {
+        phase: phase.to_string(),
+        crystal_count: report.existing_super_channels,
+        amorphous_count: report.super_channel_candidates,
+        transition_ongoing: report.requires_consensus,
+        super_channel_candidates: report.super_channel_candidates,
+        existing_super_channels: report.existing_super_channels,
+        avg_edge_weight: report.avg_edge_weight,
+        phase_coherent: report.phase_coherent,
+        requires_consensus: report.requires_consensus,
+    })))
 }
 
 pub async fn phase_consensus(

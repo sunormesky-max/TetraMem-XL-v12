@@ -210,6 +210,7 @@ pub struct SemanticHit {
 
 #[derive(Deserialize)]
 pub struct SemanticTextQueryRequest {
+    #[serde(alias = "query")]
     pub text: String,
     #[serde(default = "default_k")]
     pub k: usize,
@@ -305,6 +306,7 @@ pub struct DreamResponse {
     pub memories_consolidated: usize,
     pub edges_before: usize,
     pub edges_after: usize,
+    pub new_edges: usize,
     pub weight_before: f64,
     pub weight_after: f64,
 }
