@@ -1,862 +1,491 @@
-const API_BASE = '/api'
+const BASE = "/api";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data: T;
+  error?: string;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
     ...options,
-  })
-  const text = await res.text()
-  let data: any
-  try {
-    data = JSON.parse(text)
-  } catch {
-    throw new Error(`Server returned non-JSON (${res.status}): ${text.slice(0, 200)}`)
-  }
-  if (!res.ok) {
-    throw new Error(data?.error || `HTTP ${res.status}`)
-  }
-  if (!data.success && data.error) {
-    throw new Error(data.error)
-  }
-  return data as T
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  return res.json();
 }
 
-export interface StatsData {
-  success: boolean
-  data: {
-    nodes: number
-    manifested: number
-    dark: number
-    even: number
-    odd: number
-    total_energy: number
-    allocated_energy: number
-    available_energy: number
-    physical_energy: number
-    dark_energy: number
-    utilization: number
-    conservation_ok: boolean
-    memory_count: number
-    hebbian_edges: number
-    hebbian_total_weight: number
-  }
+function post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+  return request<T>(path, {
+    method: "POST",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 }
 
-export interface HealthData {
-  success: boolean
-  data: {
-    level: string
-    conservation_ok: boolean
-    energy_utilization: number
-    node_count: number
-    manifested_ratio: number
-    hebbian_edge_count: number
-    hebbian_avg_weight: number
-    memory_count: number
-    frontier_size: number
-  }
+function get<T>(path: string): Promise<ApiResponse<T>> {
+  return request<T>(path);
 }
 
-export interface EncodeResult {
-  success: boolean
-  data: {
-    anchor: string
-    data_dim: number
-    manifested: boolean
-    created_at: number
-  }
-}
+/* ═══════════════════════════ TYPES ═══════════════════════════ */
 
-export interface DecodeResult {
-  success: boolean
-  data: {
-    data: number[]
-  }
-}
+export type StatsData = ApiResponse<{
+  nodes: number;
+  manifested: number;
+  dark: number;
+  conservation_ok: boolean;
+  hebbian_edges: number;
+  memory_count: number;
+  utilization: number;
+  available_energy: number;
+  physical_energy: number;
+  dark_energy: number;
+  allocated_energy: number;
+  total_energy: number;
+  even: number;
+  odd: number;
+}>;
+
+export type HealthData = ApiResponse<{
+  conservation_ok: boolean;
+  energy_utilization: number;
+  node_count: number;
+  manifested_ratio: number;
+  hebbian_edge_count: number;
+  hebbian_avg_weight: number;
+  memory_count: number;
+  frontier_size: number;
+  level: string;
+  hebbian_edges: number;
+}>;
+
+export type EncodeResult = ApiResponse<{
+  anchor: string;
+  data_dim: number;
+  manifested: boolean;
+  importance: number;
+}>;
+
+export type DecodeResult = ApiResponse<{
+  anchor: string;
+  data: number[];
+}>;
 
 export interface MemoryListItem {
-  anchor: string
-  data_dim: number
-  created_at: number
-  tags: string[]
-  category: string | null
-  description: string | null
-  importance: number
+  anchor: string;
+  data_dim: number;
+  tags: string[];
+  category: string | null;
+  description: string | null;
+  importance: number;
+  created_at: number;
 }
 
-export interface MemoryListResult {
-  success: boolean
-  data: MemoryListItem[]
+export type HebbianNeighborsResult = ApiResponse<{
+  neighbors: Array<{ coord: string; weight: number }>;
+}>;
+
+export type DarkQueryResult = ApiResponse<{
+  nodes: Array<{
+    coord: string | number[];
+    is_manifested: boolean;
+    energy: number;
+  }>;
+  total: number;
+}>;
+
+export interface DarkNodeInfo {
+  exists: boolean;
+  physical_energy: number;
+  dark_energy: number;
+  is_manifested: boolean;
 }
 
-export interface PulseResult {
-  success: boolean
-  data: {
-    visited_nodes: number
-    total_activation: number
-    paths_recorded: number
-    final_strength: number
-  }
-}
+export type DarkPressureResult = ApiResponse<{
+  dimension_spread: number[];
+  dark_node_count: number;
+  physical_node_count: number;
+  avg_dark_ratio: number;
+  total_dark_energy: number;
+  total_physical_energy: number;
+  pressure_ratio: number;
+  dimension_balance_ok: boolean;
+}>;
 
-export interface DreamResult {
-  success: boolean
-  data: {
-    paths_replayed: number
-    paths_weakened: number
-    memories_consolidated: number
-    edges_before: number
-    edges_after: number
-    weight_before: number
-    weight_after: number
-  }
-}
-
-export interface ScaleResult {
-  success: boolean
-  data: {
-    energy_expanded_by: number
-    nodes_added: number
-    nodes_removed: number
-    reason: string
-  }
-}
-
-export interface RegulateResult {
-  success: boolean
-  data: string[]
-}
-
-export interface HebbianNeighborsResult {
-  success: boolean
-  data: {
-    node: string
-    neighbors: { coord: string; weight: number }[]
-  }
-}
-
-export interface BackupInfo {
-  id: number
-  timestamp_ms: number
-  trigger: string
-  node_count: number
-  memory_count: number
-  total_energy: number
-  conservation_ok: boolean
-  bytes: number
-  generation: number
-}
-
-export interface CreateBackupResult {
-  success: boolean
-  data: {
-    backup_id: number
-    generation: number
-    node_count: number
-    memory_count: number
-    bytes: number
-    elapsed_ms: number
-  }
-}
-
-export interface ListBackupsResult {
-  success: boolean
-  data: BackupInfo[]
-}
-
-export interface ClusterStatusResult {
-  success: boolean
-  data: {
-    node_id: number
-    role: string
-    term: number
-    leader_id: number | null
-    log_index: number
-    applied_count: number
-    nodes: { id: number; addr: string; role: string }[]
-  }
-}
-
-export interface ClusterProposeResult {
-  success: boolean
-  data: {
-    log_index: number
-  }
-}
-
-export interface ClusterNodeResult {
-  success: boolean
-  data: string
-}
+export type ClusterStatusResult = ApiResponse<{
+  node_id: string;
+  state: string;
+  nodes: Array<{ id: string; addr: string; role: string }>;
+  leader: string | null;
+  leader_id: string;
+  role: string;
+  term: number;
+  applied_count: number;
+  log_index: number;
+  members: Array<{ id: string; addr: string }>;
+}>;
 
 export interface TimelineDay {
-  date: string
-  count: number
-  anchors: string[]
-}
-
-export interface TimelineResult {
-  success: boolean
-  data: TimelineDay[]
+  anchor: string;
+  timestamp: string;
+  event_type: string;
+  data_dim: number;
+  importance: number;
+  count: number;
+  date: string;
+  anchors: string[];
 }
 
 export interface TraceHop {
-  anchor: string
-  created_at: number
-  data_dim: number
-  confidence: number
-  hop: number
+  anchor: string;
+  coord: number[];
+  weight: number;
+  energy: number;
+  hop: number;
+  created_at: number;
+  data_dim: number;
+  confidence: number;
 }
 
-export interface TraceResult {
-  success: boolean
-  data: TraceHop[]
-}
+export type TraceResult = ApiResponse<TraceHop[]>;
 
-export interface DarkQueryResult {
-  success: boolean
-  data: {
-    nodes: { coord: string; energy: number; is_manifested: boolean }[]
-    total: number
-  }
-}
+export type PhaseDetectResult = ApiResponse<{
+  phase: string;
+  crystal_count: number;
+  amorphous_count: number;
+  transition_ongoing: boolean;
+}>;
 
-export interface DarkFlowResult {
-  success: boolean
-  data: {
-    from: string
-    to: string
-    amount: number
-    conservation_ok: boolean
-  }
-}
+export type PhysicsStatusResult = ApiResponse<{
+  total_nodes: number;
+  manifested_nodes: number;
+  dark_nodes: number;
+  total_energy: number;
+  physics_engine: string;
+}>;
 
-export interface DarkTransferResult {
-  success: boolean
-  data: {
-    source: string
-    target: string
-    amount: number
-    conservation_ok: boolean
-  }
-}
+export type PhysicsProfileResult = ApiResponse<{
+  energy_distribution: { physical: number; dark: number };
+  conservation_ok: boolean;
+}>;
 
-export interface DarkMaterializeResult {
-  success: boolean
-  data: {
-    coord: string
-    energy: number
-    physical_ratio: number
-    conservation_ok: boolean
-  }
-}
+export type PhysicsDistanceResult = ApiResponse<{
+  distance_sq: number;
+  distance_7d: number;
+  distance_3d: number;
+  dark_contribution: number;
+}>;
 
-export interface DarkPressureResult {
-  success: boolean
-  data: {
-    total_dark_energy: number
-    total_physical_energy: number
-    pressure_ratio: number
-    dimension_balance_ok: boolean
-  }
-}
+export type PhysicsProjectResult = ApiResponse<{
+  projected: number[];
+  dimensions: number;
+  physical: number[];
+  dark: number[];
+}>;
 
-export interface PhysicsStatusResult {
-  success: boolean
-  data: {
-    total_nodes: number
-    manifested_nodes: number
-    dark_nodes: number
-    total_energy: number
-    physics_engine: string
-  }
-}
+export type SemanticStatusResult = ApiResponse<{
+  active: boolean;
+  index_size: number;
+  embedding_dim: number;
+  model: string;
+  embeddings_indexed: number;
+  relations_total: number;
+  concepts_extracted: number;
+}>;
 
-export interface PhysicsProfileResult {
-  success: boolean
-  data: {
-    energy_distribution: { physical: number; dark: number }
-    node_distribution: { manifested: number; dark: number }
-    conservation_ok: boolean
-  }
-}
+export type SemanticSearchResult = ApiResponse<{
+  results: Array<{
+    atom_key: string;
+    anchor: string;
+    similarity: number;
+    distance: number;
+    description: string;
+    tags: string[];
+    category: string;
+    importance: number;
+  }>;
+}>;
 
-export interface PhysicsDistanceResult {
-  success: boolean
-  data: { distance_7d: number; distance_3d: number; dark_contribution: number }
-}
+export type RecallResult = ApiResponse<{
+  results: Array<{
+    anchor: string;
+    content: string;
+    similarity: number;
+    tags: string[];
+    method: string;
+    description: string;
+  }>;
+  query: string;
+  total: number;
+}>;
 
-export interface PhysicsProjectResult {
-  success: boolean
-  data: { physical: number[]; dark: number[] }
-}
+export type AssociateResult = ApiResponse<{
+  associations: Array<{
+    topic: string;
+    strength: number;
+    related: string[];
+    source: string;
+    confidence: number;
+    hops: number;
+    targets: Array<{ name: string; description: string; anchor: string }>;
+  }>;
+  topic: string;
+  seed_anchor: string;
+  total: number;
+}>;
 
-export interface RememberResult {
-  success: boolean
-  data: {
-    success: boolean
-    anchor: string
-    manifested: boolean
-    created_at: number
-    conservation_ok: boolean
-  }
-}
+export type WatchdogStatusResult = ApiResponse<{
+  level: string;
+  uptime: number;
+  checks_total: number;
+  checks_passed: number;
+  last_check: string;
+  total_checkups: number;
+  uptime_ms: number;
+}>;
 
-export interface RecallResult {
-  success: boolean
-  data: {
-    query: string
-    results: {
-      anchor: string
-      similarity: number
-      method: string
-      dimensions: number
-      hebbian_neighbors: number
-      associated_memories: string[]
-      description: string
-      tags: string[]
-      category: string
-      importance: number
-    }[]
-    total: number
-  }
-}
+export type WatchdogCheckupResult = ApiResponse<{
+  level: string;
+  checks: Array<{
+    name: string;
+    status: string;
+    message: string;
+  }>;
+  utilization: number;
+  conservation_ok: boolean;
+  actions: string[];
+}>;
 
-export interface AssociateResult {
-  success: boolean
-  data: {
-    topic: string
-    seed_anchor: string
-    associations: {
-      source: string
-      targets: { anchor: string; description: string }[]
-      confidence: number
-      hops: number
-    }[]
-    total: number
-  }
-}
-
-export interface ConsolidateResult {
-  success: boolean
-  data: {
-    dream_report: {
-      paths_replayed: number
-      paths_weakened: number
-      memories_consolidated: number
-      hebbian_edges_before: number
-      hebbian_edges_after: number
-      weight_before: number
-      weight_after: number
-    }
-    maintenance: { weakened_edges: number; strengthened_edges: number }
-    conservation_ok: boolean
-  }
-}
-
-export interface ContextResult {
-  success: boolean
-  data: Record<string, any>
-}
-
-export interface ForgetResult {
-  success: boolean
-  data: {
-    success: boolean
-    erased_anchor: string
-    description: string
-    remaining_memories: number
-    conservation_ok: boolean
-  }
-}
-
-export interface AnnotateResult {
-  success: boolean
-  data: {
-    anchor: string
-    tags: string[]
-    category: string | null
-    description: string | null
-    source: string | null
-    importance: number
-  }
-}
-
-export interface SemanticSearchResult {
-  success: boolean
-  data: {
-    results: {
-      anchor: string
-      similarity: number
-      distance: number
-      tags: string[]
-      category: string | null
-      description: string | null
-      importance: number
-    }[]
-  }
-}
-
-export interface PhaseDetectResult {
-  success: boolean
-  data: {
-    phase: string
-    crystal_count: number
-    amorphous_count: number
-    transition_ongoing: boolean
-  }
-}
-
-export interface EmotionStatusResult {
-  success: boolean
-  data: {
-    pad: { pleasure: number; arousal: number; dominance: number }
-    quadrant: string
-    functional_cluster: string
-    recommendations: string[]
-  }
-}
-
-export interface PerceptionStatusResult {
-  success: boolean
-  data: {
-    total_budget: number
-    allocated: number
-    available: number
-    spent: number
-    returned: number
-    utilization: number
-  }
-}
-
-export interface SemanticStatusResult {
-  success: boolean
-  data: {
-    embeddings_indexed: number
-    relations_total: number
-    concepts_extracted: number
-  }
-}
-
-export interface ClusteringStatusResult {
-  success: boolean
-  data: {
-    memories_clustered: number
-    attractors_found: number
-    tunnels_active: number
-    bridges_active: number
-  }
-}
-
-export interface ConstitutionStatusResult {
-  success: boolean
-  data: { rules_count: number; bounds_count: number; rules: string[] }
-}
-
-export interface EventsStatusResult {
-  success: boolean
-  data: { history_len: number; subscriber_count: number }
-}
-
-export interface WatchdogStatusResult {
-  success: boolean
-  data: { total_checkups: number; uptime_ms: number }
-}
-
-export interface WatchdogCheckupResult {
-  success: boolean
-  data: {
-    level: string
-    utilization: number
-    conservation_ok: boolean
-    actions: string[]
-  }
-}
-
-export interface AgentExecuteResult {
-  success: boolean
-  data: { agent: string; success: boolean; duration_ms: number; details: string }
-}
-
-export interface MetricsResult {
-  success: boolean
-  data: string
-}
-
-export interface ConservationResult {
-  success: boolean
-  data: {
-    conservation_ok: boolean
-    energy_drift: number
-    total_energy: number
-    allocated_energy: number
-    available_energy: number
-    violation: number
-  }
-}
+export type ClusteringStatusResult = ApiResponse<Record<string, unknown>>;
+export type ConstitutionStatusResult = ApiResponse<Record<string, unknown>>;
+export type EventsStatusResult = ApiResponse<Record<string, unknown>>;
 
 export interface PluginInfo {
+  name: string;
+  enabled: boolean;
+  energy: number;
+  status: string;
   manifest: {
-    name: string
-    version: string
-    author: string
-    description: string
-    api_version: number
-    energy_budget: number
-    permissions: {
-      memory_read: boolean
-      memory_write: boolean
-      hebbian_read: boolean
-      hebbian_write: boolean
-      pulse_fire: boolean
-      universe_read: boolean
-      event_publish: boolean
-      event_subscribe: boolean
-    }
-    tags: string[]
-  }
-  status: string
-  energy_consumed: number
-  executions: number
-  last_execution: string | null
-  installed_at: string
+    name: string;
+    description: string;
+    version: string;
+    author: string;
+    tags: string[];
+    api_version: string;
+    energy_budget: number;
+    permissions: string[];
+  };
+  executions: number;
+  energy_consumed: number;
+  installed_at: string;
+  last_execution: string;
 }
 
-export interface PluginListResult {
-  success: boolean
-  data: PluginInfo[]
+export type PluginStatsResult = ApiResponse<{
+  total: number;
+  active: number;
+  total_energy: number;
+  available_energy: number;
+  running: number;
+  enabled: number;
+  suspended: number;
+  global_energy_budget: number;
+  total_energy_consumed: number;
+  total_executions: number;
+}>;
+
+export interface BackupInfo {
+  backup_id: number;
+  bytes: number;
+  created_at: string;
+  id: number;
+  generation: number;
+  node_count: number;
+  memory_count: number;
+  conservation_ok: boolean;
+  trigger: string;
+  timestamp_ms: number;
 }
 
-export interface PluginStatsResult {
-  success: boolean
-  data: {
-    total: number
-    enabled: number
-    running: number
-    suspended: number
-    total_energy_consumed: number
-    total_executions: number
-    global_energy_budget: number
-  }
-}
+export type PulseResult = ApiResponse<{
+  visited_nodes: number;
+  total_activation: number;
+  final_strength: number;
+}>;
 
-export interface PluginExecuteResult {
-  success: boolean
-  data: {
-    output: number[]
-    energy_consumed: number
-    execution_time_us: number
-    success: boolean
-    error: string | null
-  }
-}
+export type DreamResult = ApiResponse<{
+  edges_before: number;
+  edges_after: number;
+  new_edges: number;
+  paths_replayed: number;
+  memories_consolidated: number;
+  paths_weakened: number;
+}>;
 
-export interface AdjustWeightResult {
-  success: boolean
-  data: {
-    from: string
-    to: string
-    old_weight: number
-    new_weight: number
-    adjustment: number
-  }
-}
+export type CognitiveState = ApiResponse<{
+  regulation: { last_cycle: string; actions_count: number };
+  prediction: { active: boolean };
+  surprise: { last_score: number };
+}>;
 
-export interface CognitiveStateResult {
-  success: boolean
-  data: {
-    overall_vigor: number
-    dream_readiness: { should_dream: boolean; urgency: number }
-    emotion_snapshot: { pleasure: number; arousal: number; dominance: number }
-  }
-}
+export type EmotionStatusResult = ApiResponse<{
+  pad: { pleasure: number; arousal: number; dominance: number };
+  quadrant: string;
+  functional_cluster: string;
+  recommendations: string[];
+}>;
 
-export interface AttentionMapResult {
-  success: boolean
-  data: Record<string, number>
-}
+export type PerceptionStatusResult = ApiResponse<{
+  total_budget: number;
+  allocated: number;
+  available: number;
+  spent: number;
+  returned: number;
+  utilization: number;
+}>;
 
-export interface DreamInsightsResult {
-  success: boolean
-  data: {
-    contradictions: string[]
-    weak_connections: number
-    clusters_found: number
-  }
-}
-
-export interface IdentityProfileResult {
-  success: boolean
-  data: {
-    identity_memories: number
-    total_importance: number
-    coherence: number
-  }
-}
-
-export interface MetaCognitiveResult {
-  success: boolean
-  data: {
-    self_awareness: number
-    domains_classified: number
-    confidence_avg: number
-  }
-}
-
-export interface PredictionStatusResult {
-  success: boolean
-  data: {
-    active_predictions: number
-    avg_confidence: number
-    surprise_avg: number
-    accuracy_avg: number
-  }
-}
-
-export interface MemoryStreamEvent {
-  event: string
-  data: Record<string, any>
-}
+/* ═══════════════════════════ API ═══════════════════════════ */
 
 export const api = {
-  getStats: () => request<StatsData>('/stats'),
-  getHealth: () => request<HealthData>('/health'),
-  encodeMemory: (anchor: [number, number, number], data: number[]) =>
-    request<EncodeResult>('/memory/encode', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor), data }),
-    }),
-  decodeMemory: (anchor: [number, number, number], dataDim: number) =>
-    request<DecodeResult>('/memory/decode', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor), data_dim: dataDim }),
-    }),
-  listMemories: () => request<MemoryListResult>('/memory/list'),
-  firePulse: (source: [number, number, number], pulseType: string) =>
-    request<PulseResult>('/pulse', {
-      method: 'POST',
-      body: JSON.stringify({ source: Array.from(source), pulse_type: pulseType }),
-    }),
-  runDream: () => request<DreamResult>('/dream', { method: 'POST' }),
-  autoScale: () => request<ScaleResult>('/scale', { method: 'POST' }),
-  regulate: () => request<RegulateResult>('/regulate', { method: 'POST' }),
-  getHebbianNeighbors: (x: number, y: number, z: number) =>
-    request<HebbianNeighborsResult>(`/hebbian/neighbors/${x}/${y}/${z}`),
-  frontierExpand: (maxNew: number) =>
-    request<ScaleResult>(`/scale/frontier/${maxNew}`, { method: 'POST' }),
-  createBackup: () => request<CreateBackupResult>('/backup/create', { method: 'POST' }),
-  listBackups: () => request<ListBackupsResult>('/backup/list'),
-  getClusterStatus: () => request<ClusterStatusResult>('/cluster/status'),
-  initCluster: (nodeId?: number, addr?: string) =>
-    request<ClusterStatusResult>('/cluster/init', {
-      method: 'POST',
-      body: JSON.stringify({ node_id: nodeId, addr }),
-    }),
-  clusterPropose: (key: string, value: string) =>
-    request<ClusterProposeResult>('/cluster/propose', {
-      method: 'POST',
-      body: JSON.stringify({ key, value }),
-    }),
-  addClusterNode: (nodeId: number, addr: string) =>
-    request<ClusterNodeResult>('/cluster/add-node', {
-      method: 'POST',
-      body: JSON.stringify({ node_id: nodeId, addr }),
-    }),
-  removeClusterNode: (nodeId: number) =>
-    request<ClusterNodeResult>('/cluster/remove-node', {
-      method: 'POST',
-      body: JSON.stringify({ node_id: nodeId }),
-    }),
-  getTimeline: () => request<TimelineResult>('/memory/timeline'),
-  traceMemory: (anchor: [number, number, number], maxHops?: number) =>
-    request<TraceResult>('/memory/trace', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor), max_hops: maxHops }),
-    }),
+  getHealth: () => get<HealthData["data"]>("/health"),
+  getStats: () => get<StatsData["data"]>("/stats"),
 
-  // -- Dark Dimension --
-  darkQuery: () => request<DarkQueryResult>('/dark/query'),
-  darkFlow: (from: number[], to: number[], amount: number) =>
-    request<DarkFlowResult>('/dark/flow', {
-      method: 'POST',
-      body: JSON.stringify({ from, to, amount }),
+  encodeMemory: (
+    anchor: number[],
+    data: number[],
+    tags?: string[],
+    description?: string,
+    importance?: number,
+  ) =>
+    post<EncodeResult["data"]>("/memory/encode", {
+      anchor,
+      data,
+      tags: tags || [],
+      description,
+      importance: importance ?? 0.5,
     }),
-  darkTransfer: (source: number[], target: number[], amount: number) =>
-    request<DarkTransferResult>('/dark/transfer', {
-      method: 'POST',
-      body: JSON.stringify({ source, target, amount }),
+  decodeMemory: (anchor: number[], dataDim: number) =>
+    post<DecodeResult["data"]>("/memory/decode", {
+      anchor,
+      data_dim: dataDim,
     }),
-  darkMaterialize: (coord: number[], energy: number, physicalRatio: number) =>
-    request<DarkMaterializeResult>('/dark/materialize', {
-      method: 'POST',
-      body: JSON.stringify({ coord, energy, physical_ratio: physicalRatio }),
-    }),
-  darkDematerialize: (coord: number[]) =>
-    request<DarkMaterializeResult>('/dark/dematerialize', {
-      method: 'POST',
-      body: JSON.stringify({ coord }),
-    }),
-  darkPressure: () => request<DarkPressureResult>('/dark/pressure'),
-
-  // -- Physics --
-  physicsStatus: () => request<PhysicsStatusResult>('/physics/status'),
-  physicsProfile: () => request<PhysicsProfileResult>('/physics/profile'),
-  physicsDistance: (from: number[], to: number[]) =>
-    request<PhysicsDistanceResult>('/physics/distance', {
-      method: 'POST',
-      body: JSON.stringify({ from, to }),
-    }),
-  physicsProject: (coord: number[]) =>
-    request<PhysicsProjectResult>('/physics/project', {
-      method: 'POST',
-      body: JSON.stringify({ coord }),
-    }),
-
-  // -- AI Agent Memory --
-  remember: (content: string, tags?: string[], category?: string, importance?: number, source?: string) =>
-    request<RememberResult>('/memory/remember', {
-      method: 'POST',
-      body: JSON.stringify({ content, tags: tags || [], category, importance, source }),
+  listMemories: () => get<MemoryListItem[]>("/memory/list"),
+  annotateMemory: (
+    anchor: number[],
+    tags?: string[],
+    category?: string,
+    description?: string,
+    importance?: number,
+  ) => post<unknown>("/memory/annotate", { anchor, tags, category, description, importance }),
+  remember: (
+    content: string,
+    tags: string[],
+    category?: string,
+    importance?: number,
+  ) =>
+    post<EncodeResult["data"]>("/memory/remember", {
+      content,
+      tags,
+      category,
+      importance: importance ?? 0.5,
     }),
   recall: (query: string, limit?: number) =>
-    request<RecallResult>('/memory/recall', {
-      method: 'POST',
-      body: JSON.stringify({ query, limit }),
+    post<RecallResult["data"]>("/memory/recall", { query, limit: limit ?? 10 }),
+  forget: (anchor: number[]) => post<unknown>("/memory/forget", { anchor }),
+  adjustWeight: (from: number[], to: number[], boost: number) =>
+    post<{ old_weight: number; new_weight: number }>("/memory/adjust_weight", {
+      from,
+      to,
+      boost,
     }),
-  associate: (topic: string, depth?: number, limit?: number) =>
-    request<AssociateResult>('/memory/associate', {
-      method: 'POST',
-      body: JSON.stringify({ topic, depth, limit }),
-    }),
-  forget: (anchor: [number, number, number]) =>
-    request<ForgetResult>('/memory/forget', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor) }),
-    }),
-  consolidate: (importanceThreshold?: number) =>
-    request<ConsolidateResult>('/dream/consolidate', {
-      method: 'POST',
-      body: JSON.stringify({ importance_threshold: importanceThreshold }),
-    }),
-  contextAction: (action: string, role?: string, content?: string) =>
-    request<ContextResult>('/context', {
-      method: 'POST',
-      body: JSON.stringify({ action, role, content }),
-    }),
-  annotateMemory: (anchor: [number, number, number], tags?: string[], category?: string, description?: string, importance?: number) =>
-    request<AnnotateResult>('/memory/annotate', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor), tags: tags || [], category, description, importance }),
-    }),
+  traceMemory: (anchor: number[], maxHops?: number) =>
+    post<TraceHop[]>("/memory/trace", { anchor, max_hops: maxHops }),
+  getTimeline: () => get<TimelineDay[]>("/memory/timeline"),
+  semanticRelations: (anchor: number[]) =>
+    post<SemanticSearchResult["data"]>("/memory/semantic_relations", { anchor }),
 
-  // -- Semantic --
+  firePulse: (source: number[], pulseType?: string) =>
+    post<PulseResult["data"]>("/pulse", {
+      source,
+      pulse_type: pulseType || "exploratory",
+    }),
+  runDream: () => post<DreamResult["data"]>("/dream", {}),
+  consolidate: (threshold?: number) =>
+    post<unknown>("/dream/consolidate", { importance_threshold: threshold ?? 0.3 }),
+
+  autoScale: () =>
+    post<{ nodes_added: number; nodes_removed: number; reason: string }>("/scale", {}),
+  frontierExpand: (maxNew: number) =>
+    post<{ nodes_added: number; nodes_removed: number; reason: string }>(
+      `/scale/frontier/${maxNew}`,
+      {},
+    ),
+  regulate: () => post<string[]>("/regulate", {}),
+
+  darkQuery: () => get<DarkQueryResult["data"]>("/dark/query"),
+  darkMaterialize: (coord: number[], energy: number, physicalRatio?: number) =>
+    post<{ coord: string; energy: number; physical_ratio: number }>("/dark/materialize", {
+      coord,
+      energy,
+      physical_ratio: physicalRatio ?? 0.6,
+    }),
+  darkDematerialize: (coord: number[]) =>
+    post<{ coord: string; energy: number }>("/dark/dematerialize", { coord }),
+  darkFlow: (coord: number[], direction: string, amount: number) =>
+    post<unknown>("/dark/flow", { coord, direction, amount }),
+  darkTransfer: (from: number[], to: number[], amount: number) =>
+    post<unknown>("/dark/transfer", { from, to, amount }),
+  darkPressure: () => get<DarkPressureResult["data"]>("/dark/pressure"),
+
+  getHebbianNeighbors: (x: number, y: number, z: number) =>
+    get<HebbianNeighborsResult["data"]>(`/hebbian/neighbors/${x}/${y}/${z}`),
+
+  getClusterStatus: () => get<ClusterStatusResult["data"]>("/cluster/status"),
+  initCluster: () => post<ClusterStatusResult["data"]>("/cluster/init", {}),
+  addClusterNode: (nodeId: number, addr: string) =>
+    post<ClusterStatusResult["data"]>("/cluster/add", { node_id: nodeId, addr }),
+  removeClusterNode: (nodeId: number) =>
+    post<unknown>("/cluster/remove", { node_id: nodeId }),
+  clusterPropose: (key: string, value: string) =>
+    post<{ log_index: number }>("/cluster/propose", { key, value }),
+
+  createBackup: () => post<BackupInfo>("/backup/create", {}),
+  listBackups: () => get<BackupInfo[]>("/backup/list"),
+
   semanticSearch: (data: number[], k?: number) =>
-    request<SemanticSearchResult>('/semantic/search', {
-      method: 'POST',
-      body: JSON.stringify({ data, k }),
-    }),
-  semanticQuery: (text: string, k?: number) =>
-    request<SemanticSearchResult>('/semantic/query', {
-      method: 'POST',
-      body: JSON.stringify({ text, k }),
-    }),
-  semanticRelations: (anchor: [number, number, number]) =>
-    request<SemanticSearchResult>('/semantic/relations', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor) }),
-    }),
-  semanticStatus: () => request<SemanticStatusResult>('/semantic/status'),
-  semanticIndexAll: () =>
-    request<AgentExecuteResult>('/semantic/index-all', { method: 'POST' }),
-  semanticExtractConcepts: () =>
-    request<AgentExecuteResult>('/semantic/extract-concepts', { method: 'POST' }),
+    post<SemanticSearchResult["data"]>("/semantic/search", { data, k: k ?? 10 }),
+  semanticStatus: () => get<SemanticStatusResult["data"]>("/semantic/status"),
+  semanticQuery: (query: string) =>
+    post<SemanticSearchResult["data"]>("/semantic/query", { query }),
+  associate: (topic: string) =>
+    post<AssociateResult["data"]>("/semantic/associate", { topic }),
 
-  // -- Phase / Crystal --
-  phaseDetect: () => request<PhaseDetectResult>('/phase/detect'),
+  physicsStatus: () => get<PhysicsStatusResult["data"]>("/physics/status"),
+  physicsProfile: () => get<PhysicsProfileResult["data"]>("/physics/profile"),
+  physicsDistance: (from: number[], to: number[]) =>
+    post<PhysicsDistanceResult["data"]>("/physics/distance", { from, to }),
+  physicsProject: (coords: number[]) =>
+    post<PhysicsProjectResult["data"]>("/physics/project", { coords }),
 
-  // -- Emotion --
-  emotionStatus: () => request<EmotionStatusResult>('/emotion/status'),
-  emotionPulse: (anchor: [number, number, number]) =>
-    request<PulseResult>('/emotion/pulse', {
-      method: 'POST',
-      body: JSON.stringify({ anchor: Array.from(anchor) }),
-    }),
-  emotionDream: () => request<DreamResult>('/emotion/dream', { method: 'POST' }),
+  emotionStatus: () => get<EmotionStatusResult["data"]>("/emotion/status"),
+  perceptionStatus: () => get<PerceptionStatusResult["data"]>("/perception/status"),
+  emotionPulse: (anchor: number[]) =>
+    post<PulseResult["data"]>("/emotion/pulse", { anchor }),
+  emotionDream: () => post<DreamResult["data"]>("/emotion/dream", {}),
 
-  // -- Perception --
-  perceptionStatus: () => request<PerceptionStatusResult>('/perception/status'),
-  perceptionReplenish: () =>
-    request<AgentExecuteResult>('/perception/replenish', { method: 'POST' }),
+  watchdogStatus: () => get<WatchdogStatusResult["data"]>("/watchdog/status"),
+  watchdogCheckup: () => post<WatchdogCheckupResult["data"]>("/watchdog/checkup", {}),
+  clusteringStatus: () => get<Record<string, unknown>>("/clustering/status"),
+  constitutionStatus: () => get<Record<string, unknown>>("/constitution/status"),
+  eventsStatus: () => get<Record<string, unknown>>("/events/status"),
+  phaseDetect: () => get<PhaseDetectResult["data"]>("/phase/detect"),
 
-  // -- Clustering --
-  clusteringStatus: () => request<ClusteringStatusResult>('/clustering/status'),
-  clusteringMaintenance: () =>
-    request<AgentExecuteResult>('/clustering/maintenance', { method: 'POST' }),
-
-  // -- Constitution --
-  constitutionStatus: () => request<ConstitutionStatusResult>('/constitution/status'),
-
-  // -- Events --
-  eventsStatus: () => request<EventsStatusResult>('/events/status'),
-
-  // -- Watchdog --
-  watchdogStatus: () => request<WatchdogStatusResult>('/watchdog/status'),
-  watchdogCheckup: () =>
-    request<WatchdogCheckupResult>('/watchdog/checkup', { method: 'POST' }),
-
-  // -- Agents --
-  agentObserver: () => request<AgentExecuteResult>('/agent/observer'),
-  agentEmotion: () => request<AgentExecuteResult>('/agent/emotion'),
-
-  // -- Metrics / Conservation --
-  getMetrics: () => request<MetricsResult>('/metrics'),
-  conservationCheck: () => request<ConservationResult>('/conservation/status'),
-
-  // -- Plugins --
-  pluginList: () => request<PluginListResult>('/plugins/list'),
-  pluginStats: () => request<PluginStatsResult>('/plugins/stats'),
-  pluginStatus: (name: string) => request<PluginListResult>(`/plugins/${encodeURIComponent(name)}/status`),
-  pluginInstall: (manifest: any, wasmBase64: string) =>
-    request<{ success: boolean; data: { installed: boolean; status: string } }>('/plugins/install', {
-      method: 'POST',
-      body: JSON.stringify({ manifest, wasm_base64: wasmBase64 }),
-    }),
-  pluginUninstall: (name: string) =>
-    request<{ success: boolean; data: { uninstalled: boolean; version: string } }>(`/plugins/${encodeURIComponent(name)}/uninstall`, {
-      method: 'POST',
-    }),
-  pluginEnable: (name: string) =>
-    request<{ success: boolean; data: { name: string; status: string } }>(`/plugins/${encodeURIComponent(name)}/enable`, {
-      method: 'POST',
-    }),
-  pluginDisable: (name: string) =>
-    request<{ success: boolean; data: { name: string; status: string } }>(`/plugins/${encodeURIComponent(name)}/disable`, {
-      method: 'POST',
-    }),
-  pluginExecute: (name: string, func: string, input?: number[], energyLimit?: number) =>
-    request<PluginExecuteResult>(`/plugins/${encodeURIComponent(name)}/execute`, {
-      method: 'POST',
-      body: JSON.stringify({ function: func, input: input || [], energy_limit: energyLimit }),
-    }),
+  pluginList: () => get<PluginInfo[]>("/plugins/list"),
+  pluginStats: () => get<PluginStatsResult["data"]>("/plugins/stats"),
+  pluginInstall: (name: string) => post<unknown>("/plugins/install", { name }),
+  pluginEnable: (name: string) => post<unknown>("/plugins/enable", { name }),
+  pluginDisable: (name: string) => post<unknown>("/plugins/disable", { name }),
+  pluginUninstall: (name: string) => post<unknown>("/plugins/uninstall", { name }),
   pluginResetEnergy: (name: string) =>
-    request<{ success: boolean; data: { name: string; energy_reset: boolean } }>(`/plugins/${encodeURIComponent(name)}/reset-energy`, {
-      method: 'POST',
-    }),
-
-  // -- Memory Advanced --
-  adjustWeight: (fromAnchor: number[], toAnchor: number[], boost: number) =>
-    request<AdjustWeightResult>('/memory/adjust_weight', {
-      method: 'POST',
-      body: JSON.stringify({ from: fromAnchor, to: toAnchor, boost }),
-    }),
-
-  // -- Cognitive --
-  getCognitiveState: () => request<CognitiveStateResult>('/cognitive/state'),
-  getAttentionMap: () => request<AttentionMapResult>('/cognitive/attention'),
-  getDreamInsights: () => request<DreamInsightsResult>('/cognitive/insights'),
-  reflect: () =>
-    request<AgentExecuteResult>('/cognitive/reflect', { method: 'POST' }),
-  getIdentityProfile: () => request<IdentityProfileResult>('/cognitive/identity'),
-  getMetaCognitive: () => request<MetaCognitiveResult>('/cognitive/meta'),
-  getPredictionStatus: () => request<PredictionStatusResult>('/cognitive/prediction'),
-}
+    post<unknown>("/plugins/reset-energy", { name }),
+  pluginExecute: (name: string) => post<unknown>(`/plugins/${name}/execute`, {}),
+};

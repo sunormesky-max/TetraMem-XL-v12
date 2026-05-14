@@ -386,7 +386,7 @@ export default function Dark() {
                     </TableRow>
                   ) : (
                     nodes.nodes.map((node) => (
-                      <TableRow key={node.coord}>
+                      <TableRow key={String(node.coord)}>
                         <TableCell className="font-mono text-xs text-[var(--text-primary)]">
                           {node.coord}
                         </TableCell>

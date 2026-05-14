@@ -1,0 +1,29 @@
+[server]
+addr = "127.0.0.1:3456"
+timeout_secs = 30
+body_limit_bytes = 10485760
+
+[universe]
+total_energy = 10000000.0
+manifestation_threshold = 0.5
+
+[auth]
+enabled = false
+raft_secret = "hf-demo-secret"
+jwt_expiry_secs = 86400
+
+[logging]
+level = "info"
+json_format = false
+
+[backup]
+dir = "/app/backups"
+interval_secs = 300
+max_generations = 5
+
+[rate_limit]
+requests_per_minute = 120
+burst = 30
+
+[neural_embed]
+enabled = false

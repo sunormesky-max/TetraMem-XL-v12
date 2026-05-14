@@ -21,7 +21,6 @@ import {
   ResponsiveContainer,
   PolarAngleAxis,
 } from 'recharts'
-import ParticleBackground from '../components/ParticleBackground'
 import { useNavigate } from 'react-router-dom'
 import { api, type StatsData, type HealthData } from '../services/api'
 
@@ -338,15 +337,12 @@ export default function Home() {
 
   return (
     <div className="relative min-h-[100dvh]">
-      {/* 3D Particle Background */}
-      <ParticleBackground />
-
-      {/* Content Overlay */}
+      {/* Content */}
       <div className="relative z-10 p-6">
         {error && (
           <div className="mx-auto mb-4 max-w-[1440px] rounded-lg border border-[var(--accent-red)] bg-[var(--accent-red)]/10 p-4 text-center">
             <p className="font-body text-sm text-[var(--accent-red)]">{error}</p>
-            <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">请确保 TetraMem-XL 后端运行在 127.0.0.1:3456</p>
+            <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">请确保 TetraMem-XL 后端运行在 127.0.0.1:3458</p>
           </div>
         )}
         <motion.div

@@ -1,39 +1,34 @@
-import path from "path"
-import react from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
 
 export default defineConfig({
-  base: './',
+  base: "./",
   plugins: [react()],
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:3458',
-        changeOrigin: true,
-      },
-    },
-  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    port: 3000,
+    proxy: {
+      "/api": "http://127.0.0.1:3458",
+      "/health": "http://127.0.0.1:3458",
     },
   },
   build: {
     modulePreload: false,
     rollupOptions: {
       output: {
-        chunkFileNames: 'assets/[name].js',
-        entryFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]',
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('three')) return 'vendor-three';
-            if (id.includes('react-dom')) return 'vendor-react-dom';
-            if (id.includes('react/')) return 'vendor-react';
-            if (id.includes('lucide-react')) return 'vendor-lucide';
-            if (id.includes('recharts')) return 'vendor-recharts';
-          }
+        chunkFileNames: "assets/[name].js",
+        entryFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name].[ext]",
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-router": ["react-router-dom"],
+          "vendor-motion": ["framer-motion"],
+          "vendor-charts": ["recharts"],
         },
       },
     },

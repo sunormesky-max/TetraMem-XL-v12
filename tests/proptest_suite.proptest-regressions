@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 78f4f3d11739e2176d7cce5177a3b2a1b43b4d94d053074a37d47b19d2828e2d # shrinks to coords = [Coord7D { basis: [0, 0, 0, 0, 0, 0, 0], parity: Even }], amounts = [50.394360402125926]
+cc 6a29dcdf909fdca4844de97eda4e55072be0e75820586f034a8cb5fb99207d77 # shrinks to coords = [Coord7D { basis: [0, 0, 0, 0, 0, 0, 0], parity: Even }], amounts = [50.0]
+cc 45033a8749f3d40cd1d517cdaa15ade3919ae7f9a11ef00cf204bacdfba536ea # shrinks to data = [-1.0818659029778474e-8]
